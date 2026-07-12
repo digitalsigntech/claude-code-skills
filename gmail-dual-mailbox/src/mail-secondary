@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Convenience wrapper for the SECONDARY mailbox.
+cd "$(dirname "$0")" || exit 1
+export PYTHONWARNINGS="ignore::FutureWarning"
+export MAIL_ACCOUNT="secondary"
+exec ./venv/bin/python gmailer.py "$@"

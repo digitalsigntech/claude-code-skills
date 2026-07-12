@@ -1,0 +1,7 @@
+{
+  "_comment": "Optional. All settings also work as environment variables. Copy to config.json or export the vars; the code reads env vars directly (see src/config.py). No secrets live here.",
+  "CRM_PROJECT_ROOT": "~/myproject",
+  "CRM_DB": "~/myproject/crm/contacts.db",
+  "CRM_CSV": "~/myproject/crm/contacts.csv",
+  "prune_keep_newest_per_account": 0
+}

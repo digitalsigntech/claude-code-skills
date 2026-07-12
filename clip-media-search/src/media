@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# CLI wrapper: run the CLIP media-search tool with the project venv from anywhere.
+#   ./media add <image|dir> --annotation "..." [--tags "a,b"]
+#   ./media find "query"  [-k 8]
+#   ./media list
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PYTHONWARNINGS="ignore"
+PY="$HERE/venv/bin/python"
+[ -x "$PY" ] || PY="python3"          # fall back to system python if no venv
+exec "$PY" "$HERE/pipeline/clip_media.py" "$@"

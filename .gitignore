@@ -1,0 +1,27 @@
+# Secrets — never commit
+bot_token
+*token*.json
+credentials.json
+secrets.env
+*.config.sh
+reports.config.sh
+*.key
+*.pem
+
+# Populated data / state — ship code, not data
+*.db
+*.db-shm
+*.db-wal
+state/
+inbox/
+inject/
+logs/
+mail/
+mail-vlad/
+allowlist.json
+
+# Python
+*.pyc
+__pycache__/
+venv/
+.venv/

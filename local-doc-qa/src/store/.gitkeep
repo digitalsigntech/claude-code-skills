@@ -1,0 +1,4 @@
+# The vector store lives here. Created/populated at runtime by store.py as:
+#   vectors.npy   L2-normalized embedding matrix (N x EMB_DIM)
+#   meta.json     per-chunk metadata: {id, source, locator, text}
+# Shipped empty (schema only) — run `docpipe ingest` to populate it.

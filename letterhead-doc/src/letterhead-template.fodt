@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<office:document
+    xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+    xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+    xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+    xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0"
+    xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"
+    xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"
+    xmlns:xlink="http://www.w3.org/1999/xlink"
+    xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0"
+    office:version="1.3"
+    office:mimetype="application/vnd.oasis.opendocument.text">
+
+  <office:automatic-styles>
+
+    <!-- Page geometry: US Letter with generous top margin so body text
+         starts BELOW the pinned logo. Adjust fo:margin-top to match your
+         logo height + a little breathing room. -->
+    <style:page-layout style:name="pm1">
+      <style:page-layout-properties
+          fo:page-width="8.5in" fo:page-height="11in"
+          fo:margin-top="1.6in" fo:margin-bottom="1in"
+          fo:margin-left="1in" fo:margin-right="1in"
+          style:print-orientation="portrait"/>
+    </style:page-layout>
+
+    <!-- THE KEY STYLE. This is what pins the logo to the page corner.
+         wrap="none"          -> text never reflows around it
+         vertical-rel="page"  -> Y measured from the PAGE edge, not a paragraph
+         horizontal-rel="page"-> X measured from the PAGE edge, not a paragraph
+         *-pos="from-top/left" -> use the absolute svg:x / svg:y on the frame -->
+    <style:style style:name="LogoFixed" style:family="graphic">
+      <style:graphic-properties
+          style:wrap="none"
+          style:vertical-pos="from-top"   style:vertical-rel="page"
+          style:horizontal-pos="from-left" style:horizontal-rel="page"/>
+    </style:style>
+
+    <style:style style:name="P-body" style:family="paragraph">
+      <style:paragraph-properties fo:margin-bottom="0.14in"/>
+      <style:text-properties fo:font-size="11pt" style:font-name="Liberation Serif"/>
+    </style:style>
+
+  </office:automatic-styles>
+
+  <office:master-styles>
+    <style:master-page style:name="Standard" style:page-layout-name="pm1"/>
+  </office:master-styles>
+
+  <office:body>
+    <office:text>
+
+      <!-- ============================================================
+           PINNED LOGO
+           text:anchor-type="page"        -> anchored to the page itself
+           text:anchor-page-number="1"    -> only on page 1
+           svg:x / svg:y                  -> absolute offset from top-left
+           svg:width / svg:height         -> displayed size of the logo
+           Because the style above uses *-rel="page", these coordinates are
+           measured from the physical page corner and will NOT drift when the
+           file is opened in Word / LibreOffice / Google Docs / exported to PDF.
+           Replace logo.png with your own image (put it next to this file, or
+           embed it via office:binary-data). Tune svg:x/svg:y to taste.
+           ============================================================ -->
+      <text:p text:style-name="P-body">
+        <draw:frame draw:style-name="LogoFixed" draw:name="Logo"
+            text:anchor-type="page" text:anchor-page-number="1"
+            svg:x="1in" svg:y="0.5in"
+            svg:width="4.2in" svg:height="0.6in" draw:z-index="3">
+          <draw:image xlink:href="logo.png" xlink:type="simple"
+              xlink:show="embed" xlink:actuate="onLoad"/>
+          <!-- Fallback caption a human sees if the image is missing.
+               Remove once you drop in a real logo. -->
+          <svg:title>[LOGO]</svg:title>
+        </draw:frame>
+      </text:p>
+
+      <!-- ============================================================
+           LETTER BODY  (starts below the top margin / logo)
+           ============================================================ -->
+      <text:p text:style-name="P-body">[COMPANY NAME]</text:p>
+      <text:p text:style-name="P-body">[ADDRESS LINE 1]</text:p>
+      <text:p text:style-name="P-body">[ADDRESS LINE 2]</text:p>
+      <text:p text:style-name="P-body">[CITY, STATE ZIP] &#183; [COUNTRY]</text:p>
+      <text:p text:style-name="P-body">[PHONE] &#183; [EMAIL] &#183; [WEBSITE]</text:p>
+
+      <text:p text:style-name="P-body"/>
+      <text:p text:style-name="P-body">[DATE]</text:p>
+      <text:p text:style-name="P-body"/>
+
+      <text:p text:style-name="P-body">[RECIPIENT NAME]</text:p>
+      <text:p text:style-name="P-body">[RECIPIENT ADDRESS]</text:p>
+      <text:p text:style-name="P-body"/>
+
+      <text:p text:style-name="P-body">Dear [RECIPIENT NAME],</text:p>
+      <text:p text:style-name="P-body"/>
+      <text:p text:style-name="P-body">[BODY PARAGRAPH 1]</text:p>
+      <text:p text:style-name="P-body"/>
+      <text:p text:style-name="P-body">[BODY PARAGRAPH 2]</text:p>
+      <text:p text:style-name="P-body"/>
+
+      <text:p text:style-name="P-body">Sincerely,</text:p>
+      <text:p text:style-name="P-body"/>
+      <text:p text:style-name="P-body"/>
+      <text:p text:style-name="P-body">[SIGNER NAME]</text:p>
+      <text:p text:style-name="P-body">[SIGNER TITLE]</text:p>
+
+    </office:text>
+  </office:body>
+</office:document>

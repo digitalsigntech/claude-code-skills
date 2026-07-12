@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Convenience wrapper: run docpipe with the project venv from any directory.
+# Resolves paths relative to this script, so the skill folder can live anywhere.
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PY="$HERE/venv/bin/python"           # project venv (create with: python -m venv venv)
+[ -x "$PY" ] || PY="$(command -v python3)"   # fall back to system python3
+cd "$HERE/pipeline"
+exec "$PY" docpipe.py "$@"

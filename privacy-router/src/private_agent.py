@@ -1,0 +1,299 @@
+"""Tool-calling agent loop for the PRIVATE path.
+
+The private model (any OpenAI-compatible endpoint that supports tool calling — e.g.
+Nemotron via OpenRouter, or a local llama.cpp/vLLM server) answers private queries
+agentically: it calls read-only lookup tools — CRM contacts, an archived-email store,
+an optional semantic KB index — in a loop until it can answer. Every tool executes
+ON-BOX; only the model inference itself goes to the endpoint (fully private once the
+model is local).
+
+Why a loop: a single-shot call with pre-retrieved context can't follow up. Worse, a
+capable model will *pretend* it can ("let me check the database…") and stop — a
+hallucinated capability. Giving it real tools fixes both.
+
+Design constraints:
+  • Tools are READ-ONLY lookups plus file DELIVERY (find_files/send_file). No writes,
+    no shell. send_file only queues a path — the gateway does the actual chat upload
+    after the loop, so this process never touches the network beyond the model.
+  • Hard caps: MAX_TURNS model calls, WALL_DEADLINE seconds overall — a stuck loop
+    degrades to "couldn't finish", never hangs the caller.
+  • Fail closed: any error surfaces as a plain explanation; the caller must never
+    fall through to the cloud LLM.
+
+Config (env):
+  PRIVATE_LLM_URL     chat/completions endpoint (default: OpenRouter)
+  PRIVATE_LLM_MODEL   model id
+  PRIVATE_LLM_KEY     api key, or PRIVATE_LLM_KEY_FILE=path (KEY=value lines)
+  CONTACTS_DB         sqlite CRM db (tables: contacts, emails — see crm-contacts skill)
+  WORKSPACE_ROOT      dir find_files/send_file are confined to (default: cwd)
+"""
+import os, sys, json, time, sqlite3, re, urllib.request
+
+OR_URL = os.environ.get("PRIVATE_LLM_URL", "https://openrouter.ai/api/v1/chat/completions")
+OR_MODEL = os.environ.get("PRIVATE_LLM_MODEL", "nvidia/nemotron-3-super-120b-a12b")
+CONTACTS_DB = os.environ.get("CONTACTS_DB", "")
+WORKSPACE_ROOT = os.path.realpath(os.environ.get("WORKSPACE_ROOT", os.getcwd()))
+
+MAX_TURNS = 6          # max model calls (i.e. up to 5 rounds of tool use)
+WALL_DEADLINE = 120    # seconds for the whole loop
+
+_STOP = {"what", "why", "how", "when", "where", "who", "did", "does", "do", "the",
+         "a", "an", "is", "are", "was", "were", "with", "from", "about", "have",
+         "has", "had", "want", "wanted", "will", "would", "our", "their", "them",
+         "they", "this", "that", "much", "many", "get", "got", "can", "could",
+         "please", "tell", "show", "give", "know", "need", "customer", "client"}
+
+
+def _log(msg):
+    print(f"[private-agent] {msg}", file=sys.stderr, flush=True)
+
+
+def _load_key():
+    k = os.environ.get("PRIVATE_LLM_KEY")
+    if k:
+        return k
+    path = os.environ.get("PRIVATE_LLM_KEY_FILE", "")
+    try:
+        return next((l.split("=", 1)[1].strip() for l in open(path) if "=" in l), None)
+    except Exception:
+        return None
+
+
+def _terms(text, n=6):
+    return [w for w in re.findall(r"[a-zA-Z][a-zA-Z0-9&'-]{2,}", text.lower())
+            if w not in _STOP][:n]
+
+
+# ---- tools (all read-only, all on-box) --------------------------------------
+def t_search_contacts(query):
+    """LIKE-match contacts by name/company/email; return rolling summaries."""
+    out = []
+    db = sqlite3.connect(CONTACTS_DB)
+    for term in _terms(query, 4) or [query.lower()]:
+        for email, name, company, base, act in db.execute(
+                "SELECT email, name, company, base_summary, activity_summary FROM contacts "
+                "WHERE lower(coalesce(name,'')||' '||coalesce(company,'')||' '||email) "
+                "LIKE ? LIMIT 4", (f"%{term}%",)):
+            summ = " ".join(s for s in (base, act) if s).strip()
+            out.append({"email": email, "name": name, "company": company,
+                        "summary": summ[:1500] or "(no summary)"})
+    dedup = list({c["email"]: c for c in out}.values())[:6]
+    return dedup or "No matching contacts."
+
+
+def t_search_emails(query, limit=5):
+    """Keyword-rank archived emails; return id/date/from/subject + short excerpt."""
+    terms = _terms(query)
+    if not terms:
+        return "Query had no searchable terms."
+    db = sqlite3.connect(CONTACTS_DB)
+    score = "+".join("(CASE WHEN instr(lower(coalesce(subject,'')||' '||coalesce(body,'')), ?) "
+                     ">0 THEN 1 ELSE 0 END)" for _ in terms)
+    rows = db.execute(
+        f"SELECT id, date, from_addr, to_addr, subject, body, ({score}) AS m FROM emails "
+        f"WHERE m>0 ORDER BY m DESC, internal_date DESC LIMIT ?",
+        terms + [min(int(limit or 5), 8)]).fetchall()
+    out = []
+    for eid, date, frm, to, subj, body, m in rows:
+        body = body or ""
+        pos = min((p for p in (body.lower().find(t) for t in terms) if p >= 0), default=0)
+        out.append({"id": eid, "date": date, "from": frm, "to": to, "subject": subj,
+                    "excerpt": body[max(0, pos - 150):pos + 450].strip()})
+    return out or "No matching emails."
+
+
+def t_read_email(email_id):
+    """Full body of one archived email by id (from search_emails results)."""
+    db = sqlite3.connect(CONTACTS_DB)
+    r = db.execute("SELECT date, from_addr, to_addr, cc, subject, body FROM emails "
+                   "WHERE id=?", (str(email_id),)).fetchone()
+    if not r:
+        return f"No email with id {email_id}."
+    date, frm, to, cc, subj, body = r
+    return {"date": date, "from": frm, "to": to, "cc": cc, "subject": subj,
+            "body": (body or "")[:6000]}
+
+
+def t_kb_search(query):
+    """Semantic search over the knowledge base (needs the kb-semantic-index skill's
+    kb_index.py importable; tool is skipped gracefully if it isn't)."""
+    from kb_index import retrieve
+    hits = retrieve(query, k=5)
+    return [{"source": h["source"], "score": round(h["score"], 3),
+             "text": h["text"][:800]} for h in hits] or "No KB matches."
+
+
+# ---- file delivery (the private chat must be able to hand over actual documents —
+# PDFs, invoices, images — not just talk about them). The chat is allowlisted and
+# private; sending confidential company files there is accepted policy. Credentials
+# are the one thing that must never leave the box, so those stay blocked.
+SEND_MAX_BYTES = 49 * 1024 * 1024      # Telegram bot upload cap is 50 MB
+_DENY_PARTS = ("token", "secret", "credential", "password", "bot_token",
+               os.sep + ".git" + os.sep, os.sep + "venv" + os.sep)
+_SKIP_DIRS = {".git", "venv", "__pycache__", "node_modules", "logs", "state",
+              ".claude", "inject", "inbox"}
+_pending_files = []
+
+
+def _sendable(path):
+    """Return (real_path, error). A file is sendable only if it resolves inside the
+    workspace, exists, fits the chat upload cap and isn't credential-like."""
+    real = os.path.realpath(path if os.path.isabs(path)
+                            else os.path.join(WORKSPACE_ROOT, path))
+    if not real.startswith(WORKSPACE_ROOT + os.sep):
+        return None, f"{path} is outside the workspace — not sendable."
+    if any(p in real.lower() for p in _DENY_PARTS):
+        return None, f"{path} looks like credentials — never sendable."
+    if not os.path.isfile(real):
+        return None, f"{path} does not exist. Use find_files to get the exact path."
+    if os.path.getsize(real) > SEND_MAX_BYTES:
+        return None, f"{path} exceeds the 50 MB upload limit."
+    return real, ""
+
+
+def t_find_files(query, limit=8):
+    """Filename search under the workspace; ranked by terms matched, newest first."""
+    terms = [w for w in re.findall(r"[a-zA-Z0-9][a-zA-Z0-9.&'_-]{2,}", query.lower())
+             if w not in _STOP][:6]
+    if not terms:
+        return "Query had no searchable terms."
+    hits = []
+    for root, dirs, files in os.walk(WORKSPACE_ROOT):
+        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS and not d.startswith(".")]
+        for f in files:
+            full = os.path.join(root, f)
+            rel = os.path.relpath(full, WORKSPACE_ROOT)
+            m = sum(1 for t in terms if t in rel.lower())
+            if m:
+                try:
+                    st = os.stat(full)
+                except OSError:
+                    continue
+                hits.append((m, st.st_mtime, rel, st.st_size))
+    hits.sort(key=lambda h: (-h[0], -h[1]))
+    return [{"path": rel, "size_kb": round(size / 1024, 1),
+             "modified": time.strftime("%Y-%m-%d", time.localtime(mt))}
+            for m, mt, rel, size in hits[:min(int(limit or 8), 15)]
+            ] or "No files matched those terms."
+
+
+def t_send_file(path, caption=""):
+    """Queue a file; the gateway uploads it to the chat after the loop finishes."""
+    real, err = _sendable(path)
+    if not real:
+        return err
+    _pending_files.append({"path": real, "caption": (caption or "")[:900]})
+    return (f"OK — {os.path.relpath(real, WORKSPACE_ROOT)} will be attached to your reply. "
+            "Do not paste its contents; just tell the owner what you are sending.")
+
+
+TOOLS = {
+    "search_contacts": (t_search_contacts, "Search CRM contacts by name/company/email. "
+                        "Returns contact info + a rolling summary of all dealings with them.",
+                        {"query": {"type": "string", "description": "name, company or email fragment"}}),
+    "search_emails": (t_search_emails, "Keyword-search the archived email store (subjects+bodies). "
+                      "Returns matching emails with ids and excerpts, best matches first.",
+                      {"query": {"type": "string", "description": "keywords, e.g. 'acme refund'"},
+                       "limit": {"type": "integer", "description": "max results (default 5)"}}),
+    "read_email": (t_read_email, "Fetch the full body of one archived email by its id "
+                   "(get ids from search_emails).",
+                   {"email_id": {"type": "string", "description": "email id"}}),
+    "kb_search": (t_kb_search, "Semantic search over the company knowledge base "
+                  "(specs, prices, policies, extracted email knowledge).",
+                  {"query": {"type": "string", "description": "natural-language question"}}),
+    "find_files": (t_find_files, "Search the workspace for files by NAME — invoices, "
+                   "PDFs, images, price lists, reports. Returns relative paths with size "
+                   "and date, best match first.",
+                   {"query": {"type": "string",
+                              "description": "filename keywords, e.g. 'invoice acme pdf'"},
+                    "limit": {"type": "integer", "description": "max results (default 8)"}}),
+    "send_file": (t_send_file, "Attach a file to your reply — the owner receives it in "
+                  "the chat. Private/confidential company documents are fine in this "
+                  "chat. Use find_files first to get the exact path.",
+                  {"path": {"type": "string", "description": "path from find_files"},
+                   "caption": {"type": "string", "description": "optional short caption"}}),
+}
+
+
+def _tool_schemas():
+    return [{"type": "function",
+             "function": {"name": name, "description": desc,
+                          "parameters": {"type": "object",
+                                         "properties": props,
+                                         "required": [next(iter(props))]}}}
+            for name, (fn, desc, props) in TOOLS.items()]
+
+
+def _call_api(messages, key, timeout=45):
+    payload = {"model": OR_MODEL, "temperature": 0.0, "max_tokens": 900,
+               "reasoning": {"enabled": False},
+               "tools": _tool_schemas(),
+               "messages": messages}
+    req = urllib.request.Request(OR_URL, data=json.dumps(payload).encode(),
+                                 headers={"Authorization": f"Bearer {key}",
+                                          "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read())["choices"][0]["message"]
+
+
+SYSTEM = (
+    "You are the PRIVATE assistant of the company. You run on-box and are trusted with "
+    "confidential company data. You are mid-conversation with the owner; the recent "
+    "chat history is provided for context.\n"
+    "You HAVE lookup tools — use them: search_contacts / search_emails / read_email for "
+    "customer matters, kb_search for product facts. When the owner asks for an actual "
+    "document (a PDF, invoice, image, price list, report), use find_files to locate it "
+    "and send_file to attach it — this chat is private and trusted, so confidential "
+    "company files may be sent here. Call tools as needed (several rounds are fine) "
+    "BEFORE answering. When you have enough, give the final answer: concise, factual, "
+    "grounded in what the tools returned. If the data truly isn't there, say exactly "
+    "what you looked for and what's missing. Never invent facts."
+)
+
+
+def run(question, history=""):
+    """Tool-calling loop. Returns (answer_text, files_to_send) where files_to_send is
+    a list of {path, caption} the gateway should upload to the chat. Raises on hard
+    failure."""
+    key = _load_key()
+    if not key:
+        raise RuntimeError("no API key (set PRIVATE_LLM_KEY or PRIVATE_LLM_KEY_FILE)")
+    del _pending_files[:]
+    user = ""
+    if history.strip():
+        user = f"Recent conversation (oldest first):\n{history.strip()}\n\n"
+    user += f"Owner's message: {question}"
+    messages = [{"role": "system", "content": SYSTEM},
+                {"role": "user", "content": user}]
+    deadline = time.time() + WALL_DEADLINE
+    for turn in range(MAX_TURNS):
+        msg = _call_api(messages, key, timeout=min(45, max(5, deadline - time.time())))
+        calls = msg.get("tool_calls") or []
+        if not calls:
+            return ((msg.get("content") or "").strip() or "(the model returned no text)",
+                    list(_pending_files))
+        messages.append({"role": "assistant", "content": msg.get("content") or "",
+                         "tool_calls": calls})
+        for tc in calls:
+            name = tc["function"]["name"]
+            try:
+                args = json.loads(tc["function"].get("arguments") or "{}")
+            except Exception:
+                args = {}
+            _log(f"turn {turn + 1}: {name}({json.dumps(args)[:120]})")
+            fn = TOOLS.get(name, (None,))[0]
+            try:
+                result = fn(**args) if fn else f"Unknown tool {name}"
+            except Exception as e:
+                result = f"Tool error: {e}"
+            messages.append({"role": "tool", "tool_call_id": tc.get("id", name),
+                             "content": json.dumps(result, default=str)[:8000]})
+        if time.time() > deadline - 10:
+            messages.append({"role": "user", "content":
+                             "Time is up — answer NOW from what you already gathered."})
+    # Loop exhausted: force a final answer from gathered context.
+    messages.append({"role": "user", "content":
+                     "Stop using tools. Give your best final answer from what you gathered."})
+    msg = _call_api(messages, key, timeout=30)
+    return ((msg.get("content") or "").strip() or "(no answer after tool loop)",
+            list(_pending_files))

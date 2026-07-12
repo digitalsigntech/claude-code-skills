@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Convenience wrapper for the unified KB semantic index.
+#   ./kb search "how do I reset the device?" [-k 8]
+#   ./kb index        # refresh (incremental)
+#   ./kb ask   "..."  # tier-1 reflex answer from a confident Q&A hit
+#   ./kb stats
+#
+# Uses $KB_PYTHON if set (e.g. a virtualenv interpreter), else python3 on PATH.
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec "${KB_PYTHON:-python3}" "$HERE/kb_index.py" "$@"

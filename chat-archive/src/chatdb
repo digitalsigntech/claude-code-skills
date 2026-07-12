@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Thin CLI wrapper — resolves chatdb.py next to this script, no matter the CWD.
+exec python3 "$(dirname "$(readlink -f "$0")")/chatdb.py" "$@"

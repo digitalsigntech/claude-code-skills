@@ -1,0 +1,8 @@
+*.pyc
+__pycache__/
+bot_token
+allowlist.json
+state/
+inbox/
+inject/
+logs/

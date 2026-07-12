@@ -1,0 +1,22 @@
+# Example crontab wiring the boot-autostart pattern together.
+# Install with:  crontab crontab.example   (or `crontab -e` and paste).
+# Adjust the ~/myproject paths to your real project location.
+
+# --- Boot: start everything once when the machine comes up --------------------
+# Model / API servers (health-waited launcher).
+@reboot ~/myproject/start_servers.sh >> ~/myproject/logs/boot.log 2>&1
+# Bot gateway (flock single-instance; foreground process holds the lock).
+@reboot ~/myproject/start_gateway.sh
+# Persistent-connection worker (flock single-instance).
+@reboot ~/myproject/start_watcher.sh
+
+# --- Watchdogs: keep them up if they die or wedge -----------------------------
+# Gateway watchdog: re-run the launcher every 5 min. flock makes it a no-op if up.
+*/5 * * * * ~/myproject/start_gateway.sh # gateway watchdog
+
+# Worker watchdog: socket-aware, every 1 min. Restarts on a dead process OR a
+# wedged (socket-less) connection. See src/watchdog.sh.
+*/1 * * * * ~/myproject/watchdog.sh # worker watchdog (socket-aware)
+
+# Silence cron's default mail; the scripts log to their own files instead.
+MAILTO=""

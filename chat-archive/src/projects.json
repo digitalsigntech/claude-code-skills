@@ -1,0 +1,41 @@
+{
+  "_comment": "Known project slugs the classifier assigns messages to (exactly ONE primary tag per row). It picks the best fit; if nothing fits it may add a new lowercase-kebab slug here (auto-grown). Keep names stable — search filters on them. These are EXAMPLE slugs — replace them with your own projects.",
+  "projects": [
+    {
+      "slug": "sales",
+      "hint": "customer quotes, pricing, product questions, order follow-ups"
+    },
+    {
+      "slug": "product",
+      "hint": "the company's core product/hardware: features, specs, roadmap"
+    },
+    {
+      "slug": "infrastructure",
+      "hint": "on-box/on-prem deployment, servers, boot/autostart, backups, ops"
+    },
+    {
+      "slug": "email-kb",
+      "hint": "email knowledge-base extraction, contacts DB, follow-up checks"
+    },
+    {
+      "slug": "chat-gateway",
+      "hint": "the chat bot itself: gateway, streaming, file ingest, message queue"
+    },
+    {
+      "slug": "chat-archive",
+      "hint": "this searchable chat/message archive and recall system, plus its topic/project classifier — real-time tagging, conversation bursts"
+    },
+    {
+      "slug": "research",
+      "hint": "exploratory research, benchmarks, model/tool evaluations"
+    },
+    {
+      "slug": "finance",
+      "hint": "invoices, POs, payments, pricing math, accounting"
+    },
+    {
+      "slug": "general",
+      "hint": "greetings, status checks, meta questions, anything that fits no specific project"
+    }
+  ]
+}

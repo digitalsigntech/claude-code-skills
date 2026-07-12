@@ -1,0 +1,19 @@
+{
+  "_comment": "SOURCE OF TRUTH for data privacy labels. DEFAULT = private. Only sources labeled public (or matching a public rule) may be sent to the CLOUD LLM; everything else must be processed by the private model. Mislabeling private data as public causes a leak, so keep this list conservative and explicit.",
+
+  "default": "private",
+
+  "rules": {
+    "web_is_public": true,
+    "_web_note": "Anything obtained from a public website is public. Scrapers/ingest that pull from the open web tag their output 'public'."
+  },
+
+  "public_paths": [
+    "knowledge-base/products/product-manual.md",
+    "knowledge-base/products/price-list.md"
+  ],
+
+  "_public_paths_note": "List ONLY documents you'd be comfortable publishing: user manuals, public price lists, marketing material. Customer data, emails, CRM, financials stay private by default.",
+
+  "drop_convention": "When the owner drops a document and says it's public, add its ingested path to public_paths at ingest time; otherwise it is private."
+}

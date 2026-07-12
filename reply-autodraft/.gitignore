@@ -1,0 +1,19 @@
+# Secrets / config with real values — never commit
+autodraft.env
+bot_token
+*token*.json
+credentials.json
+secrets.env
+*.key
+*.pem
+
+# Populated data / learned state — ship code, not data
+*.db
+*.db-shm
+*.db-wal
+logs/
+.lock
+
+# Python
+*.pyc
+__pycache__/

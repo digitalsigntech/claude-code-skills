@@ -1,0 +1,27 @@
+{
+  "workspace_dir": "~/myproject",
+  "memory_dir": "~/.claude/projects/-home-user-myproject/memory",
+
+  "log_bloat_mb": 50,
+  "cron_stale_days": 2,
+
+  "expected_procs": [
+    ["python3 gateway.py", "chat gateway"],
+    ["idle_watcher.py", "mailbox watcher"]
+  ],
+
+  "expected_crons": {
+    "jobs/backup.sh": "daily backup",
+    "jobs/ingest.sh": "data ingestion",
+    "gateway/start.sh": "chat gateway"
+  },
+
+  "fresh_log_dirs": [
+    ["jobs/ingest/logs", "ingestion"]
+  ],
+
+  "telegram": {
+    "bot_token_file": "~/.config/myproject/bot_token",
+    "chat_id": "123456789"
+  }
+}

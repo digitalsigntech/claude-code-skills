@@ -1,0 +1,14 @@
+[
+ {
+  "name": "event-pass",
+  "path": "/abs/path/to/ExhibitorPass.pdf",
+  "caption": "Trade Show 2026 — exhibitor pass",
+  "keywords": [["tradeshow", "trade show"], ["pass", "ticket", "badge"]]
+ },
+ {
+  "name": "price-list",
+  "path": "/abs/path/to/Price_List_2026.pdf",
+  "caption": "Price List 2026",
+  "keywords": [["price list", "pricelist"], ["send", "fetch", "get", "share", "attach", "pdf", "latest", "current"]]
+ }
+]

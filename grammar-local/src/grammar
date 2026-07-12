@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Local grammar/style fixer — runs on a local model; content never leaves the box.
+# Set GRAMMAR_PYTHON to a python that has `requests` installed (e.g. a venv), or
+# rely on the system python3.
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PYTHONWARNINGS="ignore"
+exec "${GRAMMAR_PYTHON:-python3}" "$HERE/grammar.py" "$@"
