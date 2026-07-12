@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+"""KB self-refinement watcher — cron half of the kb-refine loop.
+
+Scans the local email archive (crm/contacts.db:emails) for NEW sent replies from
+the owner to external customers, and for each one launches a headless Claude run of
+refine_prompt.md: answer the customer's question from the KB alone, diff against
+the owner's actual reply, patch the KB where it was wrong or silent, repeat until the
+KB-only answer converges (the owner, 2026-07-12: run this on every reply he sends to a
+customer question).
+
+State: state.json {"refined": {msg_id: status}, ...}. First run seeds every
+pre-existing outbound id as "seeded" so history is never bulk-processed.
+
+Usage: watch.py [--dry] [--limit N] [--force THREAD_ID:REPLY_ID]
+"""
+import argparse, json, os, re, sqlite3, subprocess, sys, datetime
+
+DIR = os.path.dirname(os.path.abspath(__file__))
+DB = "$HOME/the company/crm/contacts.db"
+STATE = os.path.join(DIR, "state.json")
+PROMPT = os.path.join(DIR, "refine_prompt.md")
+CLAUDE = "$HOME/.local/bin/claude"
+MODEL = "claude-opus-4-8"
+TIMEOUT = 1800                      # 30 min per thread, matches other headless jobs
+PER_RUN = 2                        # max refine runs per cron tick
+MAX_ATTEMPTS = 2                   # give up on a reply after this many failed runs
+
+VLAD = "vlad@example.com"
+# Replies to these are never customer Q&A (internal, personal, apprentice).
+SKIP_TO = re.compile(
+    r"@digitalsigntech\.net|vgalentovsky@gmail\.com|no-?reply|mailer-daemon", re.I)
+
+
+def now():
+    return datetime.datetime.now().isoformat(timespec="seconds")
+
+
+def load_state():
+    if os.path.exists(STATE):
+        return json.load(open(STATE))
+    return {"refined": {}}
+
+
+def save_state(st):
+    tmp = STATE + ".tmp"
+    json.dump(st, open(tmp, "w"), indent=1)
+    os.replace(tmp, STATE)
+
+
+def outbound_rows(c):
+    """All sent vlad->external replies, oldest first."""
+    rows = c.execute(
+        """SELECT id, thread_id, internal_date, to_addr, subject FROM emails
+           WHERE from_addr LIKE ? AND labels LIKE '%SENT%'
+           ORDER BY internal_date""", (f"%{VLAD}%",)).fetchall()
+    return [r for r in rows if r["to_addr"] and not SKIP_TO.search(r["to_addr"])]
+
+
+def has_inbound_question(c, thread_id, before_ts):
+    """True if the thread has an earlier inbound (non-the company) message that asks something."""
+    rows = c.execute(
+        """SELECT from_addr, body_new FROM emails
+           WHERE thread_id=? AND internal_date < ?""", (thread_id, before_ts)).fetchall()
+    for r in rows:
+        frm = (r["from_addr"] or "").lower()
+        if "example.com" in frm:
+            continue
+        if "?" in (r["body_new"] or ""):
+            return True
+    return False
+
+
+def refine(thread_id, reply_id, dry=False):
+    prompt = open(PROMPT).read() + f"\nTHREAD_ID: {thread_id}\nREPLY_ID: {reply_id}\n"
+    if dry:
+        print(f"{now()} DRY would refine thread={thread_id} reply={reply_id}")
+        return True
+    print(f"{now()} refine start thread={thread_id} reply={reply_id}")
+    r = subprocess.run([CLAUDE, "-p", prompt, "--model", MODEL,
+                        "--dangerously-skip-permissions"],
+                       capture_output=True, text=True, timeout=TIMEOUT + 60)
+    out = (r.stdout or "") + (r.stderr or "")
+    m = re.search(r"REFINE-RESULT:.*", out)
+    print(f"{now()} refine done rc={r.returncode} | {m.group(0) if m else out[-300:]}")
+    return r.returncode == 0 and m is not None
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--dry", action="store_true")
+    ap.add_argument("--limit", type=int, default=PER_RUN)
+    ap.add_argument("--force", help="THREAD_ID:REPLY_ID — refine this one now")
+    a = ap.parse_args()
+
+    if a.force:
+        tid, mid = a.force.split(":")
+        refine(tid, mid, dry=a.dry)
+        return
+
+    c = sqlite3.connect(DB, timeout=60)
+    c.row_factory = sqlite3.Row
+    st = load_state()
+    rows = outbound_rows(c)
+
+    if not st["refined"]:                       # first run: seed history, process nothing
+        st["refined"] = {r["id"]: "seeded" for r in rows}
+        save_state(st)
+        print(f"{now()} seeded {len(rows)} pre-existing outbound ids; watching from now on.")
+        return
+
+    done = 0
+    for r in rows:
+        if done >= a.limit:
+            break
+        prev = st["refined"].get(r["id"])
+        if prev and (prev in ("seeded", "ok", "skip") or prev.startswith("gaveup")):
+            continue
+        attempts = int(prev.split(":")[1]) if prev and prev.startswith("fail") else 0
+        if not r["thread_id"] or not has_inbound_question(c, r["thread_id"], r["internal_date"]):
+            st["refined"][r["id"]] = "skip"     # not a reply to a question
+            continue
+        try:
+            ok = refine(r["thread_id"], r["id"], dry=a.dry)
+        except subprocess.TimeoutExpired:
+            ok = False
+            print(f"{now()} refine TIMEOUT thread={r['thread_id']}")
+        if a.dry:
+            done += 1
+            continue
+        if ok:
+            st["refined"][r["id"]] = "ok"
+        else:
+            attempts += 1
+            st["refined"][r["id"]] = (f"fail:{attempts}" if attempts < MAX_ATTEMPTS
+                                      else f"gaveup:{attempts}")
+        save_state(st)
+        done += 1
+    if done == 0:
+        print(f"{now()} nothing new to refine.")
+
+
+if __name__ == "__main__":
+    main()
