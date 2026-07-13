@@ -65,7 +65,7 @@ See each skill's own `README.md` for configuration.
 | **chat-archive** | Searchable SQLite/FTS5 log of chat messages with real-time multi-label project tagging and LLM query-expansion recall. | [`chat-archive/`](chat-archive/) |
 | **weekly-reports** | Scheduled research/report generator → HTML/PDF, distributed by email + chat + cloud drive. Bring-your-own prompt files. | [`weekly-reports/`](weekly-reports/) |
 | **drive-backup** | Daily project backup to Google Drive with retention (keep-N) and a documented exclusion list for secrets/state. | [`drive-backup/`](drive-backup/) |
-| **health-check** | Scheduled self-maintenance routine — grooms agent memory, audits crons/processes/log bloat, pings only on judgment calls. Fully config-driven. | [`health-check/`](health-check/) |
+| **health-check** | Scheduled self-maintenance routines — weekly: grooms agent memory, audits crons/processes/log bloat, pings only on judgment calls; plus a 10-min auth watchdog that alerts when the Claude Code OAuth session dies (concurrent-process refresh race). Fully config-driven. | [`health-check/`](health-check/) |
 
 ### Infrastructure patterns / docs
 | Skill | What it does | Location |

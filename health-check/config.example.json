@@ -23,5 +23,15 @@
   "telegram": {
     "bot_token_file": "~/.config/myproject/bot_token",
     "chat_id": "123456789"
+  },
+
+  "auth_watchdog": {
+    "credentials_file": "~/.claude/.credentials.json",
+    "claude_bin": "~/.local/bin/claude",
+    "probe_model": "haiku",
+    "probe_timeout_sec": 120,
+    "grace_min": 60,
+    "realert_hours": 6,
+    "host_label": "my-server"
   }
 }

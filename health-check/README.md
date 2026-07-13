@@ -1,11 +1,17 @@
-# Weekly agent health check
+# Agent health checks
 
-A scheduled, self-maintenance routine for a Claude Code agent setup. It runs
-locally (no LLM tokens), grooms the agent's persistent memory, audits the
-supporting automation (cron jobs, long-running processes, log freshness),
-watches for log-file bloat, and pings the owner **only** when there is a
-judgment call or an auto-fix worth reporting. A fully clean run is logged to a
-file and stays silent.
+Two scheduled self-maintenance routines for a Claude Code agent setup, sharing
+one config and one Telegram alert target:
+
+- **Weekly health check** (`src/health_check.py`) — runs locally (no LLM
+  tokens), grooms the agent's persistent memory, audits the supporting
+  automation (cron jobs, long-running processes, log freshness), watches for
+  log-file bloat, and pings the owner **only** when there is a judgment call
+  or an auto-fix worth reporting. A fully clean run is logged to a file and
+  stays silent.
+- **Auth watchdog** (`src/auth_check.py`, every ~10 min) — detects when the
+  Claude Code OAuth session dies and pings the owner to re-login, since a dead
+  login silently takes down every headless agent on the box.
 
 ## What it does
 
@@ -25,6 +31,44 @@ file and stays silent.
 "Auto-prune" actions are recoverable: nothing is deleted, only moved to the
 skill's `trash/` folder (and the memory index is backed up before edits).
 
+## Auth watchdog
+
+Why it exists: a Claude Code subscription login can die silently. OAuth refresh
+tokens are single-use, and concurrent `claude` processes sharing
+`~/.claude/.credentials.json` (a chat gateway, cron jobs, an interactive
+session) can race the token refresh — the loser's refresh is rejected and the
+whole session is invalidated (known upstream bug cluster: anthropics/claude-code
+issues [#56339](https://github.com/anthropics/claude-code/issues/56339),
+[#24317](https://github.com/anthropics/claude-code/issues/24317),
+[#43392](https://github.com/anthropics/claude-code/issues/43392)). Every
+headless agent on the box is then down until someone runs `/login`, and nothing
+says so.
+
+`src/auth_check.py` checks cheapest-first and only spends tokens when
+suspicious:
+
+1. Credentials file missing/unparseable → **dead**, alert.
+2. Access token not yet expired → OK (quiet — no log line, no ping).
+3. Expired less than `grace_min` → OK; the next real agent turn will refresh it.
+4. Expired longer than `grace_min` → live probe: one minimal headless
+   `claude -p` turn (a successful turn rewrites the token, so a stale-but-valid
+   session self-heals here). An auth-shaped probe error → **dead**, alert;
+   network-type failures are logged and the prior state is kept.
+
+Alerts go out over the plain Telegram Bot API, which works precisely when
+Claude itself can't: one 🔴 ping per outage, a re-ping every `realert_hours`
+while it stays broken, and one 🟢 recovery message. State lives in
+`src/state/auth_check.json`; the log only grows on state changes and probes.
+
+Schedule it every 10 minutes:
+
+```cron
+*/10 * * * *  /usr/bin/python3 /full/path/to/health-check/src/auth_check.py >> /full/path/to/health-check/src/logs/auth_check.log 2>&1
+```
+
+Tip: add `"src/auth_check.py": "auth watchdog"` to `expected_crons` so the
+weekly check flags the watchdog itself going missing.
+
 ## How it works
 
 - **`src/health_check.py`** — the whole routine. It reads `src/config.json`
@@ -33,6 +77,8 @@ skill's `trash/` folder (and the memory index is backed up before edits).
   judgment calls — sends a Telegram message to the configured chat.
 - **`src/run.sh`** — thin wrapper for cron: takes a `flock` so only one
   instance runs, and appends output to `src/logs/health.log`.
+- **`src/auth_check.py`** — the auth watchdog (see its section below). Reads
+  the same `src/config.json`; runs standalone on its own, faster cron cadence.
 
 The memory model assumes the Claude Code convention where a `MEMORY.md` index
 links out to individual `<slug>.md` memory files with GFM links
@@ -81,8 +127,15 @@ All fields live in `src/config.json`. Paths may use `~`.
 | `expected_procs` | `[[pgrep_pattern, label], ...]` — processes that should be up | `[]` |
 | `expected_crons` | `{ "substring_in_crontab": "label", ... }` — entries that should exist | `{}` |
 | `fresh_log_dirs` | `[[log_dir, label], ...]` — dirs whose freshness is checked against `cron_stale_days`; relative paths resolve under `workspace_dir` | `[]` |
-| `telegram.bot_token_file` | File containing the bot token | *(empty → no ping)* |
-| `telegram.chat_id` | Chat/group ID to notify | *(empty → no ping)* |
+| `telegram.bot_token_file` | File containing the bot token (shared by both scripts) | *(empty → no ping)* |
+| `telegram.chat_id` | Chat/group ID to notify (shared by both scripts) | *(empty → no ping)* |
+| `auth_watchdog.credentials_file` | Claude Code OAuth credentials file to watch | `~/.claude/.credentials.json` |
+| `auth_watchdog.claude_bin` | Path to the `claude` binary — cron's PATH usually lacks `~/.local/bin`, so use an absolute path | `claude` |
+| `auth_watchdog.probe_model` | Model for the probe turn (keep it cheap) | `haiku` |
+| `auth_watchdog.probe_timeout_sec` | Probe turn timeout | `120` |
+| `auth_watchdog.grace_min` | Expired less than this (minutes) → assume normal use will refresh; no probe | `60` |
+| `auth_watchdog.realert_hours` | Re-ping this often while auth stays dead | `6` |
+| `auth_watchdog.host_label` | Machine name used in alert text | hostname |
 
 Every field has a fallback, so the script runs even with no config file — but
 without `memory_dir`, `expected_procs`, `expected_crons`, and the Telegram

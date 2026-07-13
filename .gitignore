@@ -3,6 +3,7 @@ bot_token
 *token*.json
 credentials.json
 secrets.env
+config.json
 *.config.sh
 reports.config.sh
 *.key
