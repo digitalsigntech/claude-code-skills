@@ -18,6 +18,7 @@ import photo_reflex
 import doc_reflex
 import file_reflex
 import personal_notes
+import voice_mode
 
 # Searchable chat archive (every message + reply -> SQLite/FTS5). Best-effort: if the
 # module can't load, archiving silently no-ops and the gateway runs unaffected.
@@ -316,6 +317,51 @@ def handle_file(msg, chat_id):
     TG.send_message(chat_id,
                     f"📥 Saved `{os.path.basename(path)}`.\nWhat should I do with it?",
                     reply_to=msg["message_id"], reply_markup=_file_keyboard(key))
+
+
+def handle_voice(msg, chat_id):
+    """Voice conversation (2026-07-13): a voice note in a VOICE_CHATS chat becomes a
+    spoken turn — on-box whisper transcription (language autodetected), the normal
+    Claude turn, then a Piper voice note back plus the full reply text. Any failure
+    on the audio side degrades to a plain text reply, never a lost turn."""
+    with Typing(chat_id):
+        path, _ = _save_incoming(msg, chat_id)
+    if not path:
+        TG.send_message(chat_id, "⚠️ I couldn't download that voice note.")
+        return
+    try:
+        with Typing(chat_id):
+            text, lang = voice_mode.transcribe(path)
+    except Exception as e:
+        log(f"voice transcribe FAILED chat={chat_id}: {e}")
+        TG.send_message(chat_id, f"⚠️ Transcription failed: {str(e)[:200]}")
+        return
+    if not text:
+        TG.send_message(chat_id, "⚠️ I couldn't make out any speech in that voice note.")
+        return
+    _arc_in(msg, chat_id, text, kind="voice")
+    log(f"voice in chat={chat_id} lang={lang} {text[:80]!r}")
+    # Echo what was heard so a bad transcription is immediately visible.
+    TG.send_message(chat_id, f"🎙️ _{text}_", reply_to=msg["message_id"])
+    prompt = (f"[Voice conversation: the user SPOKE this as a Telegram voice note and your "
+              f"reply will be read aloud by TTS. Keep it short and conversational — plain "
+              f"prose only: no markdown, no lists, no tables, no code. Reply in the language "
+              f"they spoke (detected: {lang}).]\n\n{text}")
+    with Typing(chat_id):
+        reply = bridge.ask(chat_id, prompt, sender=_sender_full(msg))
+    _arc_out(chat_id, reply, kind="voice")
+    ogg = None
+    try:
+        TG.send_chat_action(chat_id, "record_voice")
+        ogg = voice_mode.synthesize(reply, lang)
+    except Exception as e:
+        log(f"voice synth FAILED chat={chat_id}: {e}")
+    if ogg and voice_mode.send_voice(chat_id, ogg, reply_to=msg["message_id"]):
+        # Full text follows the audio: authoritative record, and the spoken version
+        # may be truncated for length.
+        TG.send_message(chat_id, reply)
+    else:
+        TG.send_message(chat_id, reply, reply_to=msg["message_id"])
 
 
 def handle_callback(cb):
@@ -791,7 +837,9 @@ def handle_update(upd):
             if msg["chat"].get("type") == "private":
                 TG.send_message(chat_id, f"⛔ Not authorized. Your user ID is {uid}.")
             return
-        if any(k in msg for k in ("document", "photo", "voice", "audio", "video")):
+        if "voice" in msg and chat_id in C.VOICE_CHATS and not msg.get("media_group_id"):
+            handle_voice(msg, chat_id)
+        elif any(k in msg for k in ("document", "photo", "voice", "audio", "video")):
             mgid = msg.get("media_group_id")
             if mgid:
                 _queue_album(mgid, msg, chat_id)

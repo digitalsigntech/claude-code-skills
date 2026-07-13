@@ -25,10 +25,15 @@ TIMEOUT = 1800                      # 30 min per thread, matches other headless 
 PER_RUN = 2                        # max refine runs per cron tick
 MAX_ATTEMPTS = 2                   # give up on a reply after this many failed runs
 
-VLAD = "vlad@example.com"
+# Owner identity — set via env: OWNER_EMAIL is the business address whose sent
+# replies are learned from; OWNER_DOMAIN is your company domain (internal mail is
+# never customer Q&A); OWNER_SKIP_EXTRA adds personal addresses etc. (|-separated).
+OWNER_EMAIL = os.environ.get("KB_OWNER_EMAIL", "owner@example.com")
+OWNER_DOMAIN = re.escape(os.environ.get("KB_OWNER_DOMAIN", OWNER_EMAIL.split("@")[-1]))
+_extra = os.environ.get("KB_OWNER_SKIP_EXTRA", "")
 # Replies to these are never customer Q&A (internal, personal, apprentice).
 SKIP_TO = re.compile(
-    r"@digitalsigntech\.net|vgalentovsky@gmail\.com|no-?reply|mailer-daemon", re.I)
+    "@" + OWNER_DOMAIN + "|no-?reply|mailer-daemon" + (("|" + _extra) if _extra else ""), re.I)
 
 
 def now():
@@ -52,7 +57,7 @@ def outbound_rows(c):
     rows = c.execute(
         """SELECT id, thread_id, internal_date, to_addr, subject FROM emails
            WHERE from_addr LIKE ? AND labels LIKE '%SENT%'
-           ORDER BY internal_date""", (f"%{VLAD}%",)).fetchall()
+           ORDER BY internal_date""", (f"%{OWNER_EMAIL}%",)).fetchall()
     return [r for r in rows if r["to_addr"] and not SKIP_TO.search(r["to_addr"])]
 
 
@@ -63,7 +68,7 @@ def has_inbound_question(c, thread_id, before_ts):
            WHERE thread_id=? AND internal_date < ?""", (thread_id, before_ts)).fetchall()
     for r in rows:
         frm = (r["from_addr"] or "").lower()
-        if "example.com" in frm:
+        if re.search("@" + OWNER_DOMAIN, frm):
             continue
         if "?" in (r["body_new"] or ""):
             return True

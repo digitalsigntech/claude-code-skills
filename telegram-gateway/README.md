@@ -66,6 +66,18 @@ NAT with no public IP or inbound ports.
   one sub-second via the file reflex. Notes can carry a `label` (description)
   and content `keywords` — both searchable via `search()`. See `src/personal_notes.py` (set `VLAD` to
   your owner user id).
+- **Voice conversation mode (optional, fully on-box).** In chats listed in
+  `VOICE_CHATS`, a voice note becomes a spoken turn: ogg/opus → ffmpeg 16k wav →
+  whisper.cpp (language autodetected; a Vulkan build runs the model on an
+  iGPU/dGPU, a CPU build works too) → the normal Claude turn (prompted for short,
+  speakable prose in the speaker's language) → Piper TTS (voice picked per
+  detected language) → an opus voice note back, followed by the full reply text.
+  The transcription is echoed back (`🎙️ …`) so a bad hearing is immediately
+  visible, and any audio-side failure degrades to a plain text reply — never a
+  lost turn. Audio never leaves the machine; only the transcribed text goes to
+  the LLM. In all other chats voice notes keep the save-then-ask file handling.
+  See `src/voice_mode.py`; configure `WHISPER_BIN`/`WHISPER_MODEL`/`PIPER`/
+  `PIPER_VOICES` in `tgconf.py`.
 - **Albums.** Photos/files sent together as one Telegram album (which arrive as
   separate messages sharing a `media_group_id`, only one carrying the caption) are
   buffered until the album settles, then handled as a group with the shared caption.
@@ -87,6 +99,7 @@ NAT with no public IP or inbound ports.
 | `src/doc_reflex.py` | Optional ~1s document delivery: keyword match against a curated registry → `sendDocument` via cached `file_id`s. |
 | `src/file_reflex.py` | Optional generic file reflex: "show/fetch/get/give me <thing>" resolved against the CLIP image index and a cached workspace walk; sends only a full-token-coverage match (docs via `sendDocument`, images via the photo path), everything else falls through to the LLM turn. |
 | `src/personal_notes.py` | Optional owner-private note store: no-caption DM files auto-saved; strict delivery gate (owner DM / bot+owner-only group, fails closed). |
+| `src/voice_mode.py` | Optional on-box voice conversation: whisper.cpp STT (auto language) + Piper TTS; used by `handle_voice()` for chats in `VOICE_CHATS`. |
 | `doc_registry.example.json` | Template for `doc_registry.json` (curated docs the doc reflex may send). |
 | `src/tg_whoami.py` | Onboarding helper — prints the user IDs of recent senders so you can fill the allowlist. |
 | `src/start_telegram.sh` | Single-instance launcher (flock + network wait). Used by `@reboot` and watchdog crons. |

@@ -123,6 +123,21 @@ ALWAYS_CLAUDE_CHATS = set()   # add your group chat ids, e.g. {-100123456789}
 # the owner 2026-07-07: "Claude the company Private" group. NOTE: until the DGX Spark lands,
 # Nemotron itself runs on OpenRouter (cloud inference) — the owner accepted this.
 ALWAYS_NEMOTRON_CHATS = set()  # add your group chat ids
+# Voice conversation mode (2026-07-13): a voice note in one of these chats is
+# transcribed on-box (whisper.cpp, language autodetected), answered with a normal
+# Claude turn, and the reply comes back as a Piper-synthesized voice note plus the
+# full text. Other chats keep the existing file handling (e.g. a caption-less voice
+# note in the owner's DM stays a personal note). Requires whisper.cpp built locally
+# (a Vulkan build uses the iGPU; a plain CPU build works too) and Piper TTS in a
+# venv with one .onnx voice per language.
+VOICE_CHATS = set()            # add your voice-conversation group chat ids
+WHISPER_BIN = os.path.expanduser("~/whisper.cpp/build-vulkan/bin/whisper-cli")
+WHISPER_MODEL = os.path.expanduser("~/whisper.cpp/models/ggml-large-v3-turbo-q5_0.bin")
+PIPER = os.path.join(APP_ROOT, "voice", "venv", "bin", "piper")
+PIPER_VOICES = {
+    "en": os.path.join(APP_ROOT, "voice", "voices", "en_US-lessac-medium.onnx"),
+    "ru": os.path.join(APP_ROOT, "voice", "voices", "ru_RU-irina-medium.onnx"),
+}
 DOC_EXTS = (".pdf", ".csv", ".tsv", ".txt", ".md")
 IMG_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".bmp")
 VID_EXTS = (".mp4", ".mov", ".webm", ".m4v")
