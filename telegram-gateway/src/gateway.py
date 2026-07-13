@@ -19,6 +19,7 @@ import doc_reflex
 import file_reflex
 import personal_notes
 import voice_mode
+import qa_cache
 
 # Searchable chat archive (every message + reply -> SQLite/FTS5). Best-effort: if the
 # module can't load, archiving silently no-ops and the gateway runs unaffected.
@@ -343,12 +344,19 @@ def handle_voice(msg, chat_id):
     log(f"voice in chat={chat_id} lang={lang} {text[:80]!r}")
     # Echo what was heard so a bad transcription is immediately visible.
     TG.send_message(chat_id, f"🎙️ _{text}_", reply_to=msg["message_id"])
-    prompt = (f"[Voice conversation: the user SPOKE this as a Telegram voice note and your "
-              f"reply will be read aloud by TTS. Keep it short and conversational — plain "
-              f"prose only: no markdown, no lists, no tables, no code. Reply in the language "
-              f"they spoke (detected: {lang}).]\n\n{text}")
-    with Typing(chat_id):
-        reply = bridge.ask(chat_id, prompt, sender=_sender_full(msg))
+    # Q&A cache: a repeat spoken question is answered instantly (still as a voice note).
+    reply = qa_cache.lookup(text) if qa_cache.cacheable(text) else None
+    if reply:
+        log(f"qa-cache hit (voice) chat={chat_id} {text[:60]!r}")
+    else:
+        prompt = (f"[Voice conversation: the user SPOKE this as a Telegram voice note and your "
+                  f"reply will be read aloud by TTS. Keep it short and conversational — plain "
+                  f"prose only: no markdown, no lists, no tables, no code. Reply in the language "
+                  f"they spoke (detected: {lang}).]\n\n{text}")
+        with Typing(chat_id):
+            reply = bridge.ask(chat_id, prompt, sender=_sender_full(msg))
+        if qa_cache.cacheable(text):
+            qa_cache.store(text, reply, source="voice-note")
     _arc_out(chat_id, reply, kind="voice")
     ogg = None
     try:
@@ -623,6 +631,20 @@ def handle_text(msg, chat_id, text):
                 f"files={len(files)}")
             return
 
+    # Q&A cache (2026-07-13): a question semantically equal to one already answered by
+    # a Claude turn is served from the local cache in ~0.1s — no LLM at all. Placed
+    # AFTER the privacy gate so private-intent queries never reach it. Only standalone
+    # question-shaped messages qualify (see qa_cache.cacheable); everything else falls
+    # through untouched.
+    user_q = text          # pristine question for the cache (reflexes may augment text)
+    if not command.startswith("/") and qa_cache.cacheable(text):
+        cached = qa_cache.lookup(text)
+        if cached:
+            TG.send_message(chat_id, "⚡ " + cached, reply_to=msg["message_id"])
+            _arc_out(chat_id, cached)
+            log(f"qa-cache hit chat={chat_id} {text[:60]!r}")
+            return
+
     # Tier-1 reflex: if the KB has a confident Q&A answer, send it INSTANTLY (~0.15s,
     # no LLM), then verify in the background and only follow up if it was wrong. Low
     # confidence -> None -> straight to the full LLM path below (unchanged).
@@ -646,6 +668,8 @@ def handle_text(msg, chat_id, text):
             reply = bridge.ask(chat_id, text, sender=_sender_full(msg))
         TG.send_message(chat_id, reply, reply_to=msg["message_id"])
         _arc_out(chat_id, reply)
+        if qa_cache.cacheable(user_q):
+            qa_cache.store(user_q, reply, source="text")
         return
 
     # Stream the reply: send a placeholder immediately, then edit it live as Claude's
@@ -669,6 +693,8 @@ def handle_text(msg, chat_id, text):
         TG.deliver_final(chat_id, mid, reply)
     else:
         TG.send_message(chat_id, reply, reply_to=msg["message_id"])
+    if qa_cache.cacheable(user_q):
+        qa_cache.store(user_q, reply, source="text")
 
 
 # ---- injected emails (from the claude@ IDLE watcher) ------------------------

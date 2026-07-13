@@ -100,6 +100,7 @@ NAT with no public IP or inbound ports.
 | `src/file_reflex.py` | Optional generic file reflex: "show/fetch/get/give me <thing>" resolved against the CLIP image index and a cached workspace walk; sends only a full-token-coverage match (docs via `sendDocument`, images via the photo path), everything else falls through to the LLM turn. |
 | `src/personal_notes.py` | Optional owner-private note store: no-caption DM files auto-saved; strict delivery gate (owner DM / bot+owner-only group, fails closed). |
 | `src/voice_mode.py` | Optional on-box voice conversation: whisper.cpp STT (auto language) + Piper TTS; used by `handle_voice()` for chats in `VOICE_CHATS`. |
+| `src/qa_cache.py` | Semantic Q&A answer cache: repeat questions (even reworded) answered in ~0.1s from a local-embedding cache instead of an LLM turn; guards for product codes, TTL, and conversational fragments. |
 | `doc_registry.example.json` | Template for `doc_registry.json` (curated docs the doc reflex may send). |
 | `src/tg_whoami.py` | Onboarding helper — prints the user IDs of recent senders so you can fill the allowlist. |
 | `src/start_telegram.sh` | Single-instance launcher (flock + network wait). Used by `@reboot` and watchdog crons. |
