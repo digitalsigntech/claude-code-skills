@@ -62,7 +62,12 @@ def outbound_rows(c):
 
 
 def has_inbound_question(c, thread_id, before_ts):
-    """True if the thread has an earlier inbound (non-the company) message that asks something."""
+    """True if the thread has an earlier substantive inbound (non-the company) message.
+
+    Deliberately loose: customers often ask without a question mark ("So best
+    lowest cost option is ideal" — Ashton Potter 2026-07-13, which the old
+    '?'-only gate missed entirely). refine_prompt.md step 2 does the real
+    is-there-a-question triage and skips cheaply."""
     rows = c.execute(
         """SELECT from_addr, body_new FROM emails
            WHERE thread_id=? AND internal_date < ?""", (thread_id, before_ts)).fetchall()
@@ -70,7 +75,7 @@ def has_inbound_question(c, thread_id, before_ts):
         frm = (r["from_addr"] or "").lower()
         if re.search("@" + OWNER_DOMAIN, frm):
             continue
-        if "?" in (r["body_new"] or ""):
+        if len((r["body_new"] or "").strip()) >= 20:
             return True
     return False
 

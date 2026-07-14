@@ -2,9 +2,9 @@
 
 Every reply you send to a customer question is a free training example: it is the
 ground-truth answer to a real question. This skill closes the loop — it tests
-whether your knowledge base ALONE could have produced your answer, and where it
-couldn't, it fixes the KB. Over time the KB converges toward answering the way
-you actually answer.
+whether your knowledge base ALONE could have produced your answer, in both facts
+and writing style, and where it couldn't, it fixes the KB / style profile. Over
+time the KB converges toward answering the way you actually answer.
 
 ## How it works
 
@@ -14,13 +14,16 @@ a question. For each one it launches a headless Claude session with
 `src/refine_prompt.md`, which runs this loop:
 
 1. **Blind attempt** — load the thread but hold back the target reply's body (it's
-   the answer key); answer the customer's question(s) from the KB only.
+   the answer key); draft the full reply as the owner would send it — facts from
+   the KB only, voice from the owner's writing-style profile.
 2. **Diff** — read the actual reply; classify every fact as MATCH / MISSING /
-   CONFLICT / EXTRA.
+   CONFLICT / EXTRA, and note style deltas (greeting, sign-off, length,
+   structure, tone, framing).
 3. **Patch** — append missing facts as Q&A pairs; consolidate conflicting KB
    entries into one canonical answer (the sent reply wins; superseded values are
-   kept as dated notes, never silently erased).
-4. **Re-test** — answer again from the patched KB; repeat until converged
+   kept as dated notes, never silently erased). Merge systematic style deltas
+   into the learned style profile (one email is a data point, not a rule).
+4. **Re-test** — re-draft from the patched KB + profile; repeat until converged
    (max 3 attempts).
 5. **Report** — one `REFINE-RESULT:` line in the log; a short Telegram note to the
    owner ONLY when KB files were actually changed.
