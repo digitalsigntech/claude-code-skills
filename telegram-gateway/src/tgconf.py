@@ -134,9 +134,13 @@ VOICE_CHATS = set()            # add your voice-conversation group chat ids
 WHISPER_BIN = os.path.expanduser("~/whisper.cpp/build-vulkan/bin/whisper-cli")
 WHISPER_MODEL = os.path.expanduser("~/whisper.cpp/models/ggml-large-v3-turbo-q5_0.bin")
 PIPER = os.path.join(APP_ROOT, "voice", "venv", "bin", "piper")
-PIPER_VOICES = {
+PIPER_VOICES = {   # one .onnx per language, keyed by ISO-639-1 (whisper's detection)
     "en": os.path.join(APP_ROOT, "voice", "voices", "en_US-lessac-medium.onnx"),
     "ru": os.path.join(APP_ROOT, "voice", "voices", "ru_RU-irina-medium.onnx"),
+    "es": os.path.join(APP_ROOT, "voice", "voices", "es_ES-davefx-medium.onnx"),
+    "de": os.path.join(APP_ROOT, "voice", "voices", "de_DE-thorsten-medium.onnx"),
+    "fr": os.path.join(APP_ROOT, "voice", "voices", "fr_FR-siwis-medium.onnx"),
+    # languages without an installed voice fall back to "en" in voice_mode.synthesize()
 }
 DOC_EXTS = (".pdf", ".csv", ".tsv", ".txt", ".md")
 IMG_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".bmp")
