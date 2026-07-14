@@ -2,10 +2,10 @@
 """KB self-refinement watcher — cron half of the kb-refine loop.
 
 Scans the local email archive (crm/contacts.db:emails) for NEW sent replies from
-Vlad to external customers, and for each one launches a headless Claude run of
+the owner to external customers, and for each one launches a headless Claude run of
 refine_prompt.md: answer the customer's question from the KB alone, diff against
-Vlad's actual reply, patch the KB where it was wrong or silent, repeat until the
-KB-only answer converges (Vlad, 2026-07-12: run this on every reply he sends to a
+the owner's actual reply, patch the KB where it was wrong or silent, repeat until the
+KB-only answer converges (the owner, 2026-07-12: run this on every reply he sends to a
 customer question).
 
 State: state.json {"refined": {msg_id: status}, ...}. First run seeds every
@@ -62,7 +62,12 @@ def outbound_rows(c):
 
 
 def has_inbound_question(c, thread_id, before_ts):
-    """True if the thread has an earlier inbound (non-DST) message that asks something."""
+    """True if the thread has an earlier substantive inbound (non-DST) message.
+
+    Deliberately loose: customers often ask without a question mark ("So best
+    lowest cost option is ideal" — Ashton Potter 2026-07-13, which the old
+    '?'-only gate missed entirely). refine_prompt.md step 2 does the real
+    is-there-a-question triage and skips cheaply."""
     rows = c.execute(
         """SELECT from_addr, body_new FROM emails
            WHERE thread_id=? AND internal_date < ?""", (thread_id, before_ts)).fetchall()
@@ -70,7 +75,7 @@ def has_inbound_question(c, thread_id, before_ts):
         frm = (r["from_addr"] or "").lower()
         if re.search("@" + OWNER_DOMAIN, frm):
             continue
-        if "?" in (r["body_new"] or ""):
+        if len((r["body_new"] or "").strip()) >= 20:
             return True
     return False
 

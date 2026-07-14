@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # KB self-refinement loop — cron entry point. Single instance via flock.
-# Watches for new sent replies from Vlad to customer questions and runs the
+# Watches for new sent replies from the owner to customer questions and runs the
 # refine loop (headless Claude) on each; see refine_prompt.md and README.md.
 set -u
 DIR="/home/mercury/DST/email/kb-refine"
