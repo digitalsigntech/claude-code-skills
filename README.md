@@ -38,6 +38,7 @@ See each skill's own `README.md` for configuration.
 | Skill | What it does | Location |
 |-------|--------------|----------|
 | **telegram-gateway** | Chat with a headless Claude Code agent over Telegram — real Claude turn per message, one persistent conversation per chat/group, file ingest/analyze/hold, allowlist-locked. Long-polling (works behind NAT). | [`telegram-gateway/`](telegram-gateway/) |
+| **realtime-voice** | Live spoken conversation from a phone browser: OpenAI gpt-realtime as mouth/ears (WebRTC direct, ~300 ms), Claude as the brain via tool calls — plus inline media search, an in-page camera Claude can see through, and voice-command chat clearing. No public IP needed (outbound tunnel). | [`realtime-voice/`](realtime-voice/) |
 | **grammar-local** | On-box grammar/style fixer that never sends text to the cloud — slash command + CLI + a prompt-submit hook. Bring-your-own local model endpoint. | [`grammar-local/`](grammar-local/) |
 
 ### Local AI / knowledge
