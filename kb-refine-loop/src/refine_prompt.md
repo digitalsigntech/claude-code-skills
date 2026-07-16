@@ -19,7 +19,10 @@ archive and the id of the owner's sent reply to test against.
 2. **Extract the customer's question(s)** that REPLY_ID is answering (the latest
    inbound message before it). If there is no factual/technical/product question —
    pure scheduling, thanks, shipping notice, price-list request, etc. — print
-   `REFINE-RESULT: skip (no factual question)` and stop.
+   `REFINE-RESULT: skip (no factual question)` and stop. Also check REPLY_ID's
+   to/cc (metadata only, not the body): if it is NOT addressed to the customer
+   who asked — e.g. a forward to a colleague or third party — it is not a reply;
+   print `REFINE-RESULT: skip (not addressed to the customer)` and stop.
 
 3. **Attempt N (start N=1): draft the full reply from the KB only, as the owner.**
    Facts: use `~/DST/knowledge-base/` (product-qa.md, manuals,
