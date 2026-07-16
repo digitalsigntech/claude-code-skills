@@ -26,7 +26,9 @@ the gap closes.
    - Draft was sent — possibly edited first (a draft sent from the Gmail UI keeps its
      draft id; the message just gains the `SENT` label) — **or** deleted and replaced
      by the owner's own reply in the thread → **learn** from the difference
-     (extract KB facts + refine the instructions below).
+     (extract KB facts + refine the instructions below). A sent message counts
+     as a reply ONLY if the customer (or their corporate domain) is in To/Cc —
+     a forward to a colleague is never learned from.
    - Draft gone **and** no reply sent → they deleted it → **do nothing**.
 
 ## Run
