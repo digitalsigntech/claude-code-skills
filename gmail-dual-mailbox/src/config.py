@@ -19,6 +19,11 @@ ACCOUNTS = {
 }
 DEFAULT_ACCOUNT = "primary"   # bare `mail` / cron use this
 
+# Accounts where sending is forbidden at the tool level (drafts only).
+# Add an account key here to guarantee the tool can only ever create drafts
+# for it — useful when a mailbox owner grants access on a draft-only basis.
+NO_SEND_ACCOUNTS = set()
+
 
 def token_path(account=DEFAULT_ACCOUNT):
     # keep the primary account at the plain token.json path; others get a suffix
