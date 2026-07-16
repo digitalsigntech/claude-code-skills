@@ -538,12 +538,21 @@ MERGE_SYS = (
     "markdown bullet points (each line starts with '- '), at most 25 bullets, no preamble.")
 
 
-def find_sent_reply(s, thread_id, inbound_id):
-    """Return the body of a reply the owner sent in this thread (newest), or None."""
+FREEMAIL = {"gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "aol.com", "icloud.com"}
+
+
+def find_sent_reply(s, thread_id, inbound_id, customer=None):
+    """Return the body of a reply the owner sent TO THE CUSTOMER in this thread (newest), or None.
+
+    A sent message counts only if the customer's address (or, for corporate
+    domains, someone at the same company) is among its recipients — a forward
+    to a colleague is NOT a reply and must not be learned from."""
     try:
         t = s.users().threads().get(userId="me", id=thread_id, format="full").execute()
     except HttpError:
         return None
+    cust = (customer or "").lower()
+    cust_dom = cust.split("@")[-1] if "@" in cust else ""
     best = None
     for m in t.get("messages", []):
         if m["id"] == inbound_id:
@@ -556,6 +565,11 @@ def find_sent_reply(s, thread_id, inbound_id):
             continue
         if "DRAFT" in labels:                       # unsent draft, ignore
             continue
+        if cust:
+            rcpts = f"{hdr(m, 'To')},{hdr(m, 'Cc')}".lower()
+            dom_ok = cust_dom and cust_dom not in FREEMAIL and f"@{cust_dom}" in rcpts
+            if cust not in rcpts and not dom_ok:
+                continue                            # sent, but not to the customer
         # newest sent reply from the owner wins
         idate = int(m.get("internalDate", "0"))
         if best is None or idate > best[0]:
@@ -609,7 +623,7 @@ def phase_b(s, con):
                 if getattr(e, "resp", None) is None or e.resp.status != 404:
                     log(f"draft.get error for {draft_id}: {e}"); continue
         # 2) draft gone. Did the owner send a reply in this thread?
-        sent = find_sent_reply(s, thread_id, mid)
+        sent = find_sent_reply(s, thread_id, mid, customer=sender)
         now = datetime.now(timezone.utc).isoformat()
         if not sent:
             con.execute("UPDATE drafts SET status='abandoned', resolved_at=? WHERE inbound_msg_id=?",
