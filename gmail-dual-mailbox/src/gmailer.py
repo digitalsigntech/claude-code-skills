@@ -116,6 +116,11 @@ def _mk_message(a, s):
 
 
 def cmd_send(a, s):
+    import os
+    from config import NO_SEND_ACCOUNTS, DEFAULT_ACCOUNT
+    account = os.environ.get("MAIL_ACCOUNT", DEFAULT_ACCOUNT)
+    if account in NO_SEND_ACCOUNTS:
+        sys.exit(f"REFUSED: sending as '{account}' is forbidden (drafts only). Use `draft` instead.")
     res = s.users().messages().send(userId="me", body=_mk_message(a, s)).execute()
     print(f"Sent  id={res['id']}  thread={res.get('threadId')}")
 

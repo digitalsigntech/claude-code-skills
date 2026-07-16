@@ -12,6 +12,11 @@ policy the tool **saves drafts by default** and only sends when explicitly told.
 - Works against two independent mailboxes (`primary` and `secondary`), each with
   its own OAuth token file. No passwords are stored; access is revocable from the
   Google account/admin console at any time.
+- **Draft-only accounts**: add an account key to `NO_SEND_ACCOUNTS` in
+  `src/config.py` and the CLI will refuse `send` for it at the tool level
+  (only `draft` works). Use this when a mailbox owner grants access on the
+  condition that nothing is ever sent on their behalf — the promise is then
+  enforced in code, not just by convention.
 
 ## How it works
 
