@@ -105,6 +105,31 @@ def set_chat_meta(chat_id, title, ctype):
         _save()
 
 
+# Voice-app group link: while the realtime voice app is "sneaked into" a Telegram
+# group, it mirrors the spoken exchange into that chat and queues each line here so
+# the group's NEXT Claude turn (from voice or from Telegram) sees the conversation.
+# File-based (not sessions.json) because the gateway and the voice server are
+# separate processes with independently cached session dicts.
+VOICE_SPOOL = os.path.join(C.STATE_DIR, "voice_spool")
+
+
+def spool_note(chat_id, line):
+    """Queue one spoken-exchange line for this chat's next Claude turn."""
+    os.makedirs(VOICE_SPOOL, exist_ok=True)
+    with open(os.path.join(VOICE_SPOOL, str(chat_id)), "a") as f:
+        f.write(" ".join(str(line).split()) + "\n")
+
+
+def _take_notes(chat_id):
+    p = os.path.join(VOICE_SPOOL, str(chat_id))
+    try:
+        notes = open(p).read().strip()
+        os.unlink(p)
+        return notes
+    except OSError:
+        return ""
+
+
 def _chat_context(chat_id, sender=None):
     ent = _load().get(str(chat_id)) or {}
     title, ctype = ent.get("title"), ent.get("ctype")
@@ -126,6 +151,11 @@ def _augment(chat_id, prompt, sender=None):
         listed = "\n".join(f"  - {p}" for p in held)
         parts.append(f"[Files the user sent in this chat are saved on disk:\n{listed}\n"
                      f"Read them if relevant to the message below.]")
+    notes = _take_notes(chat_id)
+    if notes:
+        parts.append("[Live voice-app exchange mirrored into this chat since the last "
+                     "Claude turn (the user already sees these lines in Telegram):\n"
+                     + notes + "]")
     if parts:
         return "\n".join(parts) + f"\n\n{prompt}"
     return prompt
