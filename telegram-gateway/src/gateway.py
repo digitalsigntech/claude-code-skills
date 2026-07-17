@@ -35,6 +35,12 @@ def _who(msg):
     return f.get("username") or f.get("first_name") or str(f.get("id") or "user")
 
 
+def _sender_first(msg):
+    """Sender's first name for the on-box private agent."""
+    f = msg.get("from", {}) or {}
+    return f.get("first_name") or f.get("username") or "the owner"
+
+
 def _sender_full(msg):
     """Full sender identity for Claude's context line: 'First Last (@username, id N)'."""
     f = msg.get("from", {}) or {}
@@ -425,7 +431,7 @@ def _chat_history(chat_id, limit=20, max_chars=6000):
         return ""
 
 
-def private_turn(text, chat_id):
+def private_turn(text, chat_id, sender="the owner"):
     """Mode A private turn: answer on-box with Nemotron, giving it FULL context (recent
     chat history + KB retrieval) so it can follow the conversation like Claude would.
     Returns (answer, files) — files are {path, caption} dicts the agent queued for
@@ -433,7 +439,7 @@ def private_turn(text, chat_id):
     FAILS CLOSED: on any error we apologize locally — never fall through to the cloud."""
     try:
         r = subprocess.run([C.KB_PY, C.PRIVACY_ROUTE, text, "--json", "--answer",
-                            "--history-stdin"],
+                            "--history-stdin", "--sender", sender],
                            input=_chat_history(chat_id),
                            capture_output=True, text=True, timeout=240)
         d = json.loads(r.stdout or "{}")
@@ -600,7 +606,7 @@ def handle_text(msg, chat_id, text):
     # the cloud Claude turn. Fails closed; /cloud is the explicit escape hatch.
     if chat_id in C.ALWAYS_NEMOTRON_CHATS and not command.startswith("/"):
         with Typing(chat_id):
-            answer, files = private_turn(text, chat_id)
+            answer, files = private_turn(text, chat_id, sender=_sender_first(msg))
             reply = "🔒 Nemotron (Always-Nemotron chat):\n\n" + answer
         TG.send_message(chat_id, reply, reply_to=msg["message_id"])
         _arc_out(chat_id, reply)
@@ -621,7 +627,7 @@ def handle_text(msg, chat_id, text):
         priv, why = privacy_router.is_private(text)
         if priv:
             with Typing(chat_id):
-                answer, files = private_turn(text, chat_id)
+                answer, files = private_turn(text, chat_id, sender=_sender_first(msg))
                 reply = ("🔒 Private — answered on-box by Nemotron (not sent to the cloud):\n\n"
                          + answer)
             TG.send_message(chat_id, reply, reply_to=msg["message_id"])
