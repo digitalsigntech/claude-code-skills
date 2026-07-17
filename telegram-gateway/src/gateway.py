@@ -710,7 +710,7 @@ def _email_reply(to_addr, reply_to_id, text):
         with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as tf:
             tf.write(text); tmp = tf.name
         cmd = [EMAIL_PY, GMAILER, "send", "--to", to_addr,
-               "--reply-to", reply_to_id, "--body-file", tmp]
+               "--reply-to", reply_to_id, "--body-file", tmp, "--md"]
         # Replies to neo@ always CC the owner so they stay in the loop (2026-06-26).
         if "neo@" in to_addr.lower() and C.OWNER_EMAIL and C.OWNER_EMAIL not in to_addr.lower():
             cmd += ["--cc", C.OWNER_EMAIL]
