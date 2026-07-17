@@ -215,7 +215,10 @@ guarded so it no-ops if the underlying tool/module is missing:
   lessons (targeted-not-strict, full context, real tools not single-shot).
 - **Email → chat injection** (`inject/` queue + `email/gmailer.py`) — a mail watcher
   drops emails (body + downloaded attachments) as JSON into `inject/`; the gateway runs each as a chat turn and can
-  email the reply back in-thread.
+  email the reply back in-thread. Replies are sent with gmailer's `--md` flag
+  (markdown body → multipart/alternative HTML + plaintext fallback), so the model's
+  markdown renders as real formatting in mail clients instead of literal `**` markers
+  (owner feedback 2026-07-17).
 
 To ship a **minimal** gateway, delete the `chatdb`/`classify` imports, the
 `kb_reflex`/`_ingest` code paths and their commands, and the
