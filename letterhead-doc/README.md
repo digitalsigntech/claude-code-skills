@@ -151,3 +151,11 @@ soffice --headless --convert-to pdf letterhead-template.fodt
 - Page anchoring pins to a **page number**. For a logo on every page (letterhead
   proper), put it in the page **header** instead, or repeat the anchored frame
   per page. This template pins page 1 (typical for a single letter).
+
+## Gotcha: automatic-style font inheritance
+
+If you add your own paragraph styles to the flat ODT, give every style used by
+visible text an explicit `<style:text-properties>` (font + size). An automatic
+style that only points at another automatic style via `parent-style-name` is
+NOT resolved by LibreOffice — the text silently falls back to the default serif
+font (bit us on a date line, 2026-07-17).
