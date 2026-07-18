@@ -55,6 +55,9 @@ def conn():
         c.execute("ALTER TABLE emails ADD COLUMN body_new TEXT")
     if "thread_id" not in cols:
         c.execute("ALTER TABLE emails ADD COLUMN thread_id TEXT")
+    if "rfc_msgid" not in cols:
+        c.execute("ALTER TABLE emails ADD COLUMN rfc_msgid TEXT")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_emails_rfc ON emails(rfc_msgid)")
     # thread_id index lives here (not in SCHEMA): the column may have just been added.
     c.execute("CREATE INDEX IF NOT EXISTS idx_emails_thread ON emails(thread_id, internal_date)")
     ccols = {r[1] for r in c.execute("PRAGMA table_info(contacts)").fetchall()}
@@ -91,7 +94,7 @@ _EMAIL_COLS = [
     ("internalDate", "internal_date"), ("date", "date"), ("from", "from_addr"),
     ("to", "to_addr"), ("cc", "cc"), ("subject", "subject"), ("labels", "labels"),
     ("has_attachment", "has_attachment"), ("attachments", "attachments"),
-    ("body", "body"), ("fetched", "fetched"),
+    ("body", "body"), ("fetched", "fetched"), ("rfcMsgid", "rfc_msgid"),
 ]
 
 

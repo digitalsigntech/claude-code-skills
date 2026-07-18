@@ -105,3 +105,11 @@ All knobs are env vars (see `secrets.env.example`) or constants in `kbconf.py`:
   if you have your own sync, replicate the pattern as a post-download step in `run.sh`
   (extract → store text + FTS row keyed by email id, small per-cycle `--limit` so scanned
   PDFs can't block the cron cadence).
+
+## Multiple mailboxes
+
+List any number of accounts in `ACCOUNTS_TO_PROCESS`; per-writer style learning
+comes from the `WRITERS` map (each person gets `learned-<person>.md`). When
+mailboxes overlap (colleagues CC each other), have your downloader store the
+RFC `Message-ID` header as `rec["rfcMsgid"]` — `db.upsert_email` then keeps a
+single copy per message across mailboxes, preferring the sender's own SENT copy.

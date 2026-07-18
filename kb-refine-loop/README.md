@@ -61,3 +61,11 @@ pressure to use") and conflicts ("two QA pairs disagree") that extraction can't.
   this the hard way: a draft said 3 psi, the sent reply said 5).
 - Seed state before enabling the cron, cap runs per tick, and gate on "the
   inbound message actually contains a question" to control LLM spend.
+
+## Multiple writers
+
+Set `KB_WRITERS="alice@co.com=alice,bob@co.com=bob"` to watch every listed
+person's sent replies; each learns into their own `learned-<person>.md` style
+file while feeding one shared KB. A watch-start fence auto-seeds a newly added
+writer's pre-existing history so it is never bulk-refined. Without `KB_WRITERS`
+the loop falls back to the single `KB_OWNER_EMAIL`.
