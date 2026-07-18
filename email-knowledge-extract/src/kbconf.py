@@ -30,7 +30,7 @@ INTERNAL_ADDRESSES = {   # never stored as external contacts
     "agent@example.com", "support@example.com",
 }
 
-ACCOUNTS_TO_PROCESS = ["owner"]   # which archived mailbox(es) get KB-processed
+ACCOUNTS_TO_PROCESS = ["owner"]   # which archived mailbox(es) get KB-processed — add as many accounts as you like; cross-mailbox duplicates are dropped by RFC Message-ID (see db.upsert_email)
 LIST_SCAN   = 60          # how many recent messages to scan per mailbox per run
 BODY_CHARS  = 6000        # truncate email body fed to the model
 

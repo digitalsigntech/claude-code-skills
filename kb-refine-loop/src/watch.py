@@ -28,7 +28,13 @@ MAX_ATTEMPTS = 2                   # give up on a reply after this many failed r
 # Owner identity — set via env: OWNER_EMAIL is the business address whose sent
 # replies are learned from; OWNER_DOMAIN is your company domain (internal mail is
 # never customer Q&A); OWNER_SKIP_EXTRA adds personal addresses etc. (|-separated).
+# KB_WRITERS: comma-separated addr=styleperson pairs — every listed writer's sent
+# replies feed the refine loop, each learning into learned-<styleperson>.md.
+# Falls back to the single KB_OWNER_EMAIL for backward compatibility.
+_writers_env = os.environ.get("KB_WRITERS", "")
 OWNER_EMAIL = os.environ.get("KB_OWNER_EMAIL", "owner@example.com")
+WRITERS = (dict(p.split("=", 1) for p in _writers_env.split(",") if "=" in p)
+           or {OWNER_EMAIL: os.environ.get("KB_OWNER_STYLE", "owner")})
 OWNER_DOMAIN = re.escape(os.environ.get("KB_OWNER_DOMAIN", OWNER_EMAIL.split("@")[-1]))
 _extra = os.environ.get("KB_OWNER_SKIP_EXTRA", "")
 # Replies to these are never customer Q&A (internal, personal, apprentice).
@@ -52,13 +58,23 @@ def save_state(st):
     os.replace(tmp, STATE)
 
 
+def writer_of(row):
+    frm = (row["from_addr"] or "").lower()
+    return next((p for a, p in WRITERS.items() if a.lower() in frm),
+                next(iter(WRITERS.values())))
+
+
 def outbound_rows(c):
-    """All sent vlad->external replies, oldest first."""
-    rows = c.execute(
-        """SELECT id, thread_id, internal_date, to_addr, subject FROM emails
-           WHERE from_addr LIKE ? AND labels LIKE '%SENT%'
-           ORDER BY internal_date""", (f"%{OWNER_EMAIL}%",)).fetchall()
-    return [r for r in rows if r["to_addr"] and not SKIP_TO.search(r["to_addr"])]
+    """All sent writer->external replies (any WRITERS member), oldest first."""
+    out = []
+    for addr in WRITERS:
+        rows = c.execute(
+            """SELECT id, thread_id, internal_date, to_addr, subject, from_addr FROM emails
+               WHERE from_addr LIKE ? AND labels LIKE '%SENT%'
+               ORDER BY internal_date""", (f"%{addr}%",)).fetchall()
+        out.extend(r for r in rows if r["to_addr"] and not SKIP_TO.search(r["to_addr"]))
+    out.sort(key=lambda r: r["internal_date"])
+    return out
 
 
 def has_inbound_question(c, thread_id, before_ts):
@@ -80,8 +96,14 @@ def has_inbound_question(c, thread_id, before_ts):
     return False
 
 
-def refine(thread_id, reply_id, dry=False):
-    prompt = open(PROMPT).read() + f"\nTHREAD_ID: {thread_id}\nREPLY_ID: {reply_id}\n"
+def refine(thread_id, reply_id, dry=False, writer=None):
+    writer = writer or next(iter(WRITERS.values()))
+    prompt = (open(PROMPT).read()
+              + f"\nTHREAD_ID: {thread_id}\nREPLY_ID: {reply_id}\nWRITER: {writer}\n"
+              f"NOTE: the sent reply under test is by WRITER above. Wherever the steps "
+              f"say the owner's name, read the writer named on the WRITER line; use "
+              f"the style profiles {writer}.md + learned-{writer}.md for style drafting "
+              f"and merge style deltas into learned-{writer}.md.\n")
     if dry:
         print(f"{now()} DRY would refine thread={thread_id} reply={reply_id}")
         return True
@@ -110,6 +132,14 @@ def main():
     c = sqlite3.connect(DB, timeout=60)
     c.row_factory = sqlite3.Row
     st = load_state()
+    # Watch-start fence: when a NEW writer's mailbox is added, their whole sent
+    # history appears as unseen ids at once — never bulk-refine it. Anything
+    # older than the fence is auto-seeded; only replies after it get refine runs.
+    ws = st.get("watch_start")
+    if ws is None:
+        ws = int(datetime.datetime.now().timestamp() * 1000)
+        st["watch_start"] = ws
+        save_state(st)
     rows = outbound_rows(c)
 
     if not st["refined"]:                       # first run: seed history, process nothing
@@ -125,12 +155,15 @@ def main():
         prev = st["refined"].get(r["id"])
         if prev and (prev in ("seeded", "ok", "skip") or prev.startswith("gaveup")):
             continue
+        if prev is None and r["internal_date"] < ws:
+            st["refined"][r["id"]] = "seeded"   # pre-fence history of a newly added writer
+            continue
         attempts = int(prev.split(":")[1]) if prev and prev.startswith("fail") else 0
         if not r["thread_id"] or not has_inbound_question(c, r["thread_id"], r["internal_date"]):
             st["refined"][r["id"]] = "skip"     # not a reply to a question
             continue
         try:
-            ok = refine(r["thread_id"], r["id"], dry=a.dry)
+            ok = refine(r["thread_id"], r["id"], dry=a.dry, writer=writer_of(r))
         except subprocess.TimeoutExpired:
             ok = False
             print(f"{now()} refine TIMEOUT thread={r['thread_id']}")
