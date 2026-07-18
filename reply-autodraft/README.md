@@ -10,6 +10,8 @@ every draft lands in Gmail *Drafts* for the owner to review, edit, and send.
 An optional **privacy layer** masks customer PII to opaque tokens before any text
 reaches the cloud LLM, and routes anything too sensitive to a local model instead.
 
+If `DST_CRM_DB` points at a contacts SQLite DB, the drafter also looks up each sender's name/company there — inbound mail often has no signature, and the greeting name has to come from the CRM. The looked-up name is registered with the masker so it still reaches the cloud model only as a `[[PERSON_N]]` token.
+
 ---
 
 ## What it does

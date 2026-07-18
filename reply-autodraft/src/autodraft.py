@@ -62,6 +62,7 @@ INTERNAL = {OWNER, CC_TEAMMATE,
             f"assistant@{INTERNAL_DOMAIN}", f"support@{INTERNAL_DOMAIN}"}
 
 STATE_DB = os.path.join(HERE, "state.db")         # created empty on first run
+CRM_DB = os.environ.get("DST_CRM_DB", "")         # optional contacts.db for sender names
 SKILL_MD = os.path.join(HERE, "SKILL.md")         # holds the learned-instructions block
 LEARN_KB = os.path.join(PROJECT_ROOT, "knowledge-base", "from-emails", "reply-learnings.md")
 PRODUCTS_DIR = os.path.join(PROJECT_ROOT, "knowledge-base", "products")
@@ -428,6 +429,24 @@ def make_draft(s, orig_msg, to, cc, orig_subject, body, attach=None):
     return res["id"], res["message"]["id"]
 
 
+def crm_contact(sender):
+    """Sender's name/company from a CRM contacts.db (optional). Inbound mail often
+    carries no name at all (no signature, bare From address) — the greeting name
+    must come from the CRM then."""
+    if not CRM_DB or not os.path.exists(CRM_DB):
+        return None, None
+    try:
+        c = sqlite3.connect(f"file:{CRM_DB}?mode=ro", uri=True)
+        row = c.execute("SELECT name, company FROM contacts WHERE email=?",
+                        (sender,)).fetchone()
+        c.close()
+        if row and (row[0] or "").strip():
+            return row[0].strip(), (row[1] or "").strip()
+    except Exception as e:
+        log(f"crm lookup failed for {sender!r}: {e}")
+    return None, None
+
+
 def phase_a(s, con):
     res = s.users().messages().list(userId="me", labelIds=["INBOX"],
                                     q=f"is:unread {SCAN_WINDOW}", maxResults=40).execute()
@@ -451,11 +470,24 @@ def phase_a(s, con):
                          "skipped", now, now)); con.commit(); continue
 
         ctx_raw = (f"From: {frm}\nTo: {to}\nCc: {cc}\nSubject: {subject}\n\n{body}")
+        crm_name, crm_company = crm_contact(sender)
+        if crm_name:
+            first = crm_name.split()[0]
+            ctx_raw += (f"\n\n[CRM contacts database: this sender is {crm_name}"
+                        + (f" of {crm_company}" if crm_company else "")
+                        + f". Greet them by first name: {first}.]")
         ctx = ctx_raw
         mk = None
         gen = cloud_llm                              # default: masked text -> cloud LLM
         if PRIVACY:
             mk = Masker().seed(body, subject, frm, to, cc)
+            if crm_name:
+                # Register the CRM name deterministically (NER never saw it):
+                # full name before first name so longest-first masking is exact.
+                mk.register("PERSON", crm_name)
+                mk.register("PERSON", first)
+                if crm_company:
+                    mk.register("ORG", crm_company)
             if not mk.ner_ok:                        # NER down -> whole thing local
                 gen = local_chat
                 log(f"privacy: NER unavailable for {sender!r} — routing to local model")
