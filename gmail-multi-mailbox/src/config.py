@@ -1,7 +1,7 @@
 import os
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-CREDENTIALS = os.path.join(BASE, "credentials.json")   # OAuth client (shared by both accounts)
+CREDENTIALS = os.path.join(BASE, "credentials.json")   # OAuth client (shared by all accounts)
 
 # Gmail modify scope: read / search / send / draft / labels (everything except
 # permanent delete). If you also need permanent-delete or raw IMAP/IDLE push,
@@ -12,10 +12,12 @@ SCOPES = [
 OAUTH_PORT = 18190
 
 # Connected mailboxes -> address. Each gets its own token file.
-# Rename these keys/addresses to your two real mailboxes.
+# Rename these keys/addresses to your real mailboxes — add as many as you need;
+# run `python auth.py <key>` once per account to store its token.
 ACCOUNTS = {
     "primary":   "primary@example.com",
     "secondary": "secondary@example.com",
+    # "assistant": "assistant@example.com",
 }
 DEFAULT_ACCOUNT = "primary"   # bare `mail` / cron use this
 

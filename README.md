@@ -52,7 +52,7 @@ See each skill's own `README.md` for configuration.
 ### Email / CRM
 | Skill | What it does | Location |
 |-------|--------------|----------|
-| **gmail-dual-mailbox** | Programmatic access to two Gmail mailboxes (profile/list/read/thread/send/draft) with OAuth setup. Drafts by default; sends only when told. | [`gmail-dual-mailbox/`](gmail-dual-mailbox/) |
+| **gmail-multi-mailbox** | Programmatic access to any number of Gmail mailboxes (profile/list/read/thread/send/draft) with OAuth setup. Drafts by default; sends only when told; per-account draft-only enforcement. | [`gmail-multi-mailbox/`](gmail-multi-mailbox/) |
 | **email-idle-watcher** | Event-driven IMAP IDLE push — new mail seen in seconds, enqueued as JSON jobs; flock launcher + watchdog. | [`email-idle-watcher/`](email-idle-watcher/) |
 | **email-knowledge-extract** | Cron pipeline that extracts durable facts + contacts from email into a KB/CRM using an LLM, with rolling per-contact summaries and citations. | [`email-knowledge-extract/`](email-knowledge-extract/) |
 | **kb-refine-loop** | Self-improving KB: for every reply the owner sends to a customer question, a headless agent answers the question from the KB alone, diffs against the real reply, and patches gaps/conflicts until the KB converges. | [`kb-refine-loop/`](kb-refine-loop/) |
@@ -75,4 +75,4 @@ See each skill's own `README.md` for configuration.
 | **headless-chrome-scrape** | Read JavaScript-rendered pages a plain fetch can't — render the DOM with headless Chrome, then parse. Retry-with-growing-budget helper included. | [`headless-chrome-scrape/`](headless-chrome-scrape/) |
 | **letterhead-doc** | Guide + blank template for pinning a logo to a page corner (ODF/OOXML) so letterhead doesn't drift across viewers. | [`letterhead-doc/`](letterhead-doc/) |
 
-_Each skill folder has its own `README.md` with what it does and how to install it. Several email/report skills share the Google OAuth setup from **gmail-dual-mailbox**; local-AI skills expect a bring-your-own OpenAI-compatible model endpoint._
+_Each skill folder has its own `README.md` with what it does and how to install it. Several email/report skills share the Google OAuth setup from **gmail-multi-mailbox**; local-AI skills expect a bring-your-own OpenAI-compatible model endpoint._

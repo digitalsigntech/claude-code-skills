@@ -32,7 +32,7 @@ the ones that do. If nothing is pending, it stays quiet.
 
 - **Python 3** with `requests` and the Google API client
   (`pip install requests google-api-python-client google-auth google-auth-oauthlib`).
-- **The `gmail-dual-mailbox` skill** — this tool imports `gmailer` (Gmail read/search/send
+- **The `gmail-multi-mailbox` skill** — this tool imports `gmailer` (Gmail read/search/send
   helpers) and `config.token_path` (per-account OAuth tokens) from it. Place this tool's
   `followups.py` in the same directory as that skill's `gmailer.py` / `config.py` /
   `auth.py`, or add their directory to `PYTHONPATH`. That skill is where you set up the
@@ -43,7 +43,7 @@ the ones that do. If nothing is pending, it stays quiet.
 
 ## Install / setup
 
-1. Set up the **`gmail-dual-mailbox`** skill first and confirm you can list/send mail for
+1. Set up the **`gmail-multi-mailbox`** skill first and confirm you can list/send mail for
    your accounts. Note the account **keys** in its `config.ACCOUNTS` (e.g. `primary`,
    `secondary`).
 2. Drop `src/followups.py` and `src/followups_run.sh` next to that skill's `gmailer.py` /
@@ -81,7 +81,7 @@ senders to skip — add your own), and `CLASSIFY_SYS` (the triage prompt).
 ## Caveats
 
 - **Bring your own credentials.** No OAuth tokens, `credentials.json`, or mailboxes ship
-  here — they live in the `gmail-dual-mailbox` skill. This tool only reads/sends through
+  here — they live in the `gmail-multi-mailbox` skill. This tool only reads/sends through
   that layer.
 - **Swappable model backend.** The triage call is a plain OpenAI-compatible request; point
   it wherever you like. Quality of the digest depends on the model — tune `CLASSIFY_SYS`
