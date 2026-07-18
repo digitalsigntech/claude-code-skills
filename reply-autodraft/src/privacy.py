@@ -89,6 +89,13 @@ class Masker:
                 self._assign(kind, value)
         return self
 
+    def register(self, kind, value):
+        """Explicitly register a known entity (e.g. the sender's name from a
+        CRM) so it is masked even though NER never saw it in the email text."""
+        if value and value.strip():
+            self._assign(kind, value)
+        return self
+
     def mask(self, text):
         if not text:
             return text
