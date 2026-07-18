@@ -9,7 +9,7 @@ ordering request). If any are pending, a digest email is sent to the owner.
 Designed to run once a day from cron (default 08:00 — see the run script / README).
 
 Dependencies (documented, NOT bundled here):
-  * gmailer + config.token_path  -> provided by the `gmail-dual-mailbox` skill
+  * gmailer + config.token_path  -> provided by the `gmail-multi-mailbox` skill
     (the Gmail read/search/send layer + per-account token handling).
   * An OpenAI-compatible chat endpoint for the YES/NO triage (see classify() below).
     The backend is swappable — point LLM_URL/LLM_MODEL at any provider you like.
@@ -23,7 +23,7 @@ import requests
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-# gmailer.py and config.py come from the `gmail-dual-mailbox` skill. Place them next
+# gmailer.py and config.py come from the `gmail-multi-mailbox` skill. Place them next
 # to this file, or add their directory to PYTHONPATH.
 import gmailer
 from config import token_path

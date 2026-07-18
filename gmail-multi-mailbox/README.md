@@ -1,16 +1,18 @@
-# Gmail dual-mailbox access
+# Gmail multi-mailbox access
 
-Programmatic read / search / send / draft access to **two** Gmail mailboxes from
-one small CLI, using the Gmail API over OAuth. Each mailbox has its own saved
-token; you pick which one a command targets with an environment variable. By
+Programmatic read / search / send / draft access to **any number of** Gmail
+mailboxes from one small CLI, using the Gmail API over OAuth. Each mailbox has
+its own saved token; you pick which one a command targets with an environment
+variable. (Born as a two-mailbox tool; the account map takes as many entries as
+you need — we run it with three.) By
 policy the tool **saves drafts by default** and only sends when explicitly told.
 
 ## What it does
 
 - Read, search (full Gmail query syntax), and print single messages or whole threads.
 - Compose new mail or threaded replies, either as a **draft** (default, safe) or a **send**.
-- Works against two independent mailboxes (`primary` and `secondary`), each with
-  its own OAuth token file. No passwords are stored; access is revocable from the
+- Works against any number of independent mailboxes — every key in the
+  `ACCOUNTS` map gets its own OAuth token file. No passwords are stored; access is revocable from the
   Google account/admin console at any time.
 - **Draft-only accounts**: add an account key to `NO_SEND_ACCOUNTS` in
   `src/config.py` and the CLI will refuse `send` for it at the tool level
@@ -26,7 +28,7 @@ policy the tool **saves drafts by default** and only sends when explicitly told.
 | `src/auth.py` | One-time OAuth login per account; loads/refreshes the saved token. |
 | `src/config.py` | Scopes, OAuth port, the `ACCOUNTS` map, and token file paths. |
 | `src/mail` | Bash wrapper that runs the CLI against the **primary** mailbox. |
-| `src/mail-secondary` | Same wrapper for the **secondary** mailbox. |
+| `src/mail-secondary` | Same wrapper for the `secondary` account — copy one per extra mailbox (`MAIL_ACCOUNT=<key>` inside). |
 | `credentials.example.json` | Template for the Google OAuth Desktop client JSON. |
 
 The CLI selects a mailbox from the `MAIL_ACCOUNT` env var (default `primary`).
