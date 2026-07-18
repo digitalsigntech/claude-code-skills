@@ -133,3 +133,11 @@ refreshes only with the exact scopes it was originally granted.
 - **Attachment sending is not part of this CLI.** `send`/`draft` handle plain-text
   bodies only. A one-off attachment helper existed in the source project but was
   omitted here as private scratch code.
+
+## HTML email (`--md`)
+
+`send`/`draft` accept `--md`: the body is treated as markdown and sent as
+multipart/alternative — an HTML part (rendered via the `markdown` package,
+`pip install markdown`; graceful plain fallback if absent) plus a plaintext
+part with the markdown markers stripped. Use it for any formatted prose so
+recipients never see literal `**` markers.

@@ -6,14 +6,18 @@ Usage:
   gmailer.py list   [-q "<gmail query>"] [-n 15] [--label INBOX]
   gmailer.py read   <message_id>
   gmailer.py thread <thread_id>
-  gmailer.py send   --to a@b.com [--cc ..] [--bcc ..] --subject "..." --body "..." [--body-file f] [--reply-to <msg_id>]
-  gmailer.py draft  --to a@b.com [--cc ..] --subject "..." --body "..." [--body-file f] [--reply-to <msg_id>]
+  gmailer.py send   --to a@b.com [--cc ..] [--bcc ..] --subject "..." --body "..." [--body-file f] [--reply-to <msg_id>] [--md]
+  gmailer.py draft  --to a@b.com [--cc ..] --subject "..." --body "..." [--body-file f] [--reply-to <msg_id>] [--md]
+
+--md: treat the body as markdown and send multipart/alternative (plaintext fallback +
+HTML) — Outlook/Gmail render **bold** etc. properly instead of showing literal markers.
 
 Pick the mailbox with the MAIL_ACCOUNT env var (default: primary).
 Gmail query examples: 'is:unread', 'from:bob newer_than:7d', 'subject:invoice'.
 """
-import sys, argparse, base64
+import sys, argparse, base64, re
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from email.utils import parseaddr
 from googleapiclient.discovery import build
 from auth import get_credentials
@@ -91,9 +95,34 @@ def cmd_thread(a, s):
         print(_body_text(m.get("payload", {})).strip()[:2000])
 
 
+def _md_plain(md):
+    """Plaintext fallback for a markdown body: strip the markers that read badly."""
+    t = re.sub(r"\*\*(.+?)\*\*", r"\1", md)
+    t = re.sub(r"__(.+?)__", r"\1", t)
+    t = re.sub(r"`([^`\n]+)`", r"\1", t)
+    t = re.sub(r"^#{1,6}\s+", "", t, flags=re.M)
+    return t
+
+
+def _md_html(md):
+    import html as html_lib
+    try:
+        import markdown
+        inner = markdown.markdown(md, extensions=["extra", "sane_lists", "nl2br"])
+    except ImportError:
+        inner = "<br>\n".join(html_lib.escape(_md_plain(md)).splitlines())
+    return ('<div dir="ltr" style="font-family:Arial,Helvetica,sans-serif;'
+            f'font-size:14px;line-height:1.45">{inner}</div>')
+
+
 def _mk_message(a, s):
     body = open(a.body_file).read() if getattr(a, "body_file", None) else (a.body or "")
-    mime = MIMEText(body)
+    if getattr(a, "md", False):
+        mime = MIMEMultipart("alternative")
+        mime.attach(MIMEText(_md_plain(body)))
+        mime.attach(MIMEText(_md_html(body), "html"))
+    else:
+        mime = MIMEText(body)
     mime["To"] = a.to
     if a.cc: mime["Cc"] = a.cc
     if getattr(a, "bcc", None): mime["Bcc"] = a.bcc
@@ -144,6 +173,7 @@ def main():
         g.add_argument("--subject", default=None); g.add_argument("--body", default=None)
         g.add_argument("--body-file", dest="body_file", default=None)
         g.add_argument("--reply-to", dest="reply_to", default=None)
+        g.add_argument("--md", action="store_true")
         g.set_defaults(func=fn)
     a = ap.parse_args()
     a.func(a, svc())
