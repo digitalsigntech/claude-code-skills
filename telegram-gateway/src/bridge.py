@@ -19,12 +19,16 @@ _sessions = None
 
 
 def _load():
+    """Always re-read from disk. The gateway AND the voice server share this file
+    from separate processes — a cached copy goes stale the moment the other
+    process writes, and saving the stale copy erases its entries (that bug lost
+    the 'Space Rigs Website with Claude' registration on 2026-07-17). Callers
+    mutate-and-save within _sess_guard, so read-modify-write stays near-atomic."""
     global _sessions
-    if _sessions is None:
-        try:
-            _sessions = json.load(open(C.SESSIONS_FILE))
-        except Exception:
-            _sessions = {}
+    try:
+        _sessions = json.load(open(C.SESSIONS_FILE))
+    except Exception:
+        _sessions = _sessions or {}
     return _sessions
 
 
@@ -40,10 +44,18 @@ def _chat_lock(chat_id):
 
 
 def reset(chat_id):
-    """Forget this chat's session so the next message starts a fresh Claude conversation."""
+    """Forget this chat's session so the next message starts a fresh Claude
+    conversation. Keeps the chat's title/ctype metadata — popping the whole entry
+    made a context clear also unregister the chat (e.g. from the voice app's
+    group list)."""
     with _sess_guard:
-        _load().pop(str(chat_id), None)
-        _save()
+        s = _load()
+        ent = s.get(str(chat_id))
+        if ent:
+            ent["sid"] = str(uuid.uuid4())
+            ent["init"] = False
+            ent["held"] = []
+            _save()
 
 
 def hold_file(chat_id, path):
