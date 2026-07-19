@@ -81,6 +81,11 @@ NAT with no public IP or inbound ports.
 - **Albums.** Photos/files sent together as one Telegram album (which arrive as
   separate messages sharing a `media_group_id`, only one carrying the caption) are
   buffered until the album settles, then handled as a group with the shared caption.
+- **Project chats (optional).** Groups listed in `PROJECT_CHATS` (or bound at
+  runtime via `/project <slug>`) become self-filing R&D lab notebooks: every post
+  is auto-filed into a per-project directory before the conversational turn, with
+  a `/privacy`·`/wisdom` per-chat model switch shown on the group title. See the
+  [projects](../projects/) skill for the module (`projects_mode.py`) and details.
 - **Resilience.** `start_telegram.sh` is single-instance (flock) and waits for
   DNS/network before launching (boot can fire the cron before DNS is up). Pair it
   with a `@reboot` cron and a `*/5` watchdog cron.
@@ -101,6 +106,7 @@ NAT with no public IP or inbound ports.
 | `src/personal_notes.py` | Optional owner-private note store: no-caption DM files auto-saved; strict delivery gate (owner DM / bot+owner-only group, fails closed). |
 | `src/voice_mode.py` | Optional on-box voice conversation: whisper.cpp STT (auto language) + Piper TTS; used by `handle_voice()` for chats in `VOICE_CHATS`. |
 | `src/qa_cache.py` | Semantic Q&A answer cache: repeat questions (even reworded) answered in ~0.1s from a local-embedding cache instead of an LLM turn; guards for product codes, TTL, and conversational fragments. |
+| `src/projects_mode.py` | Optional project chats (symlink to [`../projects/src/projects_mode.py`](../projects/)): per-group auto-filing into a project directory + `/privacy`·`/wisdom` switch. |
 | `doc_registry.example.json` | Template for `doc_registry.json` (curated docs the doc reflex may send). |
 | `src/tg_whoami.py` | Onboarding helper — prints the user IDs of recent senders so you can fill the allowlist. |
 | `src/start_telegram.sh` | Single-instance launcher (flock + network wait). Used by `@reboot` and watchdog crons. |

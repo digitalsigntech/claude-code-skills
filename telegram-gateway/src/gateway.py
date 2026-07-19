@@ -20,6 +20,7 @@ import file_reflex
 import personal_notes
 import voice_mode
 import qa_cache
+import projects_mode   # R&D project chats — see ../../projects/ skill
 
 # Searchable chat archive (every message + reply -> SQLite/FTS5). Best-effort: if the
 # module can't load, archiving silently no-ops and the gateway runs unaffected.
@@ -117,6 +118,9 @@ HELP = (
     "Commands:\n"
     "/cloud <text> — force a cloud (Claude) turn, bypassing the privacy gate (public info only)\n"
     "/topic — show what project this conversation is currently about\n"
+    "/privacy | /wisdom — in a project chat: switch answers between the local-policy "
+    "model and cloud Claude (mode shows on the group title)\n"
+    "/project [slug] — show/set which project this chat files into\n"
     "/clear (or /new) — clear this chat's memory and start fresh\n"
     "/whoami — show this chat's IDs\n"
     "/help — this message")
@@ -253,6 +257,10 @@ def handle_album(msgs, chat_id):
             f"[album: {len(paths)} file(s)] {caption}".strip(), kind="file")
     if len(paths) < len(msgs):
         TG.send_message(chat_id, f"⚠️ Only {len(paths)} of {len(msgs)} album files downloaded.")
+    # Project chats: file the whole album into the project.
+    if projects_mode.is_project_chat(chat_id):
+        handle_project_album(msgs, chat_id, paths, caption)
+        return
     # Personal notes (the owner 2026-07-10): a caption-less album in his DM = one note per file.
     if not caption.strip() and chat_id == personal_notes.OWNER:
         ids = []
@@ -295,6 +303,10 @@ def handle_file(msg, chat_id):
         TG.send_message(chat_id, "⚠️ I couldn't download that file from Telegram.")
         return
     _arc_in(msg, chat_id, f"[file: {os.path.basename(path)}] {caption}".strip(), kind="file")
+    # Project chats: every posted file is filed into the project — no action keyboard.
+    if projects_mode.is_project_chat(chat_id):
+        handle_project_file(msg, chat_id, path, caption)
+        return
     # Personal notes (the owner 2026-07-10): a file in HIS DM with no caption is a personal
     # note — stored in the private personal/ db, never offered the KB-ingest keyboard.
     if not caption.strip() and chat_id == personal_notes.OWNER:
@@ -507,6 +519,100 @@ def kb_reflex(text):
     return None
 
 
+# ---- project chats ----------------------------------------------------------
+# (the owner, 2026-07-19): every post in a bound group is filed into its project
+# under DST_ROOT/projects/<slug>/ BEFORE the conversational turn; the turn's
+# first source of context is the project directory, not the KB. Privacy toggle:
+# /wisdom = cloud Claude, /privacy = local-policy Nemotron (fails closed).
+def handle_project_text(msg, chat_id, text, kind="note", already_filed=None):
+    """File the message into the project notebook, then answer per privacy mode."""
+    pm = projects_mode.get(chat_id)
+    note_path = projects_mode.add_note(pm["project"], text, _sender_first(msg), kind=kind)
+    filed = already_filed or f" The user's message was ALREADY auto-filed to {note_path} — do not file it again."
+    if pm.get("privacy") == "privacy":
+        ctx = (f"[Project '{pm['project']}' chat. Project files live under "
+               f"{projects_mode.root(pm['project'])} (PROJECT.md, REGISTRY.md, notes/, "
+               f"files/) — consult them FIRST, before the KB.] ")
+        with Typing(chat_id):
+            answer, files = private_turn(ctx + text, chat_id, sender=_sender_first(msg))
+        reply = "🔒 Nemotron (Privacy mode):\n\n" + answer
+        TG.send_message(chat_id, reply, reply_to=msg["message_id"])
+        _arc_out(chat_id, reply)
+        _send_private_files(chat_id, files)
+        log(f"project turn (privacy) chat={chat_id}")
+        return
+    prompt = projects_mode.turn_context(chat_id, filed) + "\n\n" + text
+    with Typing(chat_id):
+        reply = bridge.ask(chat_id, prompt, sender=_sender_full(msg))
+    TG.send_message(chat_id, reply, reply_to=msg["message_id"])
+    _arc_out(chat_id, reply)
+    log(f"project turn (wisdom) chat={chat_id}")
+
+
+def handle_project_file(msg, chat_id, path, caption):
+    """File one downloaded item into the project. Voice notes: transcribe on-box
+    (whisper.cpp), file both the audio and the transcript, then treat the transcript
+    as a message. Photos/docs: annotate/summarize via the local-policy model."""
+    sender = _sender_first(msg)
+    pm = projects_mode.get(chat_id)
+    if "voice" in msg or "audio" in msg:
+        text = ""
+        try:
+            with Typing(chat_id):
+                text, _lang = voice_mode.transcribe(path)
+        except Exception as e:
+            log(f"project voice transcribe FAILED chat={chat_id}: {e}")
+        ann = caption or (f"voice note; transcript: {text[:300]}" if text else "(transcription failed)")
+        dest, kind, _a, _auto = projects_mode.ingest_file(chat_id, path, ann, sender)
+        if not text:
+            TG.send_message(chat_id, f"📁 Filed audio to `{os.path.relpath(dest, projects_mode.PROJECTS_DIR)}` "
+                                     "— ⚠️ transcription failed.", reply_to=msg["message_id"])
+            return
+        TG.send_message(chat_id, f"🎙️ _{text}_", reply_to=msg["message_id"])
+        handle_project_text(msg, chat_id, text, kind="voice",
+                            already_filed=f" (Voice note: audio filed at {dest}; transcript auto-filed to notes/.)")
+        return
+    with Typing(chat_id):
+        dest, kind, annotation, auto = projects_mode.ingest_file(chat_id, path, caption, sender)
+    rel = os.path.relpath(dest, projects_mode.PROJECTS_DIR)
+    tag = "auto-annotation" if auto else ("annotation" if caption else "note")
+    preview = (annotation or "")[:350]
+    TG.send_message(chat_id, f"📁 Filed {kind} → `{rel}`\n_{tag}:_ {preview}",
+                    reply_to=msg["message_id"])
+    # A caption may also be a question/instruction about the file — give the
+    # conversational turn a chance to act on it (it's told to stay quiet-short
+    # if the caption was purely descriptive).
+    if caption.strip():
+        prompt = (f"The user attached a {kind} (filed at {dest}, registry updated) with "
+                  f"this caption: \"{caption.strip()}\". If the caption contains a question "
+                  f"or instruction, respond/act on it (project files are the first source "
+                  f"of context). If it was just a description/annotation, reply with one "
+                  f"very short acknowledgement.")
+        handle_project_text(msg, chat_id, prompt, kind="caption",
+                            already_filed=" (File + caption already filed — do not re-file.)")
+
+
+def handle_project_album(msgs, chat_id, paths, caption):
+    sender = _sender_first(msgs[0])
+    lines, dests = [], []
+    with Typing(chat_id):
+        for p in paths:
+            dest, kind, annotation, auto = projects_mode.ingest_file(chat_id, p, caption, sender)
+            dests.append(dest)
+            lines.append(f"• {kind} `{os.path.relpath(dest, projects_mode.PROJECTS_DIR)}` — "
+                         f"{(annotation or '')[:150]}")
+    TG.send_message(chat_id, "📁 Filed album:\n" + "\n".join(lines),
+                    reply_to=msgs[0]["message_id"])
+    if caption.strip():
+        listing = "\n".join(dests)
+        prompt = (f"The user posted an album of {len(dests)} files (already filed):\n{listing}\n"
+                  f"Album caption: \"{caption.strip()}\". If it contains a question or "
+                  f"instruction, respond/act on it; if purely descriptive, reply with one "
+                  f"very short acknowledgement.")
+        handle_project_text(msgs[0], chat_id, prompt, kind="caption",
+                            already_filed=" (Album + caption already filed — do not re-file.)")
+
+
 # ---- text -------------------------------------------------------------------
 def handle_text(msg, chat_id, text):
     # Match just the first token, lowercased, with the @botname suffix (added in
@@ -550,6 +656,42 @@ def handle_text(msg, chat_id, text):
         bridge.reset(chat_id)
         TG.send_message(chat_id, "🧹 Cleared. This chat starts fresh — I won't remember earlier "
                                  "messages (or held files) here."); return
+    # Project-chat controls: privacy toggle (shown on the group title) + rebinding.
+    if command in ("/privacy", "/wisdom", "/wise"):
+        if not projects_mode.is_project_chat(chat_id):
+            TG.send_message(chat_id, "This chat isn't bound to a project. Use "
+                                     "`/project <slug>` first."); return
+        mode = "privacy" if command == "/privacy" else "wisdom"
+        projects_mode.set_privacy(chat_id, mode)
+        err = projects_mode.apply_title(chat_id, msg["chat"].get("title"))
+        who = ("🔒 *Privacy* — answers run on the local-policy model (Nemotron); "
+               "nothing goes to the cloud Claude turn." if mode == "privacy" else
+               "🧠 *Wisdom* — answers run on cloud Claude (filing/analysis of files "
+               "stays on the local-policy model).")
+        note = (f"\n⚠️ Couldn't update the group title ({err}) — make the bot a group "
+                f"admin with *Change group info* so the mode shows up top." if err else "")
+        TG.send_message(chat_id, f"{who}{note}")
+        log(f"project chat={chat_id} privacy -> {mode} (title err: {err})")
+        return
+    if command == "/project":
+        parts = text.strip().split(maxsplit=1)
+        if len(parts) < 2:
+            pm = projects_mode.get(chat_id)
+            TG.send_message(chat_id,
+                            f"📌 Project: *{pm['project']}* · mode: {pm.get('privacy','wisdom')}\n"
+                            f"Dir: `{projects_mode.root(pm['project'])}`" if pm else
+                            "Usage: `/project <slug>` — bind this chat to DST/projects/<slug>/")
+            return
+        slug = projects_mode.set_project(chat_id, parts[1])
+        TG.send_message(chat_id, f"📌 This chat now files into `projects/{slug}/`."
+                        if slug else "⚠️ Bad project name — use letters/digits/dashes.")
+        return
+    # Project chats: file-then-answer, project files first. Handled BEFORE the KB
+    # reflexes/caches on purpose — the KB is the wrong first source here.
+    if projects_mode.is_project_chat(chat_id) and not command.startswith("/"):
+        handle_project_text(msg, chat_id, text)
+        return
+
     # Doc reflex (2026-07-10, the owner: "make the labelexpo pass instant"): requests for a
     # CURATED registered document ("fetch my labelexpo pass") are answered by a direct
     # sendDocument with a cached file_id — no LLM turn. Registry: doc_registry.json,
@@ -903,6 +1045,9 @@ def main():
     who = me["result"]
     TG.set_commands([
         {"command": "cloud", "description": "Force a cloud (Claude) turn — public info only"},
+        {"command": "privacy", "description": "Project chat: answers on the local-policy model"},
+        {"command": "wisdom", "description": "Project chat: answers on cloud Claude"},
+        {"command": "project", "description": "Show or set this chat's project binding"},
         {"command": "topic", "description": "Show this conversation's current project topic"},
         {"command": "clear", "description": "Clear this chat's memory, start fresh"},
         {"command": "whoami", "description": "Show chat & user IDs"},
@@ -914,6 +1059,24 @@ def main():
             "to telegram/allowlist.json")
     threading.Thread(target=drain_injections, daemon=True).start()
     log(f"email→chat injection queue active: {INJECT_DIR}")
+
+    # Project chats: assert the privacy-mode suffix on each bound group's title once
+    # per boot (first boot fetches the base title via getChat). Best-effort — a bot
+    # without "change info" admin rights just logs the refusal.
+    def _assert_project_titles():
+        for cid in set(C.PROJECT_CHATS) | {int(k) for k in projects_mode._load()}:
+            try:
+                st = projects_mode.get(cid) or {}
+                base = st.get("base_title")
+                if not base:
+                    r = TG._call("getChat", chat_id=cid)
+                    base = (r.get("result") or {}).get("title") if r.get("ok") else None
+                err = projects_mode.apply_title(cid, base)
+                if err and "not modified" not in err.lower():
+                    log(f"project title assert chat={cid}: {err}")
+            except Exception as e:
+                log(f"project title assert failed chat={cid}: {e}")
+    threading.Thread(target=_assert_project_titles, daemon=True).start()
     if chatdb:
         try:
             import classify

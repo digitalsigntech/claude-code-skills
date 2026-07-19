@@ -131,6 +131,13 @@ ALWAYS_NEMOTRON_CHATS = set()  # add your group chat ids
 # (a Vulkan build uses the iGPU; a plain CPU build works too) and Piper TTS in a
 # venv with one .onnx voice per language.
 VOICE_CHATS = set()            # add your voice-conversation group chat ids
+# Project chats (the owner, 2026-07-19): a group bound to a project directory under
+# DST_ROOT/projects/<slug>/ — every post (text/voice/photo/doc) is auto-filed there;
+# /wisdom (cloud Claude) vs /privacy (local-policy Nemotron) per chat, mode shown on
+# the group title. Module: projects_mode.py (canonical copy in the ../projects skill).
+# Additional bindings can be added at runtime via /project <slug> (persisted in
+# state/projects.json).
+PROJECT_CHATS = {}             # e.g. {-100123456789: "my-project"}
 WHISPER_BIN = os.path.expanduser("~/whisper.cpp/build-vulkan/bin/whisper-cli")
 WHISPER_MODEL = os.path.expanduser("~/whisper.cpp/models/ggml-large-v3-turbo-q5_0.bin")
 PIPER = os.path.join(DST_ROOT, "voice", "venv", "bin", "piper")
