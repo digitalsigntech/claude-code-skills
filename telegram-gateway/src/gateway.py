@@ -666,7 +666,7 @@ def handle_text(msg, chat_id, text):
         err = projects_mode.apply_title(chat_id, msg["chat"].get("title"))
         who = ("🔒 *Privacy* — answers run on the local-policy model (Nemotron); "
                "nothing goes to the cloud Claude turn." if mode == "privacy" else
-               "🧠 *Wisdom* — answers run on cloud Claude (filing/analysis of files "
+               "💡 *Wisdom* — answers run on cloud Claude (filing/analysis of files "
                "stays on the local-policy model).")
         note = (f"\n⚠️ Couldn't update the group title ({err}) — make the bot a group "
                 f"admin with *Change group info* so the mode shows up top." if err else "")

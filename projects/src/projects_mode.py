@@ -1,10 +1,9 @@
 """R&D project chats — every post in a project group is FILED into the project.
 
 A "project chat" is a Telegram group bound to a project directory under
-DST/projects/<slug>/ (e.g. "Widget R&D" → projects/widget-rd/). Everything
+DST/projects/<slug>/ (e.g. "PHD R&D with Claude" → projects/phd-rd/). Everything
 the owner posts there — text, voice notes, photos, documents — is filed
-deterministically into the project (owner spec, 2026-07-19), organized for quick
-retrieval:
+deterministically into the project, organized for quick retrieval:
 
     projects/<slug>/
       PROJECT.md          wiki-style overview: goals, decisions, links (LLM-editable)
@@ -13,8 +12,8 @@ retrieval:
       notes/YYYY-MM.md    chronological lab-notebook of text posts + voice transcripts
 
 Processing policy: image/document analysis is done by the LOCAL-policy LLM only
-(Nemotron — on OpenRouter until the DGX Spark lands, same interim the owner accepted for
-email extraction; never cloud Claude). Voice transcription is whisper.cpp on-box.
+(Nemotron — on OpenRouter until local hardware lands, same interim the owner accepted
+for email extraction; never cloud Claude). Voice transcription is whisper.cpp on-box.
 
 Privacy switch per chat: "wisdom" = the conversational turn runs on cloud Claude;
 "privacy" = it runs on the Nemotron private path. The current mode is shown as a
@@ -38,7 +37,9 @@ OR_TEXT_MODEL = os.environ.get("OR_MODEL", "nvidia/nemotron-3-super-120b-a12b")
 OR_VISION_MODEL = os.environ.get("DST_PROJECTS_VISION_MODEL",
                                  "nvidia/nemotron-nano-12b-v2-vl:free")
 
-TITLE_SUFFIX = {"wisdom": "🧠 Wisdom", "privacy": "🔒 Privacy"}
+TITLE_SUFFIX = {"wisdom": "💡 Wisdom", "privacy": "🔒 Privacy"}
+# retired suffixes still stripped from titles so toggling doesn't stack them
+OLD_SUFFIXES = ["🧠 Wisdom"]
 
 
 def _or_key():
@@ -112,7 +113,7 @@ def apply_title(chat_id, base_title=None):
     string if Telegram refused (usually: bot is not an admin), else None."""
     st = get(chat_id) or {}
     base = base_title or st.get("base_title") or ""
-    for suf in TITLE_SUFFIX.values():
+    for suf in list(TITLE_SUFFIX.values()) + OLD_SUFFIXES:
         base = base.replace(suf, "")
     base = base.strip(" -—·|").strip()
     if not base:
