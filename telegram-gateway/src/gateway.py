@@ -304,12 +304,18 @@ def _image_data_url(path):
     return f"data:image/{ext};base64,{b64}"
 
 
+# Primary describer: richer output than the default annotator model. Both free;
+# fallback is the other free vision model (no paid variant exists).
+OR_VISION_DESCRIBE = os.environ.get("DST_PRIVATE_VISION_MODEL",
+                                    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free")
+
+
 def _describe_image(path, attempts=3):
     """Detailed on-policy vision description of an image, for the private path.
-    Free-tier VL models intermittently return empty — retry, then fall back to the
-    paid variant of the SAME model on the last attempt. Returns str or None."""
-    models = [projects_mode.OR_VISION_MODEL] * (attempts - 1)
-    models.append(projects_mode.OR_VISION_MODEL.removesuffix(":free"))
+    Free-tier VL endpoints intermittently return empty — retry, then fall back to
+    the other free vision model on the last attempt. Returns str or None."""
+    models = [OR_VISION_DESCRIBE] * (attempts - 1)
+    models.append(projects_mode.OR_VISION_MODEL)
     url = _image_data_url(path)
     for i, model in enumerate(models):
         try:
@@ -322,7 +328,7 @@ def _describe_image(path, attempts=3):
                 {"role": "user", "content": [
                     {"type": "text", "text": "Describe the image."},
                     {"type": "image_url", "image_url": {"url": url}}]}],
-                model, max_tokens=600)
+                model, max_tokens=1200)
         except Exception as e:
             log(f"private image describe attempt {i + 1}/{len(models)} "
                 f"({model}) failed: {e}")
@@ -369,7 +375,15 @@ def handle_file(msg, chat_id):
             if path.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
                 desc = _describe_image(path)
                 if desc:
-                    note += f". A vision model describes it as: {desc}"
+                    note += (f". A vision model describes it as: {desc}\n"
+                             "CAUTION: vision models often misread hand-drawn WIRE "
+                             "ROUTING (which terminal connects to which). Trust "
+                             "written labels and component names, but treat described "
+                             "connections as uncertain — prefer connection details "
+                             "the sender stated in text, and after drawing a diagram "
+                             "from a photo, end your reply by listing the connections "
+                             "you drew and asking the sender to confirm or correct "
+                             "them")
                 else:
                     note += (". IMPORTANT: image analysis FAILED — you have NO idea "
                              "what this image shows. Do NOT guess its contents and do "
