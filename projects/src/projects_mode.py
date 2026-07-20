@@ -152,6 +152,20 @@ def scaffold(slug):
     return r
 
 
+PK = os.path.join(PROJECTS_DIR, "pk")
+
+
+def index_refresh(slug):
+    """Incrementally refresh the project's semantic index (projects/<slug>/.kb_index)
+    in the background, so vector search stays current with every filed item."""
+    def run():
+        try:
+            subprocess.run([PK, slug, "index"], capture_output=True, text=True, timeout=300)
+        except Exception as e:
+            print(f"[projects] index refresh failed for {slug}: {e}", flush=True)
+    threading.Thread(target=run, daemon=True).start()
+
+
 def _registry_add(slug, relpath, kind, sender, summary):
     row = "| {} | {} | {} | {} | {} |\n".format(
         datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -175,6 +189,7 @@ def add_note(slug, text, sender, kind="note"):
             if new:
                 f.write(f"# {slug} — notes {now:%Y-%m}\n")
             f.write(entry)
+    index_refresh(slug)
     return p
 
 
@@ -317,6 +332,7 @@ def ingest_file(chat_id, path, caption, sender):
     write_sidecar(dest, annotation, sender, caption)
     if kind == "photo":
         clip_index(dest, annotation if annotation and "unannotated" not in annotation else "")
+    index_refresh(slug)
     return dest, kind, annotation, auto
 
 
@@ -330,9 +346,13 @@ def turn_context(chat_id, filed_note=""):
         f"project; everything the user posts is auto-filed under {r}/ "
         f"(PROJECT.md = overview, REGISTRY.md = index of all filed items, notes/ = "
         f"chronological text/voice notes, files/ = raw files by date).{filed_note} "
-        f"FIRST SOURCE of truth for any question here is the project directory — "
-        f"read PROJECT.md / REGISTRY.md / notes/, and `ug <term> {r}` to search — "
-        f"BEFORE the general KB or generic knowledge. If the user's message states "
+        f"FIRST SOURCE of truth for any question here is the project directory. "
+        f"RETRIEVAL: run `{PK} {slug} search \"<question>\" -k 6` FIRST — ~0.15s "
+        f"semantic search over PROJECT.md, REGISTRY.md, notes/ and file sidecars "
+        f"(auto-refreshed on every filed item); answer straight from the hits when "
+        f"they suffice. Only if the hits are insufficient, fall back to reading "
+        f"PROJECT.md / REGISTRY.md / notes/ or `ug <term> {r}` — and always BEFORE "
+        f"the general KB or generic knowledge. If the user's message states "
         f"results/decisions/facts worth keeping, also update PROJECT.md (Goals/"
         f"Current state/Decisions/Key files) so the overview stays current. If it "
         f"is just a note with nothing to answer, confirm filing in ONE short line.]")
