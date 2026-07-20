@@ -82,8 +82,15 @@ def _chunks_md(text, title):
         if not p:
             continue
         if re.match(r"^#{1,6}\s", p):
-            emit(); h = re.sub(r"^#{1,6}\s*", "", p).strip()
-            heading = "" if h == title else h; continue   # don't echo the H1 (already the title)
+            # A heading may share its paragraph with body text (no blank line after it,
+            # e.g. filed note entries): only the first line is the heading — keep the
+            # rest as a normal paragraph, or it would be swallowed and never embedded.
+            emit(); first, _, rest = p.partition("\n")
+            h = re.sub(r"^#{1,6}\s*", "", first).strip()
+            heading = "" if h == title else h   # don't echo the H1 (already the title)
+            p = rest.strip()
+            if not p:
+                continue
         table = _table_rows(p, ctx())
         if table:                                          # split tables row-by-row
             emit(); chunks.extend(table); continue
