@@ -29,8 +29,9 @@ NAT with no public IP or inbound ports.
   per topic). Calls are serialized per-chat, concurrent across chats.
 - **Files: save-then-ask.** Incoming document/photo/voice/audio/video is downloaded
   to `inbox/<chat_id>/`. If the message had a caption, the caption is treated as a
-  question and answered directly; otherwise the bot posts inline buttons:
-  **📚 Ingest to KB · 🔍 Analyze · 📎 Hold for chat**.
+  question and answered directly (in Always-Nemotron chats this stays on the local
+  private path — file captions never escape to the cloud turn); otherwise the bot
+  posts inline buttons: **📚 Ingest to KB · 🔍 Analyze · 📎 Hold for chat**.
 - **Allowlist-locked.** Only Telegram user IDs listed in `allowlist.json` can talk
   to the bot; everyone else is denied and logged. The file is re-read on every
   message, so you can add/remove users with no restart.
