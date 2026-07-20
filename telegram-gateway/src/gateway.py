@@ -296,6 +296,14 @@ def handle_album(msgs, chat_id):
                     reply_to=msgs[0]["message_id"], reply_markup=_file_keyboard(key))
 
 
+def _image_data_url(path):
+    import base64
+    b64 = base64.b64encode(open(path, "rb").read()).decode()
+    ext = os.path.splitext(path)[1].lstrip(".").lower() or "jpeg"
+    ext = {"jpg": "jpeg"}.get(ext, ext)
+    return f"data:image/{ext};base64,{b64}"
+
+
 def handle_file(msg, chat_id):
     with Typing(chat_id):
         path, caption = _save_incoming(msg, chat_id)
@@ -328,8 +336,30 @@ def handle_file(msg, chat_id):
         # can't view the image, but it gets the caption + file location and handles
         # the instruction like any other private turn.
         if chat_id in C.ALWAYS_NEMOTRON_CHATS:
-            turn_text = (f"[The sender attached a file, saved at {path} — you cannot "
-                         f"view it, but their message refers to it] {caption.strip()}")
+            note = f"[The sender attached a file, saved at {path}"
+            # Images: describe on the local-policy vision model (same as project chats)
+            # so the text agent can work from the picture — e.g. redraw a hand sketch
+            # as a proper diagram. Best-effort; falls back to a "can't view it" note.
+            if path.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
+                try:
+                    desc = projects_mode._or_chat([
+                        {"role": "system", "content":
+                         "Describe this image in exhaustive detail so a text-only model "
+                         "can work from it: every component, label, terminal, value and "
+                         "connection you can read, spatial layout, and any handwriting. "
+                         "Factual only; no speculation."},
+                        {"role": "user", "content": [
+                            {"type": "text", "text": "Describe the image."},
+                            {"type": "image_url", "image_url": {"url":
+                                _image_data_url(path)}}]}],
+                        projects_mode.OR_VISION_MODEL, max_tokens=600)
+                    note += f". A vision model describes it as: {desc}"
+                except Exception as e:
+                    log(f"private image describe failed: {e}")
+                    note += " — you cannot view it, but their message refers to it"
+            else:
+                note += " — you cannot view it, but their message refers to it"
+            turn_text = f"{note}] {caption.strip()}"
             with Typing(chat_id):
                 answer, files = private_turn(turn_text, chat_id, sender=_sender_first(msg))
                 reply = "🔒 Nemotron (Always-Nemotron chat):\n\n" + answer
