@@ -304,6 +304,32 @@ def _image_data_url(path):
     return f"data:image/{ext};base64,{b64}"
 
 
+def _describe_image(path, attempts=3):
+    """Detailed on-policy vision description of an image, for the private path.
+    Free-tier VL models intermittently return empty — retry, then fall back to the
+    paid variant of the SAME model on the last attempt. Returns str or None."""
+    models = [projects_mode.OR_VISION_MODEL] * (attempts - 1)
+    models.append(projects_mode.OR_VISION_MODEL.removesuffix(":free"))
+    url = _image_data_url(path)
+    for i, model in enumerate(models):
+        try:
+            return projects_mode._or_chat([
+                {"role": "system", "content":
+                 "Describe this image in exhaustive detail so a text-only model "
+                 "can work from it: every component, label, terminal, value and "
+                 "connection you can read, spatial layout, and any handwriting. "
+                 "Factual only; no speculation."},
+                {"role": "user", "content": [
+                    {"type": "text", "text": "Describe the image."},
+                    {"type": "image_url", "image_url": {"url": url}}]}],
+                model, max_tokens=600)
+        except Exception as e:
+            log(f"private image describe attempt {i + 1}/{len(models)} "
+                f"({model}) failed: {e}")
+            time.sleep(2)
+    return None
+
+
 def handle_file(msg, chat_id):
     with Typing(chat_id):
         path, caption = _save_incoming(msg, chat_id)
@@ -341,22 +367,15 @@ def handle_file(msg, chat_id):
             # so the text agent can work from the picture — e.g. redraw a hand sketch
             # as a proper diagram. Best-effort; falls back to a "can't view it" note.
             if path.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
-                try:
-                    desc = projects_mode._or_chat([
-                        {"role": "system", "content":
-                         "Describe this image in exhaustive detail so a text-only model "
-                         "can work from it: every component, label, terminal, value and "
-                         "connection you can read, spatial layout, and any handwriting. "
-                         "Factual only; no speculation."},
-                        {"role": "user", "content": [
-                            {"type": "text", "text": "Describe the image."},
-                            {"type": "image_url", "image_url": {"url":
-                                _image_data_url(path)}}]}],
-                        projects_mode.OR_VISION_MODEL, max_tokens=600)
+                desc = _describe_image(path)
+                if desc:
                     note += f". A vision model describes it as: {desc}"
-                except Exception as e:
-                    log(f"private image describe failed: {e}")
-                    note += " — you cannot view it, but their message refers to it"
+                else:
+                    note += (". IMPORTANT: image analysis FAILED — you have NO idea "
+                             "what this image shows. Do NOT guess its contents and do "
+                             "NOT substitute an old diagram or file; tell the sender "
+                             "plainly that you could not read the image and ask them "
+                             "to resend it or describe it in text")
             else:
                 note += " — you cannot view it, but their message refers to it"
             turn_text = f"{note}] {caption.strip()}"
