@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Per-project semantic index — same engine as ./kb, scoped to one project dir.
+#   ./pk <slug> search "query" [-k 8] [--json]
+#   ./pk <slug> index        # refresh (incremental; auto-run by the gateway on filing)
+#   ./pk <slug> stats
+# Index store: projects/<slug>/.kb_index/ — covers PROJECT.md, REGISTRY.md,
+# notes/*.md and files/**/*.meta.md sidecars.
+set -e
+slug="$1"; shift || { echo "usage: pk <slug> <search|index|stats> ..." >&2; exit 1; }
+root="/home/mercury/DST/projects/$slug"
+[ -d "$root" ] || { echo "no such project: $slug" >&2; exit 1; }
+export DST_KB_ROOT="$root" DST_KB_DIRS="."
+exec /home/mercury/DST/email/venv/bin/python /home/mercury/DST/email/kb/kb_index.py "$@"

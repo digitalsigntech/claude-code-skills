@@ -23,9 +23,15 @@ projects/<slug>/
   notes/YYYY-MM.md    chronological lab notebook: text posts + voice transcripts
 ```
 
-Two retrieval paths by design: **REGISTRY.md** (grep one file, newest last) for
-"where is that thing", and the wiki-style **PROJECT.md** for "what's the state of
-this project". Filed photos are also pushed into the CLIP media index (see
+Three retrieval paths by design: a **per-project vector index** first —
+`src/pk <slug> search "question"` runs a ~0.15s semantic search over PROJECT.md,
+REGISTRY.md, notes/ and the `.meta.md` sidecars, powered by the
+[kb-semantic-index](../kb-semantic-index/) engine pointed at the project root via
+`DST_KB_ROOT`/`DST_KB_DIRS` (store: `projects/<slug>/.kb_index/`, refreshed
+incrementally in the background on every filed item, so new posts are searchable
+within seconds) — then **REGISTRY.md** (grep one file, newest last) for "where is
+that thing", and the wiki-style **PROJECT.md** for "what's the state of this
+project". Filed photos are also pushed into the CLIP media index (see
 [clip-media-search](../clip-media-search/)) so "show me the photo of X" works.
 
 ## What happens per post

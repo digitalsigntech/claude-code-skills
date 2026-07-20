@@ -1,37 +1,30 @@
 #!/usr/bin/env python3
-"""Unified semantic index over a whole knowledge base.
+"""Unified semantic index over the whole knowledge base.
 
-Chunks `<KB_ROOT>/**` (Q&A files as one chunk per Q/A pair; other .md heading-aware,
-size-bounded), embeds each chunk on an embeddings server (default a LOCAL nomic server at
-127.0.0.1:18183 — embeddings are non-generative, so they're cheap to run on-box), and stores
-vectors + metadata in `<KB_ROOT>/.kb_index/`.
+Chunks `knowledge-base/**` (Q&A files as one chunk per Q/A pair; other .md heading-aware,
+size-bounded), embeds each chunk on the LOCAL nomic server (127.0.0.1:18183 — embeddings
+are non-generative, fine on-box), and stores vectors + metadata in `knowledge-base/.kb_index/`.
 
 Incremental + idempotent: chunks are keyed by content hash, so a rebuild only embeds NEW or
 CHANGED chunks and drops chunks whose text disappeared (edits/deletes handled). Safe on a cron.
 
   kb_index.py index                     # build / refresh the index
-  kb_index.py search "how do I reset it" [-k 8] [--json]
-  kb_index.py ask    "how do I reset it" [--json]
+  kb_index.py search "how to soak KM1024i" [-k 8] [--json]
   kb_index.py stats
-
-Config (environment):
-  KB_ROOT            root folder of the knowledge base (default: ~/myproject/knowledge-base)
-  KB_INDEX_DIRS      comma-separated subdirs to index (default: products,company,faq,technical,from-emails)
-  KB_EMBED_URL       embeddings endpoint (default: http://127.0.0.1:18183/v1/embeddings)
-  KB_ANSWER_THRESH   min cosine score for `ask` to answer without escalating (default: 0.74)
-
-The embeddings backend is bring-your-own: any OpenAI-compatible /v1/embeddings endpoint that
-returns 768-dim vectors works. Swap the model/URL and dimension (DIM) to match your server.
 """
 import os, re, sys, json, glob, hashlib, argparse, urllib.request
 import numpy as np
 
-KB_ROOT = os.path.expanduser(os.environ.get("KB_ROOT", "~/myproject/knowledge-base"))
-INDEX_DIRS = [d for d in os.environ.get(
-    "KB_INDEX_DIRS", "products,company,faq,technical,from-emails").split(",") if d]
+# Default: the company knowledge base. Point DST_KB_ROOT (+ optional DST_KB_DIRS,
+# comma-separated, "." = whole tree) at any other directory to index it — the store
+# lives in <root>/.kb_index, so every root gets its own independent index
+# (used by projects/pk for per-project R&D indexes).
+KB_ROOT = os.environ.get("DST_KB_ROOT", "/home/mercury/DST/knowledge-base")
+INDEX_DIRS = [d.strip() for d in os.environ.get(
+    "DST_KB_DIRS", "products,company,faq,technical,from-emails").split(",") if d.strip()]
 STORE = os.path.join(KB_ROOT, ".kb_index")
 VECS_F, META_F = os.path.join(STORE, "vectors.npy"), os.path.join(STORE, "meta.json")
-EMB_URL = os.environ.get("KB_EMBED_URL", "http://127.0.0.1:18183/v1/embeddings")
+EMB_URL = os.environ.get("DST_EMBED_URL", "http://127.0.0.1:18183/v1/embeddings")
 DIM, BATCH, MAX_CHARS = 768, 64, 900
 
 
@@ -67,7 +60,7 @@ _TABLE_SEP = re.compile(r"^\s*\|[\s:|-]+\|\s*$")            # the |---|---| divi
 def _table_rows(p, ctx):
     """If paragraph `p` is a markdown table, return one chunk PER DATA ROW with the header
     row prepended (so each row carries its column meaning and embeds on its own signal —
-    e.g. a single distinctive row stops getting averaged into a 20-row blob). Else None."""
+    e.g. the KM1024 Hexa row stops getting averaged into a 20-row blob). Else None."""
     pipe = [l.strip() for l in p.splitlines() if l.strip().startswith("|")]
     if len(pipe) < 2 or not any(_TABLE_SEP.match(l) for l in pipe):
         return None
@@ -163,13 +156,13 @@ def cmd_search(a):
         print(f"\n[{h['score']}] {h['source']}\n  {snippet[:300]}{'…' if len(snippet)>300 else ''}")
 
 
-ANSWER_THRESH = float(os.environ.get("KB_ANSWER_THRESH", "0.74"))
+ANSWER_THRESH = float(os.environ.get("DST_KB_ANSWER_THRESH", "0.74"))
 
 
 def cmd_ask(a):
     """Tier-1 reflex: answer a question DIRECTLY from a confident Q&A hit, no LLM.
     Prints the stored answer verbatim on a hit; prints nothing + exits 2 to signal
-    the caller to escalate to a reasoning model."""
+    the caller (Claude) to escalate to reasoning."""
     vecs, meta = _load()
     if not len(vecs):
         sys.stderr.write("index empty\n"); sys.exit(2)
@@ -198,7 +191,7 @@ def cmd_stats(_):
 
 
 def retrieve(query, k=6):
-    """Programmatic top-k retrieval for other tools. Returns list of
+    """Programmatic top-k retrieval for other tools (autodraft). Returns list of
     {score, source, text}; [] if the index/embeddings are unavailable."""
     try:
         vecs, meta = _load()
