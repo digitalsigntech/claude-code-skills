@@ -323,12 +323,29 @@ def handle_file(msg, chat_id):
     # directly instead of swallowing it behind the action buttons. Hold the file too
     # so follow-up messages in this chat can keep referring to it.
     if caption.strip():
+        # Always-Nemotron chats stay on-box even for file captions (a captioned photo
+        # in a private group must never escape to the cloud turn). The local model
+        # can't view the image, but it gets the caption + file location and handles
+        # the instruction like any other private turn.
+        if chat_id in C.ALWAYS_NEMOTRON_CHATS:
+            turn_text = (f"[The sender attached a file, saved at {path} — you cannot "
+                         f"view it, but their message refers to it] {caption.strip()}")
+            with Typing(chat_id):
+                answer, files = private_turn(turn_text, chat_id, sender=_sender_first(msg))
+                reply = "🔒 Nemotron (Always-Nemotron chat):\n\n" + answer
+            TG.send_message(chat_id, reply, reply_to=msg["message_id"])
+            _arc_out(chat_id, reply)
+            _send_private_files(chat_id, files)
+            log(f"always-nemotron file-caption chat={chat_id} files={len(files)}")
+            return
         bridge.hold_file(chat_id, path)
         prompt = (f"A file was sent to you via Telegram and saved at: {path}\n"
                   f"The user's message accompanying it: \"{caption.strip()}\"\n"
                   f"Open/read the file and respond to their message.")
         with Typing(chat_id):
-            TG.send_message(chat_id, bridge.ask(chat_id, prompt, sender=_sender_full(msg)), reply_to=msg["message_id"])
+            reply = bridge.ask(chat_id, prompt, sender=_sender_full(msg))
+            TG.send_message(chat_id, reply, reply_to=msg["message_id"])
+        _arc_out(chat_id, reply)
         return
     key = uuid.uuid4().hex[:10]
     with PENDING_GUARD:
@@ -431,7 +448,7 @@ def _chat_history(chat_id, limit=20, max_chars=6000):
             c = chatdb._get()
             rows = c.execute(
                 "SELECT sender, direction, text FROM messages WHERE chat_id=? "
-                "AND kind IN ('text','email') ORDER BY id DESC LIMIT ?",
+                "AND kind IN ('text','email','file') ORDER BY id DESC LIMIT ?",
                 (chat_id, limit)).fetchall()
         lines = []
         for sender, direction, txt in reversed(rows):
