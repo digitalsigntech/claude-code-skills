@@ -395,7 +395,7 @@ def handle_file(msg, chat_id):
             turn_text = f"{note}] {caption.strip()}"
             with Typing(chat_id):
                 answer, files = private_turn(turn_text, chat_id, sender=_sender_first(msg))
-                reply = "🔒 Nemotron (Always-Nemotron chat):\n\n" + answer
+                reply = "🔒 Local Agent:\n\n" + answer
             TG.send_message(chat_id, reply, reply_to=msg["message_id"])
             _arc_out(chat_id, reply)
             _send_private_files(chat_id, files)
@@ -829,7 +829,7 @@ def handle_text(msg, chat_id, text):
     if chat_id in C.ALWAYS_NEMOTRON_CHATS and not command.startswith("/"):
         with Typing(chat_id):
             answer, files = private_turn(text, chat_id, sender=_sender_first(msg))
-            reply = "🔒 Nemotron (Always-Nemotron chat):\n\n" + answer
+            reply = "🔒 Local Agent:\n\n" + answer
         TG.send_message(chat_id, reply, reply_to=msg["message_id"])
         _arc_out(chat_id, reply)
         _send_private_files(chat_id, files)
