@@ -177,6 +177,29 @@ def t_find_files(query, limit=8):
             ] or "No files matched those terms."
 
 
+MEDIA_SEARCH_URL = os.environ.get("MEDIA_SEARCH_URL", "http://127.0.0.1:8477")
+
+
+def t_find_media(query, limit=4):
+    """Semantic photo/video search via a local CLIP server (see the
+    clip-media-search skill). Filename search misses these — 'PHD board' never
+    matches 'phd-connect-32-v1.5-a.jpeg'."""
+    import urllib.request, urllib.parse
+    k = min(int(limit or 4), 8)
+    url = (MEDIA_SEARCH_URL + "/find?" +
+           urllib.parse.urlencode({"q": query, "k": k}))
+    try:
+        with urllib.request.urlopen(url, timeout=5) as r:
+            data = json.loads(r.read().decode())
+    except Exception as e:
+        return f"Media search unavailable ({e}) — fall back to find_files."
+    out = [{"path": os.path.relpath(h["path"], DST_ROOT),
+            "annotation": (h.get("annotation") or "")[:300],
+            "score": round(h.get("score", 0), 2)}
+           for h in data.get("results", []) if h.get("score", 0) >= 0.75]
+    return out or "No matching photos/videos in the media KB."
+
+
 def t_send_file(path, caption=""):
     """Queue a file; the gateway uploads it to the chat after the loop finishes."""
     real, err = _sendable(path)
@@ -207,6 +230,14 @@ TOOLS = {
                    {"query": {"type": "string",
                               "description": "filename keywords, e.g. 'invoice acme pdf'"},
                     "limit": {"type": "integer", "description": "max results (default 8)"}}),
+    "find_media": (t_find_media, "Find PHOTOS or VIDEOS of products/equipment by what "
+                   "they SHOW (semantic content search of the media KB, runs on-box). "
+                   "ALWAYS use this — never find_files — when asked for a picture, "
+                   "photo, image or video of something. Returns paths + descriptions; "
+                   "deliver hits with send_file, using each annotation as the caption.",
+                   {"query": {"type": "string",
+                              "description": "what the picture should show"},
+                    "limit": {"type": "integer", "description": "max results (default 4)"}}),
     "send_file": (t_send_file, "Attach a file to your reply — the owner receives it in "
                   "the chat. Private/confidential company documents are fine in this "
                   "chat. Use find_files first to get the exact path.",
@@ -243,7 +274,9 @@ SYSTEM = (
     "You HAVE lookup tools — use them: search_contacts / search_emails / read_email for "
     "customer matters, kb_search for product facts. When the owner asks for an actual "
     "document (a PDF, invoice, image, price list, report), use find_files to locate it "
-    "and send_file to attach it — this chat is private and trusted, so confidential "
+    "and send_file to attach it; for a PICTURE/PHOTO/VIDEO of something use find_media "
+    "(searches what images show; find_files only matches filenames) and send_file each "
+    "hit with its annotation as the caption — this chat is private and trusted, so confidential "
     "company files may be sent here. Call tools as needed (several rounds are fine) "
     "BEFORE answering. When you have enough, give the final answer: concise, factual, "
     "grounded in what the tools returned. If the data truly isn't there, say exactly "
