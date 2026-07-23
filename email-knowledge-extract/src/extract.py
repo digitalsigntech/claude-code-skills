@@ -98,11 +98,13 @@ def _chat_primary(system, user, max_tokens, temperature, reasoning=False, model=
                             {"role": "user", "content": user}]}
     # Optional reasoning toggle (honoured by routers that support it; harmless elsewhere).
     payload["reasoning"] = {"enabled": bool(reasoning)}
-    # Optional provider pin (router-style): EKB_PROVIDER="ProviderA,ProviderB".
+    # Optional provider preference (router-style): EKB_PROVIDER="ProviderA,ProviderB".
+    # Fallbacks stay ON so a rate-limited provider degrades to another instead of a
+    # 429 error; set EKB_PROVIDER_STRICT=1 to hard-pin to the listed providers only.
     prov = os.environ.get("EKB_PROVIDER")
     if prov:
         payload["provider"] = {"order": [p.strip() for p in prov.split(",")],
-                               "allow_fallbacks": False}
+                               "allow_fallbacks": os.environ.get("EKB_PROVIDER_STRICT") != "1"}
     timed_out, last = False, None
     for attempt in range(3):                      # bounded retries -> no multi-minute storm
         try:
