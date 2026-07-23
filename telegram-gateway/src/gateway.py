@@ -531,7 +531,8 @@ def private_turn(text, chat_id, sender="the owner"):
     FAILS CLOSED: on any error we apologize locally — never fall through to the cloud."""
     try:
         r = subprocess.run([C.KB_PY, C.PRIVACY_ROUTE, text, "--json", "--answer",
-                            "--history-stdin", "--sender", sender],
+                            "--history-stdin", "--sender", sender,
+                            "--chat-id", str(chat_id)],
                            input=_chat_history(chat_id),
                            capture_output=True, text=True, timeout=240)
         d = json.loads(r.stdout or "{}")

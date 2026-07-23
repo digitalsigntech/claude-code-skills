@@ -210,6 +210,55 @@ def t_send_file(path, caption=""):
             "Do not paste its contents; just tell the owner what you are sending.")
 
 
+# ---- scheduling (reminders.py in this dir) ----------------------------------
+# Without this, the model *pretends* to schedule ("I'll ping you at 5pm") and
+# nothing happens — the same hallucinated-capability failure the tool loop fixes
+# for lookups. Reminders fire into the chat of the current turn; run() sets this.
+_current_chat = int(os.environ.get("TG_OWNER_ID", "0"))   # 0 = unknown
+
+
+def t_schedule_reminder(when, text, kind="ping"):
+    """Queue a future ping/task in the shared reminder queue (a local SQLite insert;
+    the per-minute cron runner fires it)."""
+    import reminders
+    if not _current_chat:
+        return "FAILED: no target chat known (set TG_OWNER_ID or pass chat_id to run())."
+    now = time.time()
+    try:
+        when_epoch = time.mktime(time.strptime((when or "").strip(), "%Y-%m-%d %H:%M"))
+    except ValueError:
+        return (f"FAILED: bad time {when!r}. Use 'YYYY-MM-DD HH:MM' (24-hour, local time). "
+                f"Right now it is {time.strftime('%Y-%m-%d %H:%M')}.")
+    if when_epoch < now + 60:
+        return (f"FAILED: {when} is in the past (now: {time.strftime('%Y-%m-%d %H:%M')}). "
+                "Ask the sender for the intended time if unsure.")
+    if kind not in ("ping", "task"):
+        return "FAILED: kind must be 'ping' or 'task'."
+    rid, when_local = reminders.add(when, _current_chat, kind, text,
+                                    created_by="private-agent")
+    return (f"Scheduled: reminder #{rid} will fire at {when_local} in this chat "
+            f"({'the message will be sent verbatim' if kind == 'ping' else 'the instruction will be executed then and the result posted'}). "
+            "Confirm this to the user, including the time.")
+
+
+def t_list_reminders():
+    """Pending reminders for the current chat."""
+    import reminders
+    rows = [r for r in reminders.list_rows() if r["chat_id"] == _current_chat]
+    return rows or "No pending reminders for this chat."
+
+
+def t_cancel_reminder(reminder_id):
+    """Cancel a pending reminder (only for the current chat)."""
+    import reminders
+    rows = [r for r in reminders.list_rows() if r["chat_id"] == _current_chat
+            and r["id"] == int(reminder_id)]
+    if not rows:
+        return f"No pending reminder #{reminder_id} in this chat (use list_reminders)."
+    return ("Cancelled." if reminders.cancel(int(reminder_id))
+            else "Could not cancel — already fired or cancelled.")
+
+
 TOOLS = {
     "search_contacts": (t_search_contacts, "Search CRM contacts by name/company/email. "
                         "Returns contact info + a rolling summary of all dealings with them.",
@@ -243,6 +292,34 @@ TOOLS = {
                   "chat. Use find_files first to get the exact path.",
                   {"path": {"type": "string", "description": "path from find_files"},
                    "caption": {"type": "string", "description": "optional short caption"}}),
+    "schedule_reminder": (t_schedule_reminder, "Schedule a FUTURE action ('remind me at "
+                          "5pm', 'ping me tomorrow at 9', 'check later whether...'). You "
+                          "do NOT run between messages — a promise to ping/check later is "
+                          "a lie unless you call this tool. kind 'ping': text is sent to "
+                          "this chat verbatim at that time. kind 'task': text is an "
+                          "INSTRUCTION executed at that time by an agent with the same "
+                          "email/CRM/KB lookup tools, which posts its findings — use for "
+                          "conditional reminders ('at 17:00 check whether we replied to "
+                          "X; report the status'); phrase the instruction self-contained "
+                          "with full names/emails, since the executor has no chat "
+                          "history. After calling, confirm the reminder id and exact "
+                          "time to the user.",
+                          {"when": {"type": "string",
+                                    "description": "fire time, 'YYYY-MM-DD HH:MM' 24-hour "
+                                                   "local time; the current date/time is "
+                                                   "in your context"},
+                           "text": {"type": "string",
+                                    "description": "ping message, or self-contained task "
+                                                   "instruction"},
+                           "kind": {"type": "string",
+                                    "description": "'ping' (default) or 'task'"}}),
+    "list_reminders": (t_list_reminders, "List pending scheduled reminders for this chat "
+                       "(id, time, kind, text). Use before cancelling, or when asked "
+                       "what is scheduled.", {}),
+    "cancel_reminder": (t_cancel_reminder, "Cancel a pending reminder by id (see "
+                        "list_reminders).",
+                        {"reminder_id": {"type": "integer",
+                                         "description": "id from list_reminders"}}),
 }
 
 
@@ -251,7 +328,7 @@ def _tool_schemas():
              "function": {"name": name, "description": desc,
                           "parameters": {"type": "object",
                                          "properties": props,
-                                         "required": [next(iter(props))]}}}
+                                         "required": [next(iter(props))] if props else []}}}
             for name, (fn, desc, props) in TOOLS.items()]
 
 
@@ -281,6 +358,13 @@ SYSTEM = (
     "BEFORE answering. When you have enough, give the final answer: concise, factual, "
     "grounded in what the tools returned. If the data truly isn't there, say exactly "
     "what you looked for and what's missing. Never invent facts.\n"
+    "FUTURE actions ('remind me at 5pm', 'ping me tomorrow', 'check this evening "
+    "whether...'): you do not run between messages, so call schedule_reminder — kind "
+    "'ping' for a plain reminder message, kind 'task' for a check to perform at that "
+    "time (write the instruction self-contained, with full names and addresses). NEVER "
+    "answer 'I will ping you / check later' without a successful schedule_reminder "
+    "call in THIS turn — an unscheduled promise is a lie. Confirm the scheduled time "
+    "in your reply.\n"
     "SOCIAL messages (greetings, thanks, congratulations, small talk) need no tools — "
     "just reply warmly and briefly like any assistant would. Whatever the message: "
     "NEVER narrate your reasoning or classification ('this is praise, no tool use is "
@@ -289,17 +373,21 @@ SYSTEM = (
 )
 
 
-def run(question, history=""):
+def run(question, history="", chat_id=None):
     """Tool-calling loop. Returns (answer_text, files_to_send) where files_to_send is
     a list of {path, caption} the gateway should upload to the chat. Raises on hard
     failure."""
+    global _current_chat
+    if chat_id:
+        _current_chat = int(chat_id)
     key = _load_key()
     if not key:
         raise RuntimeError("no API key (set PRIVATE_LLM_KEY or PRIVATE_LLM_KEY_FILE)")
     del _pending_files[:]
-    user = ""
+    # The model needs today's date to resolve "tomorrow at 9" into an absolute time.
+    user = f"Current date and time: {time.strftime('%A %Y-%m-%d %H:%M')} (local).\n\n"
     if history.strip():
-        user = f"Recent conversation (oldest first):\n{history.strip()}\n\n"
+        user += f"Recent conversation (oldest first):\n{history.strip()}\n\n"
     user += f"Owner's message: {question}"
     messages = [{"role": "system", "content": SYSTEM},
                 {"role": "user", "content": user}]
