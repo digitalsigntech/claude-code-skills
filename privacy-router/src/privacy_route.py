@@ -29,17 +29,22 @@ def main():
                     help="skip classification; just answer privately via the agent loop")
     ap.add_argument("--history-stdin", action="store_true",
                     help="read recent conversation history (plain text) from stdin")
+    ap.add_argument("--sender", default="the owner",
+                    help="display name of the person who sent the message")
+    ap.add_argument("--chat-id", type=int, default=None,
+                    help="chat the question came from (scheduled reminders fire there)")
     a = ap.parse_args()
     history = sys.stdin.read() if a.history_stdin else ""
     if a.answer:
-        ans, files = private_agent.run(a.query, history)
+        ans, files = private_agent.run(a.query, history, chat_id=a.chat_id)
         out = {"decision": "private", "reason": "forced-answer",
                "answer": ans, "files": files}
     else:
         priv, why = intent.is_private(a.query)
         out = {"decision": "private" if priv else "public", "reason": why}
         if priv:
-            out["answer"], out["files"] = private_agent.run(a.query, history)
+            out["answer"], out["files"] = private_agent.run(a.query, history,
+                                                            chat_id=a.chat_id)
     print(json.dumps(out) if a.json else json.dumps(out, indent=2))
 
 
