@@ -32,6 +32,9 @@ NAT with no public IP or inbound ports.
   question and answered directly (in Always-Nemotron chats this stays on the local
   private path — file captions never escape to the cloud turn); otherwise the bot
   posts inline buttons: **📚 Ingest to KB · 🔍 Analyze · 📎 Hold for chat**.
+  Exception: in Always-Nemotron (private) chats a no-caption document is **ingested
+  into the KB by default** — no keyboard — and the confirmation names the document
+  plus a one-line gist of its contents.
 - **Allowlist-locked.** Only Telegram user IDs listed in `allowlist.json` can talk
   to the bot; everyone else is denied and logged. The file is re-read on every
   message, so you can add/remove users with no restart.

@@ -202,6 +202,37 @@ def _ingest(path, caption):
         return f"⚠️ Ingest failed: {e}"
 
 
+def _doc_gist(path, max_chars=180):
+    """One-line gist (title-ish first lines) of an ingested document, so the ingest
+    confirmation says WHAT went in — a mixed-up upload is then caught on the spot.
+    PDFs are read via the .md docpipe just produced (the source of truth); text-ish
+    files directly. Best-effort: '' on any trouble."""
+    try:
+        src, ext = path, os.path.splitext(path)[1].lower()
+        if ext == ".pdf":
+            slug = re.sub(r"[^a-z0-9]+", "-",
+                          os.path.splitext(os.path.basename(path))[0].lower()).strip("-")
+            src = os.path.join(C.DST_ROOT, "knowledge-base", "from-pdfs", slug + ".md")
+        with open(src, encoding="utf-8", errors="replace") as f:
+            text = f.read(20000)
+        if src.endswith(".md") and text.startswith("---"):
+            text = text.split("---", 2)[-1]          # drop frontmatter
+        keep, name = [], os.path.basename(path)
+        for ln in text.splitlines():
+            ln = ln.strip().lstrip("#").strip()
+            if (not ln or ln == name or ln.startswith(("_Converted", "Page "))
+                    or re.fullmatch(r"[-=*_| ]+", ln)):
+                continue
+            keep.append(ln)
+            if sum(len(k) + 3 for k in keep) > max_chars:
+                break
+        gist = " — ".join(keep)
+        return gist[:max_chars] + "…" if len(gist) > max_chars else gist
+    except Exception as e:
+        log(f"doc gist failed for {path}: {e}")
+        return ""
+
+
 def _file_keyboard(key):
     return {"inline_keyboard": [[
         {"text": "📚 Ingest to KB", "callback_data": f"ing:{key}"},
@@ -359,6 +390,26 @@ def handle_file(msg, chat_id):
             log(f"personal note save FAILED: {e}")
             TG.send_message(chat_id, f"⚠️ Couldn't save that as a personal note: {e}")
         return
+    # Private group, no caption = ingest by default: a bare document goes straight
+    # into the KB — no action keyboard — and the reply confirms the ingest AND what
+    # the document is (title/gist).
+    if not caption.strip() and chat_id in C.ALWAYS_NEMOTRON_CHATS \
+            and path.lower().endswith(C.DOC_EXTS + C.IMG_EXTS):
+        name = os.path.basename(path)
+        with Typing(chat_id):
+            result = _ingest(path, caption)
+            gist = _doc_gist(path)
+        if result.startswith("📚"):
+            head = (f"📚 `{name}` is already in the KB — nothing new to add."
+                    if "already indexed" in result else
+                    f"📚 Ingested `{name}` into the KB (no caption, so ingested by default).")
+            reply = head + (f"\n\nContents: {gist}" if gist else "")
+        else:   # image path keeps _ingest's own message; failures show the raw error
+            reply = result
+        TG.send_message(chat_id, reply, reply_to=msg["message_id"])
+        _arc_out(chat_id, reply)
+        log(f"auto-ingest (no caption) chat={chat_id} {name}")
+        return
     # A caption is the user's actual question/instruction about the file — answer it
     # directly instead of swallowing it behind the action buttons. Hold the file too
     # so follow-up messages in this chat can keep referring to it.
@@ -413,9 +464,10 @@ def handle_file(msg, chat_id):
     key = uuid.uuid4().hex[:10]
     with PENDING_GUARD:
         PENDING[key] = {"path": path, "caption": caption, "chat_id": chat_id}
-    TG.send_message(chat_id,
-                    f"📥 Saved `{os.path.basename(path)}`.\nWhat should I do with it?",
+    prompt_msg = f"📥 Saved `{os.path.basename(path)}`.\nWhat should I do with it?"
+    TG.send_message(chat_id, prompt_msg,
                     reply_to=msg["message_id"], reply_markup=_file_keyboard(key))
+    _arc_out(chat_id, prompt_msg)
 
 
 def handle_voice(msg, chat_id):
@@ -486,7 +538,13 @@ def handle_callback(cb):
     paths = path if isinstance(path, list) else [path]   # albums hold a list of paths
     if action == "ing":
         with Typing(chat_id):
-            TG.send_message(chat_id, "\n".join(_ingest(p, caption) for p in paths))
+            out = []
+            for p in paths:
+                r, g = _ingest(p, caption), _doc_gist(p)
+                out.append(r + (f"\n📄 Contents: {g}" if g else ""))
+            reply = "\n".join(out)
+            TG.send_message(chat_id, reply)
+        _arc_out(chat_id, reply)
     elif action == "anl":
         with Typing(chat_id):
             listing = "\n".join(f"  - {p}" for p in paths)
