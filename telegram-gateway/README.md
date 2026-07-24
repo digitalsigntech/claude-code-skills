@@ -118,6 +118,10 @@ NAT with no public IP or inbound ports.
 
 Runtime dirs (auto-created, gitignored): `state/` (sessions + poll offset),
 `inbox/<chat_id>/` (received files), `logs/`, `inject/` (optional email queue).
+On KB ingest the original document is copied to `knowledge-base/uploads/` before
+any conversion, so the knowledge base never depends on files in `telegram/inbox/`
+(and the upload's filename is searchable immediately, even while a slow
+document→markdown conversion is still running).
 
 ---
 

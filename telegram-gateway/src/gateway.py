@@ -187,7 +187,17 @@ def _save_incoming(msg, chat_id):
 def _ingest(path, caption):
     ext = os.path.splitext(path)[1].lower()
     try:
+        # KB documents belong IN the KB tree, not telegram/inbox. Copy the original
+        # FIRST, before any conversion (which can take minutes): the filename under
+        # knowledge-base/uploads/ is findable the moment the upload is accepted.
+        # Images are skipped -- `media add` already copies them into the media store.
         if ext in C.DOC_EXTS:
+            import shutil
+            up_dir = os.path.join(C.DST_ROOT, "knowledge-base", "uploads")
+            os.makedirs(up_dir, exist_ok=True)
+            kb_copy = os.path.join(up_dir, os.path.basename(path))
+            if not os.path.exists(kb_copy):
+                shutil.copy2(path, kb_copy)
             r = subprocess.run([C.DOCPIPE, "ingest", path], capture_output=True, text=True, timeout=900)
             return f"📚 Ingested into the KB (docpipe).\n{(r.stdout or r.stderr).strip()[:500]}"
         if ext in C.IMG_EXTS:
