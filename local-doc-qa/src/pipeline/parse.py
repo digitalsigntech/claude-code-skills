@@ -11,6 +11,27 @@ from config import CHUNK_CHARS, CHUNK_OVERLAP
 TEXT_EXTS = {".txt", ".md", ".markdown", ".json", ".log", ".py", ".js",
              ".html", ".xml", ".yaml", ".yml", ".rtf"}
 
+# Media/binary formats we can't extract text from locally — skip instead of
+# falling through to the text parser (a multi-MB image read as text becomes
+# thousands of garbage chunks and pegs the embedding server for minutes).
+SKIP_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".heic", ".heif",
+             ".tif", ".tiff", ".svg", ".ico", ".mp4", ".mov", ".avi", ".mkv",
+             ".mp3", ".wav", ".m4a", ".ogg", ".zip", ".gz", ".tgz", ".tar",
+             ".7z", ".rar", ".exe", ".dll", ".so", ".bin", ".iso", ".dmg"}
+
+
+def _looks_binary(path, probe=8192):
+    try:
+        with open(path, "rb") as f:
+            head = f.read(probe)
+    except OSError:
+        return True
+    if b"\x00" in head:
+        return True
+    # mostly non-text bytes -> binary
+    textish = sum(1 for b in head if 32 <= b < 127 or b in (9, 10, 13))
+    return bool(head) and textish / len(head) < 0.7
+
 
 def _chunk(text, max_chars=CHUNK_CHARS, overlap=CHUNK_OVERLAP):
     """Split text into overlapping chunks on paragraph/word boundaries."""
@@ -110,12 +131,18 @@ def _parse_text(path):
 def parse_file(path):
     """Return list of {source, locator, text} chunks for a single file."""
     ext = os.path.splitext(path)[1].lower()
+    if ext in SKIP_EXTS:
+        print(f"  skipping media/binary file (no text extraction): {path}")
+        return []
     if ext == ".pdf":
         items = _parse_pdf(path)
     elif ext in (".csv", ".tsv"):
         items = _parse_csv(path)
-    elif ext in TEXT_EXTS or ext == "":
+    elif ext in TEXT_EXTS:
         items = _parse_text(path)
+    elif _looks_binary(path):
+        print(f"  skipping binary file (no text extraction): {path}")
+        return []
     else:
         # best-effort: try as text
         items = _parse_text(path)

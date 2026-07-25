@@ -43,11 +43,15 @@ start chat "$CHAT_PORT" \
   -m "$CHAT_MODEL_GGUF" \
   --alias local-chat -c 32768 --parallel 1 -ngl 99 -t 8 -fa off -b 2048 -ub 64 --cache-ram 0
 
-# Embedding model. Runs on CPU (-ngl 0) here so the whole GPU stays free for chat;
-# adjust to taste. -ub must be large enough for your longest chunk.
+# Embedding model. Default is full GPU offload (-ngl 99) — embedding models are tiny
+# (a few hundred MB) and batch ingest on CPU can peg every core for minutes. Set
+# EMB_NGL=0 to keep the GPU free for the chat model instead. -ub must be large
+# enough for your longest chunk. Note: if the server logs "ggml_vulkan: No devices
+# found" it silently falls back to CPU — usually the user lacks access to
+# /dev/dri/renderD128 (add them to the `render` group).
 start emb "$EMB_PORT" \
   -m "$EMB_MODEL_GGUF" \
-  --alias local-embed --embeddings -c 8192 -b 4096 -ub 4096 -ngl 0 -t 8 --cache-ram 0
+  --alias local-embed --embeddings -c 8192 -b 4096 -ub 4096 -ngl "${EMB_NGL:-99}" -t 4 --cache-ram 0
 
 echo "waiting for health..."
 for name_port in chat:$CHAT_PORT emb:$EMB_PORT; do
