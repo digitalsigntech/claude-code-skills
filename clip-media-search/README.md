@@ -11,8 +11,11 @@ Everything runs locally on CPU — no image or query ever leaves the machine.
 
 - `add` an image, a video, or a whole directory with an optional annotation + tags.
   Each item gets two vectors: its visual embedding and its annotation-text embedding.
-  Videos (`.mp4/.mov/.webm/.m4v`) are embedded via their middle frame (requires
-  ffmpeg); the index stores the video path, so hits return the clip itself.
+  Videos (`.mp4/.mov/.webm/.m4v`) are embedded via a few sampled frames (25/50/75%,
+  averaged into one vector; requires ffmpeg); the index stores the video path, so
+  hits return the clip itself. Every item also records a content hash (`sha1`) so
+  duplicate copies of the same file under different names can be detected
+  (`MediaStore.has_content`).
 - `find "query"` returns the top-k images by cosine similarity, labelling each hit
   as a `visual` or `annotation` match.
 - A warm HTTP server keeps the model + index resident so lookups are sub-second.

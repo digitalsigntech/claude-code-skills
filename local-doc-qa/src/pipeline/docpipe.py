@@ -2,7 +2,10 @@
 """docpipe — local, private document Q&A / extraction.
 
 Pipeline (runs entirely against your configured model endpoints; local by default):
-  parse (PDF/CSV/text) -> chunk -> embed -> store (numpy)
+  parse (PDF/DOCX/CSV/text) -> chunk -> embed -> store (numpy)
+  media by CONTENT, never raw bytes: images/videos -> CLIP media index if the
+  clip-media-search skill is installed (videos by sampled frames); video/audio
+  soundtracks -> whisper.cpp transcript -> text index (optional, see media_text.py).
   ask: embed query -> retrieve top-k -> answer with the chat model, with citations.
 
 With a local backend, document content never leaves the machine. An orchestrator
@@ -22,7 +25,16 @@ import llm
 from store import VectorStore
 from config import TOP_K, CHUNK_CHARS
 
-SUPPORTED = (".pdf", ".csv", ".tsv", ".txt", ".md", ".json", ".log", ".yaml", ".yml", ".html", ".xml")
+SUPPORTED = (".pdf", ".docx", ".csv", ".tsv", ".txt", ".md", ".json", ".log",
+             ".yaml", ".yml", ".html", ".xml")
+# Media is indexed by CONTENT, never by raw bytes: images/videos go to the CLIP
+# media index (optional, from the clip-media-search skill; put it on PYTHONPATH),
+# video/audio soundtracks are whisper-transcribed into the text index (optional,
+# requires whisper.cpp — see media_text.py).
+IMG_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp")
+VID_EXTS = (".mp4", ".mov", ".webm", ".m4v", ".mkv", ".avi")
+AUD_EXTS = (".mp3", ".wav", ".m4a", ".ogg", ".opus", ".flac")
+SUPPORTED = SUPPORTED + IMG_EXTS + VID_EXTS + AUD_EXTS
 
 
 def _expand(paths):
@@ -38,6 +50,62 @@ def _expand(paths):
     return sorted(set(out))
 
 
+def _index_text(store, chunks):
+    """Embed + add pre-built chunks; returns chunk count."""
+    embs = []
+    B = 32
+    for i in range(0, len(chunks), B):
+        embs.append(llm.embed([c["text"] for c in chunks[i:i+B]], kind="document"))
+    import numpy as np
+    store.add(chunks, np.vstack(embs))
+    return len(chunks)
+
+
+def _ingest_media(store, path, force):
+    """Images/videos -> CLIP media index (if available); video/audio soundtrack
+    -> whisper transcript into the text index. Returns transcript chunk count."""
+    ext = os.path.splitext(path)[1].lower()
+    src = os.path.abspath(path)
+    if ext in IMG_EXTS or ext in VID_EXTS:
+        try:
+            import clip_media
+        except ImportError:
+            clip_media = None
+            print(f"  clip_media not on PYTHONPATH; skipping visual index for {path}")
+        if clip_media:
+            sha = clip_media.file_sha1(path)
+            if not force and clip_media.MediaStore().has_content(sha):
+                print(f"  skip (same content already in media index): {path}")
+            elif ext in IMG_EXTS:
+                clip_media.index_image(path, tags="doc-ingest", sha1=sha)
+                print(f"  image -> CLIP media index: {path}")
+            else:
+                clip_media.index_video(path, tags="doc-ingest", sha1=sha)
+                print(f"  video -> CLIP media index (sampled frames): {path}")
+    if ext in IMG_EXTS:
+        return 0
+    # transcript (video soundtrack or audio file) -> text index
+    if store.has_file(src) and not force:
+        print(f"  skip (transcript already indexed): {path}")
+        return 0
+    import media_text
+    try:
+        text = media_text.transcribe(path)
+    except Exception as e:
+        print(f"  transcript failed for {path}: {e}")
+        return 0
+    if not text:
+        print(f"  no speech found in {path}; nothing to transcribe")
+        return 0
+    if store.has_file(src):
+        store.remove_file(src)
+    chunks = [{"source": src, "locator": f"transcript {i+1}", "text": c}
+              for i, c in enumerate(P._chunk(text))]
+    n = _index_text(store, chunks)
+    print(f"  indexed {n:4d} transcript chunk(s)  <- {path}")
+    return n
+
+
 def cmd_ingest(args):
     store = VectorStore()
     files = _expand(args.paths)
@@ -45,6 +113,10 @@ def cmd_ingest(args):
         print("No matching files."); return
     total = 0
     for path in files:
+        ext = os.path.splitext(path)[1].lower()
+        if ext in IMG_EXTS or ext in VID_EXTS or ext in AUD_EXTS:
+            total += _ingest_media(store, path, args.force)
+            continue
         # A PDF is processed ONCE into a .md (the source of truth); index that .md.
         if path.lower().endswith(".pdf"):
             import pdf2md
@@ -59,15 +131,9 @@ def cmd_ingest(args):
         chunks = P.parse_file(path)
         if not chunks:
             print(f"  empty: {path}"); continue
-        # embed in batches to bound memory
-        embs = []
-        B = 32
-        for i in range(0, len(chunks), B):
-            embs.append(llm.embed([c["text"] for c in chunks[i:i+B]], kind="document"))
-        import numpy as np
-        store.add(chunks, np.vstack(embs))
-        total += len(chunks)
-        print(f"  indexed {len(chunks):4d} chunks  <- {path}")
+        n = _index_text(store, chunks)
+        total += n
+        print(f"  indexed {n:4d} chunks  <- {path}")
     store.save()
     print(f"Done. {total} new chunks. Index now: {store.stats()}")
 
