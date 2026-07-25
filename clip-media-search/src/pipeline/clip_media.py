@@ -18,7 +18,7 @@ Usage:
   clip_media.py find "natural-language query" [-k 8]
   clip_media.py list
 """
-import os, sys, json, shutil, argparse, subprocess, datetime
+import os, sys, json, shutil, argparse, subprocess, datetime, hashlib
 import numpy as np
 
 # Paths derive from this script's location by default; override via env vars.
@@ -84,11 +84,16 @@ class MediaStore:
         self.ann = self.ann[keep] if keep else np.zeros((0, DIM), np.float32)
         self.meta = [self.meta[i] for i in keep]
 
-    def add(self, path, img_vec, ann_vec, annotation, tags):
+    def has_content(self, sha1):
+        """True if a file with this content hash is already indexed (the same
+        image often arrives as multiple copies under different names)."""
+        return any(m.get("sha1") == sha1 for m in self.meta)
+
+    def add(self, path, img_vec, ann_vec, annotation, tags, sha1=None):
         self._remove(path)  # idempotent re-index
         has_ann = ann_vec is not None
         self.meta.append({"path": path, "annotation": annotation, "tags": tags,
-                          "has_ann": has_ann,
+                          "has_ann": has_ann, "sha1": sha1,
                           "added": datetime.datetime.now().isoformat(timespec="seconds")})
         self.img = np.vstack([self.img, img_vec])
         self.ann = np.vstack([self.ann, ann_vec if has_ann else np.zeros(DIM, np.float32)])
@@ -113,7 +118,15 @@ class MediaStore:
         json.dump(self.meta, open(META, "w"), indent=2)
 
 
-def index_image(path, annotation="", tags=""):
+def file_sha1(path):
+    h = hashlib.sha1()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def index_image(path, annotation="", tags="", sha1=None):
     os.makedirs(MEDIA_DIR, exist_ok=True)
     dest = os.path.join(MEDIA_DIR, os.path.basename(path))
     if os.path.abspath(path) != os.path.abspath(dest):
@@ -121,30 +134,37 @@ def index_image(path, annotation="", tags=""):
     img_vec = embed_image(dest)
     ann_vec = embed_text(annotation) if annotation.strip() else None
     s = MediaStore()
-    s.add(dest, img_vec, ann_vec, annotation, tags)
+    s.add(dest, img_vec, ann_vec, annotation, tags, sha1=sha1 or file_sha1(dest))
     s.save()
     return dest
 
 
-def index_video(path, annotation="", tags=""):
-    """Index a video by its middle frame (CLIP sees one representative frame; the
-    annotation carries the rest). Meta path points at the VIDEO, so search hits
-    return the clip itself. Requires ffmpeg/ffprobe on PATH."""
+def index_video(path, annotation="", tags="", sha1=None):
+    """Index a video by a few sampled frames (25/50/75% — averaged CLIP vector,
+    so one entry per clip; the annotation carries the rest). Meta path points at
+    the VIDEO, so search hits return the clip itself. Requires ffmpeg/ffprobe."""
     os.makedirs(MEDIA_DIR, exist_ok=True)
     dest = os.path.join(MEDIA_DIR, os.path.basename(path))
     if os.path.abspath(path) != os.path.abspath(dest):
         shutil.copy2(path, dest)
     dur = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
                           "-of", "csv=p=0", dest], capture_output=True, text=True)
-    mid = max(float(dur.stdout.strip() or 0) / 2, 0.1)
+    total = float(dur.stdout.strip() or 0)
     frame = os.path.join(STORE_DIR, "_vid_frame.jpg")
-    subprocess.run(["ffmpeg", "-y", "-v", "error", "-ss", str(mid), "-i", dest,
-                    "-frames:v", "1", frame], check=True)
-    img_vec = embed_image(frame)
-    os.remove(frame)
+    vecs = []
+    for frac in (0.25, 0.5, 0.75):
+        ts = max(total * frac, 0.1)
+        r = subprocess.run(["ffmpeg", "-y", "-v", "error", "-ss", str(ts), "-i", dest,
+                            "-frames:v", "1", frame])
+        if r.returncode == 0 and os.path.exists(frame):
+            vecs.append(embed_image(frame))
+            os.remove(frame)
+    if not vecs:
+        raise RuntimeError(f"could not extract any frame from {dest}")
+    img_vec = _norm(np.mean(vecs, axis=0))
     ann_vec = embed_text(annotation) if annotation.strip() else None
     s = MediaStore()
-    s.add(dest, img_vec, ann_vec, annotation, tags)
+    s.add(dest, img_vec, ann_vec, annotation, tags, sha1=sha1 or file_sha1(dest))
     s.save()
     return dest
 

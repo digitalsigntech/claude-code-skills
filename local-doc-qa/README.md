@@ -32,7 +32,8 @@ detection); the `.md` becomes the source of truth and the PDF is never re-read.
 | `src/docpipe` | shell wrapper — runs `pipeline/docpipe.py` from anywhere via the project venv |
 | `src/pipeline/docpipe.py` | CLI entry point; the ask router (structured vs RAG) lives here |
 | `src/pipeline/config.py` | all knobs (endpoints, model names, chunking, retrieval); env-overridable |
-| `src/pipeline/parse.py` | PDF (PyMuPDF) / CSV (pandas) / text parsing → citable chunks; media/binary files are skipped, never embedded |
+| `src/pipeline/parse.py` | PDF (PyMuPDF) / DOCX (stdlib zip/XML) / CSV (pandas) / text parsing → citable chunks; other binaries are skipped, never embedded |
+| `src/pipeline/media_text.py` | optional: video/audio → whisper.cpp transcript → text index (images/videos also go to the CLIP media index when the clip-media-search skill is on PYTHONPATH) |
 | `src/pipeline/pdf2md.py` | one-time PDF → Markdown conversion (tables + prose) |
 | `src/pipeline/llm.py` | thin OpenAI-compatible clients for the chat + embedding servers |
 | `src/pipeline/store.py` | tiny numpy cosine vector store (`vectors.npy` + `meta.json`) |

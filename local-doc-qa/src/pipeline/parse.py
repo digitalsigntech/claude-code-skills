@@ -11,13 +11,17 @@ from config import CHUNK_CHARS, CHUNK_OVERLAP
 TEXT_EXTS = {".txt", ".md", ".markdown", ".json", ".log", ".py", ".js",
              ".html", ".xml", ".yaml", ".yml", ".rtf"}
 
-# Media/binary formats we can't extract text from locally — skip instead of
-# falling through to the text parser (a multi-MB image read as text becomes
-# thousands of garbage chunks and pegs the embedding server for minutes).
+# Binary formats we can't extract text from locally — skip instead of falling
+# through to the text parser (a multi-MB image read as text becomes thousands
+# of garbage chunks and pegs the embedding server for minutes). Images/videos/
+# audio are here as a backstop: docpipe routes them to the CLIP media index +
+# whisper transcription BEFORE parse_file. .doc is the legacy pre-2007 Word
+# binary format (no dependency-free converter); .docx is parsed below.
 SKIP_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".heic", ".heif",
              ".tif", ".tiff", ".svg", ".ico", ".mp4", ".mov", ".avi", ".mkv",
-             ".mp3", ".wav", ".m4a", ".ogg", ".zip", ".gz", ".tgz", ".tar",
-             ".7z", ".rar", ".exe", ".dll", ".so", ".bin", ".iso", ".dmg"}
+             ".webm", ".m4v", ".mp3", ".wav", ".m4a", ".ogg", ".opus", ".flac",
+             ".zip", ".gz", ".tgz", ".tar", ".7z", ".rar", ".exe", ".dll",
+             ".so", ".bin", ".iso", ".dmg", ".doc"}
 
 
 def _looks_binary(path, probe=8192):
@@ -117,6 +121,24 @@ def _parse_csv(path, sep=None):
     return items
 
 
+def _parse_docx(path):
+    """Word .docx -> text via stdlib (a .docx is a zip; paragraphs live in
+    word/document.xml as <w:p>/<w:t> elements). No python-docx dependency."""
+    import zipfile
+    from xml.etree import ElementTree as ET
+    W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    with zipfile.ZipFile(path) as z:
+        root = ET.fromstring(z.read("word/document.xml"))
+    paras = []
+    for p in root.iter(W + "p"):
+        t = "".join(n.text or "" for n in p.iter(W + "t"))
+        if t.strip():
+            paras.append(t.strip())
+    text = "\n".join(paras)
+    return [{"locator": f"chunk {i+1}", "text": c}
+            for i, c in enumerate(_chunk(text))]
+
+
 def _parse_text(path):
     with open(path, "r", encoding="utf-8", errors="replace") as f:
         raw = f.read()
@@ -136,6 +158,8 @@ def parse_file(path):
         return []
     if ext == ".pdf":
         items = _parse_pdf(path)
+    elif ext == ".docx":
+        items = _parse_docx(path)
     elif ext in (".csv", ".tsv"):
         items = _parse_csv(path)
     elif ext in TEXT_EXTS:
