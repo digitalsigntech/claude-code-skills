@@ -40,7 +40,11 @@ OWNER_PERSONAL_EMAIL = os.environ.get("TG_OWNER_PERSONAL_EMAIL", "")
 
 # Headless Claude (the "brain") — every message runs a real Claude turn with full
 # tools, in the DST workspace, with one persistent session per Telegram chat.
-CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
+# Resolve to an absolute path: consumers (e.g. a voice-server bridge) may run
+# without ~/.local/bin on PATH, where a bare "claude" fails with ENOENT.
+import shutil as _shutil
+CLAUDE_BIN = (os.environ.get("CLAUDE_BIN") or _shutil.which("claude")
+              or os.path.expanduser("~/.local/bin/claude"))
 CLAUDE_WORKDIR = DST_ROOT
 CLAUDE_MODEL = os.environ.get("DST_TG_MODEL", "claude-fable-5")
 CLAUDE_TIMEOUT = int(os.environ.get("DST_TG_TIMEOUT", "900"))
