@@ -25,7 +25,9 @@ A message only becomes an agent turn if it clears ALL of these gates:
 2. **DKIM/SPF verification** — the `Authentication-Results` header stamped by
    Gmail itself (authserv-id `mx.google.com`; Gmail strips forged copies per
    RFC 8601 §5) must show `dkim=pass` with `header.d` aligned to the owner's
-   domain. So a mail *claiming* `From: owner@yourdomain.com` sent from an
+   domain — or to its Google-default signing domain
+   (`<domain-with-dashes>.<selector>.gappssmtp.com`, which Workspaces without
+   custom DKIM use; only that Workspace's Google-managed key can sign it). So a mail *claiming* `From: owner@yourdomain.com` sent from an
    attacker's server fails — the attacker cannot produce your domain's DKIM
    signature. Failures are reported to Telegram as a **possible impersonation
    attempt**. (`GCA_ALLOW_SPF_ONLY=1` relaxes to aligned `spf=pass` for the
