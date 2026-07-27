@@ -451,6 +451,11 @@ def handle_file(msg, chat_id):
                              "NOT substitute an old diagram or file; tell the sender "
                              "plainly that you could not read the image and ask them "
                              "to resend it or describe it in text")
+            elif path.lower().endswith(".pdf"):
+                # PDF tools added 2026-07-27 — point the agent at them instead of
+                # the old "cannot view it" note it used to echo back as a refusal.
+                note += (" — a PDF: call read_pdf with this exact path to read it, "
+                         "and edit_pdf if they ask for changes")
             else:
                 note += " — you cannot view it, but their message refers to it"
             turn_text = f"{note}] {caption.strip()}"
