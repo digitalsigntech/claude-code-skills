@@ -106,7 +106,7 @@ NAT with no public IP or inbound ports.
 | `src/tgconf.py` | All config: token, allowlist, paths, model, timeouts, feature flags. **Edit this first.** |
 | `src/photo_reflex.py` | Optional sub-second image retrieval: intent detection → warm CLIP server → send via cached `file_id`s. |
 | `src/doc_reflex.py` | Optional ~1s document delivery: keyword match against a curated registry → `sendDocument` via cached `file_id`s. |
-| `src/file_reflex.py` | Optional generic file reflex: "show/fetch/get/give me <thing>" resolved against the CLIP image index and a cached workspace walk; sends only a full-token-coverage match (docs via `sendDocument`, images via the photo path), everything else falls through to the LLM turn. |
+| `src/file_reflex.py` | Optional generic file reflex: "show/fetch/get/give me <thing>" resolved against the CLIP image index and a cached workspace walk (workspace files in DMs + Always-Nemotron private groups only); sends only a full-token-coverage match (docs via `sendDocument`, images via the photo path), everything else falls through to the LLM turn. |
 | `src/personal_notes.py` | Optional owner-private note store: no-caption DM files auto-saved; strict delivery gate (owner DM / bot+owner-only group, fails closed). |
 | `src/voice_mode.py` | Optional on-box voice conversation: whisper.cpp STT (auto language) + Piper TTS; used by `handle_voice()` for chats in `VOICE_CHATS`. |
 | `src/qa_cache.py` | Semantic Q&A answer cache: repeat questions (even reworded) answered in ~0.1s from a local-embedding cache instead of an LLM turn; guards for product codes, TTL, and conversational fragments. |
