@@ -879,8 +879,8 @@ def handle_text(msg, chat_id, text):
 
     # File reflex (2026-07-10, the owner: "show me / fetch / get / give me ... PDF, images,
     # docs and other files — fast, closely matching"): generic fetch-verb requests are
-    # resolved deterministically against the KB image index and (DM chats only) a
-    # cached walk of the DST workspace. Only a candidate covering EVERY distinctive
+    # resolved deterministically against the KB image index and (DMs + Always-Nemotron
+    # private groups only) a cached walk of the DST workspace. Only a candidate covering EVERY distinctive
     # query token is sent; ambiguous/partial/question-shaped asks fall through.
     if C.FILE_REFLEX:
         try:

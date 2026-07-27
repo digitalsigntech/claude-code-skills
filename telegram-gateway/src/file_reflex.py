@@ -14,7 +14,9 @@ random." One verb surface, three sources, strict matching, no LLM turn:
  3. workspace files — a cached walk of the DST tree (~4k files, refreshed every
     2 min); a file qualifies only when every distinctive query token appears in its
     name or parent folders. Best precision wins; ties go to the newest file.
-    DM chats ONLY — group chats never get arbitrary workspace files, just registry
+    DM chats + Always-Nemotron private groups ONLY (those are private channels
+    whose agent may send workspace files anyway, so the reflex may too) — other
+    group chats never get arbitrary workspace files, just registry
     docs + KB images. Secrets (token/credential/key/.env), databases and the
     mail/telegram/chatlog trees are never indexed.
 
@@ -187,7 +189,8 @@ def resolve(chat_id, text):
             return None                  # none or too vague -> Claude decides
         return ("note", nhits[0][3])     # newest match
     imgs = [] if file_hint else _images(qtoks)
-    files = [] if (img_hint or chat_id <= 0) else _files(qtoks, ext)
+    ws_ok = chat_id > 0 or chat_id in C.ALWAYS_NEMOTRON_CHATS
+    files = [] if (img_hint or not ws_ok) else _files(qtoks, ext)
     if sum(1 for s in (nhits, imgs, files) if s) > 1:
         return None                      # plausible several ways -> Claude decides
     if nhits:
