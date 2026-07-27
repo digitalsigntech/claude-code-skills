@@ -107,3 +107,27 @@ All knobs are command-line flags:
   For structured extraction, use `--html-out` and parse the HTML with a proper library.
 - **Be a good citizen.** Respect each site's terms of service and `robots.txt`, and
   don't hammer servers.
+
+## Fetching images behind a WAF (`src/web_image_fetch.py`)
+
+Some sites (e.g. Imperva/Incapsula-protected product catalogs) block `curl`/`wget`
+by **TLS fingerprint** — a browser User-Agent header is not enough, and
+`--dump-dom` only returns HTML, not image bytes. `web_image_fetch.py` solves both:
+
+```bash
+python3 src/web_image_fetch.py <page-url> <url-substring> <out.jpg> [full-size-image-url]
+```
+
+- Launches real headless Chrome with a **remote-debugging (CDP) port** and a
+  desktop User-Agent (the default headless UA is itself WAF-detected).
+- Navigates to the page, lets it load, then (optionally) force-loads a full-size
+  image URL by injecting an `<img>` into the DOM.
+- Captures the image **bytes off the wire** via `Network.getResponseBody` — immune
+  to both CORS (no cross-origin `fetch()` involved) and TLS fingerprinting (it IS
+  Chrome), and validates JPEG/PNG/WebP magic bytes before writing.
+- Picks the largest matching image if several responses match the substring.
+
+Requires `pip install websocket-client`. Two gotchas learned the hard way:
+Chrome rejects CDP WebSocket connections without `--remote-allow-origins=*`, and a
+cross-origin `fetch()` from the page context fails on CORS even though the browser
+loaded the image fine — capturing the network response body sidesteps it entirely.
