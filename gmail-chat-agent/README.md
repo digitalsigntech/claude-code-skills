@@ -11,6 +11,10 @@ prints is emailed back as a threaded reply. Email from **anyone else** is
 never processed and never replied to — but it is reported to a Telegram chat
 so the owner always knows what arrived.
 
+Cloud-only by design: everything runs against cloud services (Gmail API, a
+cloud agent CLI such as Claude Code, Telegram Bot API). No local model, GPU,
+or on-box AI pipeline is required — the host just needs Python and cron.
+
 ## Security model
 
 A message only becomes an agent turn if it clears ALL of these gates:
