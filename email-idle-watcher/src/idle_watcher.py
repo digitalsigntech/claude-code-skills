@@ -4,7 +4,10 @@
 Holds a persistent Gmail IMAP IDLE connection (XOAUTH2, reusing the OAuth token).
 The server pushes the instant new mail arrives — no polling. On a new INBOX message
 from an allow-listed sender (all other senders ignored), it fetches the body and
-drops it as a JSON file into a queue directory. A downstream consumer (e.g. a chat
+drops it as a JSON file into a queue directory. Impersonation protection: the From
+address must EXACTLY match an allow-listed address (parseaddr — display-name tricks
+fail), and the mail must pass Gmail's own DKIM/SPF verification (see
+sender_authenticated); spoofed mail is logged as SKIP-SPOOF and never queued. A downstream consumer (e.g. a chat
 gateway) drains that queue and processes each email — for example, running it as a
 real chat turn so an email from an allow-listed sender is treated like a typed message.
 
@@ -16,7 +19,8 @@ Configuration (env vars, all optional — sane defaults derived from this file's
   IDLE_ALLOWED      comma-separated allow-listed sender addrs  (default owner@example.com,peer@example.com)
   IDLE_DEFAULT_CHAT default chat/route id for notifications    (default 123456789)
 """
-import os, sys, ssl, time, json, base64, socket, imaplib, subprocess, urllib.request, urllib.parse
+import os, re, sys, ssl, time, json, base64, socket, imaplib, subprocess, urllib.request, urllib.parse
+from email.utils import parseaddr
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE)
@@ -119,6 +123,40 @@ def _body_text(payload):
     return text
 
 
+def gmail_auth_results(full):
+    """The Authentication-Results header STAMPED BY GMAIL (authserv-id
+    mx.google.com), topmost occurrence. Gmail strips inbound headers claiming its
+    own authserv-id (RFC 8601 §5), so this one is trustworthy — never trust an AR
+    header with any other authserv-id (an attacker can attach those)."""
+    for h in full.get("payload", {}).get("headers", []):
+        if h["name"].lower() == "authentication-results" and \
+           h["value"].strip().lower().startswith("mx.google.com"):
+            return h["value"].lower()
+    return ""
+
+
+def sender_authenticated(full, addr):
+    """Anti-impersonation gate: Gmail itself must have verified the mail really
+    came from addr's domain. Accepts dkim=pass with header.d/i aligned to the
+    domain OR to a Workspace's Google-default signing domain
+    (<domain-with-dashes>.<selector>.gappssmtp.com — Workspaces without custom
+    DKIM sign with that, not the bare domain), else spf=pass naming the exact
+    address. A forged From sent from an outside server passes none of these."""
+    ar = gmail_auth_results(full)
+    if not ar:
+        return False
+    domain = addr.rsplit("@", 1)[-1]
+    gapps = domain.replace(".", "-") + "."
+    for m in re.finditer(r"dkim=pass[^;]*?header\.(?:d|i)=@?([\w.\-]+)", ar):
+        d = m.group(1)
+        if d == domain or d.endswith("." + domain) or \
+           (d.startswith(gapps) and d.endswith(".gappssmtp.com")):
+            return True
+    if re.search(r"spf=pass[^;]*?\b" + re.escape(addr) + r"\b", ar):
+        return True
+    return False
+
+
 def is_auto_error(full, frm, subj, body):
     """Detect automated noise we should NOT treat as a real message: bounces,
     out-of-office / vacation auto-replies, and bot error notices (e.g. a peer agent
@@ -189,7 +227,10 @@ def check_new(first_run=False):
         m = s.users().messages().get(userId="me", id=mid, format="metadata",
                                      metadataHeaders=["From", "Subject"]).execute()
         frm = _hdr(m, "From"); subj = _hdr(m, "Subject") or "(no subject)"
-        if not any(a in frm.lower() for a in ALLOWED_SENDERS):
+        # Exact RFC 5322 address match — substring/display-name tricks like
+        # 'From: "owner@real.com" <attacker@evil.com>' fail here.
+        addr = parseaddr(frm)[1].lower()
+        if addr not in ALLOWED_SENDERS:
             log(f"IGNORE {mid} | {frm} | {subj}  (sender not allow-listed)")
             continue
         # Policy: a mail from an allow-listed sender is treated like a chat message —
@@ -201,6 +242,11 @@ def check_new(first_run=False):
         reason = is_auto_error(full, frm, subj, body)
         if reason:
             log(f"SKIP-AUTO {mid} | {frm} | {subj}  ({reason})")
+            continue
+        if not sender_authenticated(full, addr):
+            log(f"SKIP-SPOOF {mid} | {frm} | {subj}  (DKIM/SPF verification failed)")
+            notify(f"POSSIBLE IMPERSONATION: mail claiming to be from {addr} failed "
+                   f"DKIM/SPF verification. Subject: {subj}. Ignored — not queued.")
             continue
         log(f"NEW {mid} | {frm} | {subj}  -> queued as chat message")
         enqueue_injection({"id": mid, "from": frm, "subject": subj,

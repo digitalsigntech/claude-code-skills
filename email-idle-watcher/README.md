@@ -12,7 +12,13 @@ watchdog wrapper keeps the connection alive and restarts it if it wedges.
   OAuth access token). The server pushes a notification the instant new mail
   lands in the INBOX.
 - On each wake it lists recent INBOX messages and acts only on ones from an
-  **allow-listed set of senders** — everything else is ignored.
+  **allow-listed set of senders** — everything else is ignored. Impersonation
+  protection: the From address must exactly match an allow-listed address
+  (display-name tricks fail), and the mail must pass Gmail's own DKIM/SPF
+  verification (only the `mx.google.com`-stamped `Authentication-Results`
+  header is trusted; a Workspace's `gappssmtp.com` default signing domain is
+  accepted as aligned). Spoofed mail is never queued and is flagged via the
+  notify hook.
 - It filters out automated noise (bounces, out-of-office / vacation auto-replies,
   bot error notices) via RFC 3834 headers, sender heuristics, and text patterns,
   so those never trigger a downstream turn.
@@ -78,7 +84,7 @@ Environment variables (all optional; defaults derived from the script location):
 |-----|---------|---------|
 | `IDLE_INJECT_DIR` | `../queue` | Directory jobs are dropped into. |
 | `IDLE_BOT_TOKEN_F` | `../gateway/bot_token` | File holding a chat-bot API token (for the optional `notify()`). |
-| `IDLE_ALLOWED` | `owner@example.com,peer@example.com` | Comma-separated allow-listed sender addresses (substring match). |
+| `IDLE_ALLOWED` | `owner@example.com,peer@example.com` | Comma-separated allow-listed sender addresses (exact match on the parsed From address). |
 | `IDLE_DEFAULT_CHAT` | `123456789` | Fallback chat/route id stamped on jobs and used for notifications. |
 
 In-file knobs (top of `idle_watcher.py`): `BODY_MAX` (email body cap fed

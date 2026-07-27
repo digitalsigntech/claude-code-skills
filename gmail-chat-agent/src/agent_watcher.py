@@ -143,13 +143,20 @@ def gmail_auth_results(full):
 
 
 def _domains_align(d, domain):
-    return d == domain or d.endswith("." + domain) or domain.endswith("." + d)
+    if d == domain or d.endswith("." + domain) or domain.endswith("." + d):
+        return True
+    # Workspaces without custom DKIM sign with Google's default domain:
+    # <domain-with-dashes>.<selector>.gappssmtp.com — only this Workspace's
+    # Google-managed key can produce that signature, so it's just as binding.
+    gapps = domain.replace(".", "-") + "."
+    return d.startswith(gapps) and d.endswith(".gappssmtp.com")
 
 
 def sender_authenticated(full, addr):
     """True only if Gmail itself verified the mail really came from addr's
-    domain: dkim=pass with header.d aligned to the domain (or, if explicitly
-    enabled, spf=pass aligned). This is what stops From-header impersonation."""
+    domain: dkim=pass with header.d aligned to the domain (or its gappssmtp
+    default signing domain; or, if explicitly enabled, spf=pass aligned).
+    This is what stops From-header impersonation."""
     ar = gmail_auth_results(full)
     if not ar:
         return False
