@@ -23,6 +23,13 @@ DEFAULT_ACCOUNT = "agent"
 OWNER_EMAILS = [a.strip().lower() for a in os.environ.get(
     "GCA_OWNERS", "owner@example.com").split(",") if a.strip()]
 
+# FRIENDS: whitelisted outsiders whose mail is also processed and replied to —
+# same DKIM/SPF verification — but under a restricted-trust prompt: technical
+# help only, and the agent is told it must NEVER disclose the owner's private
+# information to them (hard rule, stated as non-overridable). Empty by default.
+FRIEND_EMAILS = [a.strip().lower() for a in os.environ.get(
+    "GCA_FRIENDS", "").split(",") if a.strip()]
+
 # If True, an owner mail with no aligned DKIM pass is still accepted when SPF
 # passes for the owner's domain. Keep False unless the owner's provider is
 # known not to sign with DKIM (rare — Gmail/Workspace always sign).
