@@ -23,7 +23,7 @@ watchdog wrapper keeps the connection alive and restarts it if it wedges.
   bot error notices) via RFC 3834 headers, sender heuristics, and text patterns,
   so those never trigger a downstream turn.
 - Qualifying messages are written atomically as `<ts>-<msgid>.json` into a queue
-  directory. Each job carries `{id, from, subject, body, chat_id, ts}`.
+  directory. Each job carries `{id, from, subject, body, friend, chat_id, ts}`.
 - An optional `notify()` helper can ping a chat bot (a Telegram Bot API endpoint
   is shown as an example — swap for any backend).
 
@@ -85,6 +85,7 @@ Environment variables (all optional; defaults derived from the script location):
 | `IDLE_INJECT_DIR` | `../queue` | Directory jobs are dropped into. |
 | `IDLE_BOT_TOKEN_F` | `../gateway/bot_token` | File holding a chat-bot API token (for the optional `notify()`). |
 | `IDLE_ALLOWED` | `owner@example.com,peer@example.com` | Comma-separated allow-listed sender addresses (exact match on the parsed From address). |
+| `IDLE_FRIENDS` | *(empty)* | Optional comma-separated "friend" senders: same verification gates, but their queue jobs carry `"friend": true` so the downstream consumer can apply restricted trust (e.g. never expose the owner's private data to them). |
 | `IDLE_DEFAULT_CHAT` | `123456789` | Fallback chat/route id stamped on jobs and used for notifications. |
 
 In-file knobs (top of `idle_watcher.py`): `BODY_MAX` (email body cap fed

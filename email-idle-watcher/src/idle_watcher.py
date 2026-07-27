@@ -43,6 +43,12 @@ ALLOWED_SENDERS = tuple(
     os.environ.get("IDLE_ALLOWED", "owner@example.com,peer@example.com").split(",")
     if s.strip()
 )
+# FRIENDS: whitelisted outsiders — same verification gates, but their queue jobs
+# are stamped "friend": true so the downstream consumer can apply restricted
+# trust (e.g. technical help only, never disclose the owner's private data).
+FRIEND_SENDERS = tuple(
+    s.strip().lower() for s in os.environ.get("IDLE_FRIENDS", "").split(",") if s.strip()
+)
 BODY_MAX     = 12000   # cap email body fed into the downstream turn
 
 IDLE_RENEW   = 300     # re-issue IDLE every 5 min (Gmail drops IDLE ~29 min)
@@ -230,7 +236,7 @@ def check_new(first_run=False):
         # Exact RFC 5322 address match — substring/display-name tricks like
         # 'From: "owner@real.com" <attacker@evil.com>' fail here.
         addr = parseaddr(frm)[1].lower()
-        if addr not in ALLOWED_SENDERS:
+        if addr not in ALLOWED_SENDERS and addr not in FRIEND_SENDERS:
             log(f"IGNORE {mid} | {frm} | {subj}  (sender not allow-listed)")
             continue
         # Policy: a mail from an allow-listed sender is treated like a chat message —
@@ -250,7 +256,8 @@ def check_new(first_run=False):
             continue
         log(f"NEW {mid} | {frm} | {subj}  -> queued as chat message")
         enqueue_injection({"id": mid, "from": frm, "subject": subj,
-                           "body": body, "chat_id": target_chat(), "ts": int(time.time())})
+                           "body": body, "friend": addr in FRIEND_SENDERS,
+                           "chat_id": target_chat(), "ts": int(time.time())})
         acted += 1
     return acted
 

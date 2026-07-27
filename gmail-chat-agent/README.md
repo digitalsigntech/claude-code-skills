@@ -39,6 +39,14 @@ A message only becomes an agent turn if it clears ALL of these gates:
 4. **Rate brake** — at most `GCA_MAX_TURNS_PER_HOUR` (default 20) agent turns
    per rolling hour; overflow is reported, not processed.
 
+Optional **friends tier** (`GCA_FRIENDS`, empty by default): whitelisted
+outsiders whose mail is also verified (same DKIM/SPF gates), processed, and
+replied to — but under a restricted-trust prompt: technical help only, and a
+hard, explicitly non-overridable instruction that the agent must never
+disclose the owner's private information (files, emails, contacts, business
+data, credentials) to them, nor read private stores while handling their
+mail. Friend turns are reported to the Telegram chat (`🤝 replied to …`).
+
 Everything that fails gate 1 or 2 → **no reply, no agent turn**, one line in
 the Telegram report chat (`📧 ignored email from …` / `⚠️ POSSIBLE IMPERSONATION`).
 
@@ -70,6 +78,8 @@ the Telegram report chat (`📧 ignored email from …` / `⚠️ POSSIBLE IMPER
 2. Configure (env vars, or edit `src/config.py`):
    - `GCA_AGENT_EMAIL` — the bot's mailbox (e.g. `bot@yourdomain.com`)
    - `GCA_OWNERS` — comma-separated owner addresses; ONLY these are obeyed
+   - `GCA_FRIENDS` — optional comma-separated whitelisted outsiders (replied
+     to under the restricted no-private-data policy; empty = disabled)
    - `GCA_AGENT_CMD` — agent command (default `claude -p`)
    - `GCA_AGENT_CWD` / `GCA_AGENT_TIMEOUT` — agent working dir / timeout (600 s)
    - Telegram reporting: token in `src/bot_token`, chat id in `src/report_chat`
