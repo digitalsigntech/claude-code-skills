@@ -21,20 +21,32 @@ def main():
     extra = sys.argv[4] if len(sys.argv) > 4 else None
     UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
           "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+    # Free ephemeral port + throwaway profile so concurrent runs don't collide (a
+    # second Chrome on a shared user-data-dir silently delegates to the first and
+    # exits — the CDP port then talks to the wrong browser).
+    import socket, tempfile, shutil
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    profile = tempfile.mkdtemp(prefix="webimgfetch-")
     chrome = subprocess.Popen(
         ["google-chrome", "--headless=new", "--no-sandbox", "--disable-gpu",
-         "--remote-debugging-port=9222", "--remote-allow-origins=*",
+         "--disable-extensions", f"--user-data-dir={profile}",
+         f"--remote-debugging-port={port}", "--remote-allow-origins=*",
          f"--user-agent={UA}", "about:blank"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
-        tabs = None
+        page_targets = []
         for _ in range(30):
             try:
-                tabs = json.load(urllib.request.urlopen("http://127.0.0.1:9222/json"))
-                if tabs: break
+                tabs = json.load(urllib.request.urlopen(f"http://127.0.0.1:{port}/json"))
+                # The target list also contains extension background pages / service
+                # workers; attaching to those made every navigation ERR_ABORTED.
+                page_targets = [t for t in tabs if t.get("type") == "page"]
+                if page_targets: break
             except Exception:
                 time.sleep(0.5)
-        ws = websocket.create_connection(tabs[0]["webSocketDebuggerUrl"], timeout=90)
+        if not page_targets:
+            print("FAILED: no page target on CDP port"); sys.exit(3)
+        ws = websocket.create_connection(page_targets[0]["webSocketDebuggerUrl"], timeout=90)
         mid, events = [0], []
         def cmd(method, params=None):
             mid[0] += 1
@@ -81,6 +93,11 @@ def main():
         print("OK", len(best[0]), "bytes", best[1], "->", out)
     finally:
         chrome.terminate()
+        try:
+            chrome.wait(timeout=10)
+        except Exception:
+            chrome.kill()
+        shutil.rmtree(profile, ignore_errors=True)
 
 if __name__ == "__main__":
     main()
