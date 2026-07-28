@@ -85,6 +85,12 @@ NAT with no public IP or inbound ports.
 - **Albums.** Photos/files sent together as one Telegram album (which arrive as
   separate messages sharing a `media_group_id`, only one carrying the caption) are
   buffered until the album settles, then handled as a group with the shared caption.
+  In `ALWAYS_NEMOTRON_CHATS` (privacy-router skill) the whole album routes to the
+  local private turn with a per-file note (PDF → `read_pdf` pointer, image →
+  on-policy vision description), captioned or not — never to the cloud bridge.
+  Every file/album route rule must be mirrored in the private-chat branch: a path
+  that falls through to `bridge.ask` from a private group is a privacy leak (bit
+  us for single files 2026-07-20, for albums 2026-07-28).
 - **Project chats (optional).** Groups listed in `PROJECT_CHATS` (or bound at
   runtime via `/project <slug>`) become self-filing R&D lab notebooks: every post
   is auto-filed into a per-project directory before the conversational turn, with
