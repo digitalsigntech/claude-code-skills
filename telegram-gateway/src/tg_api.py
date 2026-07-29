@@ -116,25 +116,52 @@ _SESSION.mount("https://", requests.adapters.HTTPAdapter(pool_connections=4,
 # Best-effort — must never break a Telegram send.
 _ATT_SPOOL = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                           "state", "attachments.jsonl")
-_ATT_METHODS = {"sendPhoto", "sendDocument", "sendVideo", "sendAnimation",
-                "sendAudio", "sendVoice"}
+_ATT_METHODS = {"sendPhoto": "photo", "sendDocument": "document",
+                "sendVideo": "video", "sendAnimation": "animation",
+                "sendAudio": "audio", "sendVoice": "voice"}
+
+
+def _spool_write(chat_id, caption, path=None, file_id=None):
+    entry = {"ts": time.time(), "chat_id": int(chat_id or 0),
+             "caption": str(caption or "")[:300]}
+    if path:
+        entry["path"] = os.path.abspath(path)
+    elif file_id:
+        entry["file_id"] = file_id
+    else:
+        return
+    with open(_ATT_SPOOL, "a") as f:
+        f.write(json.dumps(entry) + "\n")
 
 
 def _spool_attachment(method, params, files):
-    if method not in _ATT_METHODS or not files:
-        return
     try:
-        fh = next(iter(files.values()))
-        path = getattr(fh, "name", None)
-        if not isinstance(path, str) or not os.path.exists(path):
-            return
-        with open(_ATT_SPOOL, "a") as f:
-            f.write(json.dumps({
-                "ts": time.time(),
-                "chat_id": int(params.get("chat_id", 0)),
-                "path": os.path.abspath(path),
-                "caption": str(params.get("caption") or "")[:300],
-            }) + "\n")
+        chat, cap = params.get("chat_id"), params.get("caption")
+        if method in _ATT_METHODS:
+            field = _ATT_METHODS[method]
+            if files:                       # fresh upload — we know the path
+                path = getattr(next(iter(files.values())), "name", None)
+                if isinstance(path, str) and os.path.exists(path):
+                    _spool_write(chat, cap, path=path)
+            elif isinstance(params.get(field), str):
+                # re-send by cached Telegram file_id — no local path; the
+                # voice server fetches the bytes via getFile when needed
+                _spool_write(chat, cap, file_id=params[field])
+        elif method == "sendMediaGroup":
+            for fh in (files or {}).values():
+                path = getattr(fh, "name", None)
+                if isinstance(path, str) and os.path.exists(path):
+                    _spool_write(chat, cap, path=path)
+            media = params.get("media")
+            if isinstance(media, str):
+                try:
+                    media = json.loads(media)
+                except Exception:
+                    media = []
+            for m in media if isinstance(media, list) else []:
+                mid = m.get("media") if isinstance(m, dict) else None
+                if isinstance(mid, str) and not mid.startswith("attach://"):
+                    _spool_write(chat, m.get("caption") or cap, file_id=mid)
     except Exception:
         pass
 
