@@ -66,7 +66,9 @@ def main():
                               kind="file")
             except Exception:
                 pass
-            print(f"sent {name} to {chat_id} via {method}")
+            mid = tg_api.message_id(r)
+            print(f"sent {name} to {chat_id} via {method}"
+                  + (f" id={mid}" if mid else ""))
             return
     sys.exit(f"send FAILED: {r.get('error')}")
 
