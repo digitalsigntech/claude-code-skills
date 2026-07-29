@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Send a file into a Telegram chat THROUGH tg_api — the one supported way.
 
-    python3 ~/DST/telegram/sendfile.py <chat_id> <path> [caption]
+    python3 ~/DST/telegram/sendfile.py [--document] <chat_id> <path> [caption]
+
+--document forces sendDocument even for image files (uncompressed, lands in
+the attachments feed as a file).
 
 Why this exists (2026-07-29): Claude turns were improvising raw Bot API calls
 with the bot token. Those sends work, but they bypass tg_api._call — no
@@ -20,7 +23,7 @@ import tg_api
 def _pdf_thumb(path):
     """First-page JPEG thumbnail for a PDF (Bot API: <=320px, <=200KB).
     Telegram often shows NO preview for bot-sent PDFs unless the bot attaches
-    one explicitly. Returns a temp path or None."""
+    one explicitly (Vlad noticed, 2026-07-29). Returns a temp path or None."""
     try:
         out = tempfile.mktemp(suffix=".jpg")
         subprocess.run(["pdftoppm", "-jpeg", "-f", "1", "-l", "1",
@@ -34,14 +37,19 @@ def _pdf_thumb(path):
 
 
 def main():
-    if len(sys.argv) < 3:
+    argv = sys.argv[1:]
+    force_doc = "--document" in argv
+    if force_doc:
+        argv.remove("--document")
+    if len(argv) < 2:
         sys.exit(__doc__)
-    chat_id, path = int(sys.argv[1]), sys.argv[2]
-    caption = " ".join(sys.argv[3:])[:1000]
+    chat_id, path = int(argv[0]), argv[1]
+    caption = " ".join(argv[2:])[:1000]
     if not os.path.exists(path):
         sys.exit(f"no such file: {path}")
     name = os.path.basename(path)
-    as_photo = path.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
+    as_photo = (not force_doc
+                and path.lower().endswith((".jpg", ".jpeg", ".png", ".webp")))
     attempts = ([("sendPhoto", "photo"), ("sendDocument", "document")]
                 if as_photo else [("sendDocument", "document")])
     thumb = _pdf_thumb(path) if path.lower().endswith(".pdf") else None
