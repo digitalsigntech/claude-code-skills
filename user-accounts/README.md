@@ -6,7 +6,9 @@ Enforced by injecting a briefing line into every Claude turn (telegram/bridge.py
 
 - **Privileges:** `private_info` (may see customers/finances/credentials/internal
   docs), `write_code` (may request code changes and skill installs).
-- **Fields:** name, telegram id (key), position (optional).
+- **Fields:** name, telegram id (key), position (optional), emails (optional,
+  several allowed) — `get_by_email()` lets the email side resolve the same
+  account and privileges.
 - **Unknown allowlisted senders = guests:** hard denial line, referred to the owner.
 - **Owner (configure your own id) is the baseline** — no line injected.
 - **Admin privilege** (`admin`): may manage user accounts — add/remove users and

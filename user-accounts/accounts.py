@@ -3,7 +3,7 @@
 
 Registry of known people with per-user privileges, keyed by Telegram user id.
 Users have privileges (private information access; code/skill-change
-requests; account administration), names, telegram ids, optional positions.
+requests; account administration), names, telegram ids, emails, positions.
 
     accounts.py add <telegram_id> <name> [--position "Co-owner"]
                     [--private-info] [--write-code]
@@ -50,6 +50,16 @@ def get(tg_id):
     return _load().get(str(tg_id))
 
 
+def get_by_email(email):
+    """Resolve an account by any of its email addresses (case-insensitive) —
+    lets the email side (IDLE watcher etc.) apply the same privileges."""
+    email = (email or "").strip().lower()
+    for tid, u in _load().items():
+        if email in [e.lower() for e in u.get("emails", [])]:
+            return {**u, "telegram_id": tid}
+    return None
+
+
 def context_line(tg_id):
     """Prompt line describing the sender's account + what the agent must
     enforce. Always returns a line — unknown senders are guests."""
@@ -88,6 +98,8 @@ def main():
     a = sub.add_parser("add")
     a.add_argument("tg_id"); a.add_argument("name")
     a.add_argument("--position", default=None)
+    a.add_argument("--email", action="append", default=[],
+                   help="repeatable — a user may have several")
     a.add_argument("--private-info", action="store_true")
     a.add_argument("--write-code", action="store_true")
     a.add_argument("--admin", action="store_true")
@@ -96,6 +108,9 @@ def main():
     s.add_argument("--grant", choices=PRIVS, action="append", default=[])
     s.add_argument("--revoke", choices=PRIVS, action="append", default=[])
     s.add_argument("--name"); s.add_argument("--position")
+    s.add_argument("--email", action="append", default=[],
+                   help="add an email address")
+    s.add_argument("--rm-email", action="append", default=[])
     r = sub.add_parser("rm"); r.add_argument("tg_id")
     sub.add_parser("list")
     g = sub.add_parser("get"); g.add_argument("tg_id")
@@ -105,6 +120,7 @@ def main():
     if args.cmd == "add":
         users[str(args.tg_id)] = {
             "name": args.name, "position": args.position,
+            "emails": args.email,
             "privileges": {"private_info": args.private_info,
                            "write_code": args.write_code,
                            "admin": args.admin},
@@ -123,6 +139,11 @@ def main():
             u["name"] = args.name
         if args.position is not None:
             u["position"] = args.position
+        if args.email or args.rm_email:
+            ems = [e.lower() for e in u.get("emails", [])]
+            ems += [e.lower() for e in args.email if e.lower() not in ems]
+            u["emails"] = [e for e in ems
+                           if e not in {x.lower() for x in args.rm_email}]
         _save(users)
         print(json.dumps(u, ensure_ascii=False))
     elif args.cmd == "rm":
@@ -135,9 +156,10 @@ def main():
         for tid, u in users.items():
             p = u.get("privileges", {})
             flags = "+".join(k for k in PRIVS if p.get(k)) or "none"
+            em = ", ".join(u.get("emails", []))
             print(f"{tid}  {u['name']}"
                   + (f" ({u['position']})" if u.get("position") else "")
-                  + f"  [{flags}]")
+                  + f"  [{flags}]" + (f"  {em}" if em else ""))
     elif args.cmd == "get":
         print(json.dumps(users.get(str(args.tg_id)), indent=1,
                          ensure_ascii=False))
