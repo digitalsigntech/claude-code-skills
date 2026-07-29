@@ -104,7 +104,7 @@ EMAIL_DIR = os.path.join(C.DST_ROOT, "email")          # for emailing replies ba
 EMAIL_PY = os.path.join(EMAIL_DIR, "venv", "bin", "python")
 GMAILER = os.path.join(EMAIL_DIR, "gmailer.py")
 
-# Loop guard removed permanently (the owner, 2026-06-26): the claude@ ↔ neo@ thread is
+# Loop guard removed permanently (the owner, 2026-06-26): the bot ↔ friend thread is
 # important real work and must continue — never throttle bot-to-bot auto-replies.
 
 HELP = (
@@ -381,8 +381,8 @@ def _image_data_url(path):
 
 # Primary describer: richer output than the default annotator model. Both free;
 # fallback is the other free vision model (no paid variant exists).
-OR_VISION_DESCRIBE = os.environ.get("DST_PRIVATE_VISION_MODEL",
-                                    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free")
+OR_VISION_DESCRIBE = os.environ.get("TG_PRIVATE_VISION_MODEL", os.environ.get(
+    "DST_PRIVATE_VISION_MODEL", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"))
 
 
 def _describe_image(path, attempts=3):
@@ -1041,7 +1041,7 @@ def handle_text(msg, chat_id, text):
 
 
 # ---- injected emails (from the claude@ IDLE watcher) ------------------------
-# A mail from the owner/neo@ is treated like a message typed in this chat: the watcher
+# A mail from the owner/friend is treated like a message typed in this chat: the watcher
 # drops it as a JSON file in inject/, we run it as a real Claude turn in the same
 # per-chat session (so it shares history + serializes via bridge's per-chat lock).
 def _email_reply(to_addr, reply_to_id, text):
@@ -1054,8 +1054,9 @@ def _email_reply(to_addr, reply_to_id, text):
             tf.write(text); tmp = tf.name
         cmd = [EMAIL_PY, GMAILER, "send", "--to", to_addr,
                "--reply-to", reply_to_id, "--body-file", tmp, "--md"]
-        # Replies to neo@ always CC the owner so they stay in the loop (2026-06-26).
-        if "neo@" in to_addr.lower() and C.OWNER_EMAIL and C.OWNER_EMAIL not in to_addr.lower():
+        # Replies to the friend always CC the owner so they stay in the loop.
+        if C.FRIEND_EMAIL and C.FRIEND_EMAIL in to_addr.lower() \
+                and C.OWNER_EMAIL and C.OWNER_EMAIL not in to_addr.lower():
             cmd += ["--cc", C.OWNER_EMAIL]
         r = subprocess.run(cmd, cwd=EMAIL_DIR, capture_output=True, text=True, timeout=120)
         os.unlink(tmp)
@@ -1066,7 +1067,7 @@ def _email_reply(to_addr, reply_to_id, text):
 
 def _is_throttle_bounce(body):
     """True if an inbound email is an auto-generated throttle/usage-limit bounce
-    (Neo's agent loop out of quota), not real content — e.g.
+    (a peer agent loop out of quota), not real content — e.g.
     "API call failed after 3 retries: HTTP 429: The usage limit has been reached"."""
     b = (body or "").lower()
     return ("usage limit has been reached" in b
@@ -1079,14 +1080,14 @@ def handle_injected_email(rec):
     frm = rec.get("from", ""); subj = rec.get("subject", "(no subject)")
     body = (rec.get("body", "") or "").strip()
     addr = frm.lower()
-    # Neo throttled: his replies become 429/usage-limit bounces. Do NOT run a turn or
-    # auto-reply — that just lands in his inbox, re-triggers his loop, and spams this
-    # chat. Drop it silently; resume when he sends real content. (the owner, 2026-07-03)
+    # Peer-agent throttled: its replies become 429/usage-limit bounces. Do NOT run a
+    # turn or auto-reply — that just lands back in its inbox, re-triggers its loop,
+    # and spams this chat. Drop silently; resume when real content arrives.
     if _is_throttle_bounce(body):
         log(f"dropping throttle-bounce from {frm}: {body[:80]!r}")
         return
-    if "neo@" in addr:
-        who, first = "Neo (neo@)", "Neo"
+    if C.FRIEND_EMAIL and C.FRIEND_EMAIL in addr:
+        who, first = f"{C.FRIEND_NAME} ({C.FRIEND_EMAIL})", C.FRIEND_NAME
     elif C.OWNER_EMAIL and C.OWNER_EMAIL in addr:
         who, first = f"{C.OWNER_NAME} (business)", C.OWNER_NAME
     elif C.OWNER_PERSONAL_EMAIL and C.OWNER_PERSONAL_EMAIL in addr:
@@ -1113,7 +1114,7 @@ def handle_injected_email(rec):
             "as a .md file, then move it and EVERY attachment into the personal store. For each "
             "attachment FIRST open/read it (PDF, image, doc) and extract 5-15 content keywords; "
             "a descriptive subject line serves as the file's label. Then file each with "
-            "`cd /home/mercury/DST/telegram && python3 -c \"import personal_notes; "
+            f"`cd {C.HERE} && python3 -c \"import personal_notes; "
             "print(personal_notes.add('<path>', orig_name='<name>', label='<subject>', "
             "keywords=['kw1','kw2',...]))\"` (one call per file) — label and keywords are "
             "searchable later. Personal notes are private — never mention their content outside "
@@ -1124,7 +1125,7 @@ def handle_injected_email(rec):
             " STANDING POLICY for this sender: if the subject/body contain instructions, follow "
             "them. If NOT (the mail is just content/files, empty or trivial text), add it to the "
             "PRIVATE KB: save the email contents as a .md file and move every attachment under "
-            "/home/mercury/DST/knowledge-base/from-emails/ (KB default is private — do NOT add "
+            f"{C.DST_ROOT}/knowledge-base/from-emails/ (KB default is private — do NOT add "
             "anything to public_paths in data-classification.json). For each attachment FIRST "
             "open/read it and extract 5-15 content keywords, then write a sidecar `<file>.meta.md` "
             "next to it containing: the description (a descriptive subject line serves as this), "

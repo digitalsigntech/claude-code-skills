@@ -12,7 +12,8 @@ send-everything behavior.
 """
 import sys, os, json, argparse, urllib.parse, urllib.request
 
-sys.path.insert(0, "/home/mercury/DST/telegram")
+sys.path.insert(0, os.path.expanduser(
+    os.environ.get("TELEGRAM_GATEWAY_DIR", "~/DST/telegram")))
 import tg_api
 
 CHAT = os.environ.get("DST_CHAT_ID", "")  # your Telegram chat id (or pass --chat)

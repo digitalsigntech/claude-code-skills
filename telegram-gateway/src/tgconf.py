@@ -37,6 +37,10 @@ OWNER_ID = int(os.environ.get("TG_OWNER_ID", "0"))
 OWNER_NAME = os.environ.get("TG_OWNER_NAME", "Owner")
 OWNER_EMAIL = os.environ.get("TG_OWNER_EMAIL", "")            # business mailbox
 OWNER_PERSONAL_EMAIL = os.environ.get("TG_OWNER_PERSONAL_EMAIL", "")
+# Optional trusted outside collaborator ("friend" tier): their emails run agent
+# turns like the owner's, but replies always CC the owner. Empty = feature off.
+FRIEND_EMAIL = os.environ.get("TG_FRIEND_EMAIL", "").lower()
+FRIEND_NAME = os.environ.get("TG_FRIEND_NAME", "Friend")
 
 # Headless Claude (the "brain") — every message runs a real Claude turn with full
 # tools, in the DST workspace, with one persistent session per Telegram chat.
@@ -46,8 +50,8 @@ import shutil as _shutil
 CLAUDE_BIN = (os.environ.get("CLAUDE_BIN") or _shutil.which("claude")
               or os.path.expanduser("~/.local/bin/claude"))
 CLAUDE_WORKDIR = DST_ROOT
-CLAUDE_MODEL = os.environ.get("DST_TG_MODEL", "claude-fable-5")
-CLAUDE_TIMEOUT = int(os.environ.get("DST_TG_TIMEOUT", "900"))
+CLAUDE_MODEL = os.environ.get("TG_MODEL", os.environ.get("DST_TG_MODEL", "claude-fable-5"))
+CLAUDE_TIMEOUT = int(os.environ.get("TG_TIMEOUT", os.environ.get("DST_TG_TIMEOUT", "900")))
 
 LONGPOLL = 50          # getUpdates long-poll seconds
 TG_MAX = 4000          # message chunk size (Telegram hard limit is 4096)
@@ -80,22 +84,22 @@ APPEND_SYSTEM = (
     "enforces the gate itself."
 )
 # Photo reflex (2026-07-07): image requests answered deterministically from the warm
-# CLIP server + cached Telegram file_ids — sub-second, no LLM. DST_PHOTO_REFLEX=0 off.
-PHOTO_REFLEX = os.environ.get("DST_PHOTO_REFLEX", "1") == "1"
+# CLIP server + cached Telegram file_ids — sub-second, no LLM. TG_PHOTO_REFLEX=0 off.
+PHOTO_REFLEX = os.environ.get("TG_PHOTO_REFLEX", os.environ.get("DST_PHOTO_REFLEX", "1")) == "1"
 # Doc reflex (2026-07-10): curated documents (doc_registry.json) sent instantly via
-# sendDocument + cached file_ids — no LLM. DST_DOC_REFLEX=0 off.
-DOC_REFLEX = os.environ.get("DST_DOC_REFLEX", "1") == "1"
+# sendDocument + cached file_ids — no LLM. TG_DOC_REFLEX=0 off.
+DOC_REFLEX = os.environ.get("TG_DOC_REFLEX", os.environ.get("DST_DOC_REFLEX", "1")) == "1"
 # File reflex (2026-07-10, the owner: "show/fetch/get/give me any file — fast, closest
 # match"): generic fetch-verb requests resolved deterministically — registry doc,
 # KB image set, or (DM chats only) the closest-matching DST workspace file. Strict
-# all-tokens-match; anything ambiguous falls through. DST_FILE_REFLEX=0 off.
-FILE_REFLEX = os.environ.get("DST_FILE_REFLEX", "1") == "1"
+# all-tokens-match; anything ambiguous falls through. TG_FILE_REFLEX=0 off.
+FILE_REFLEX = os.environ.get("TG_FILE_REFLEX", os.environ.get("DST_FILE_REFLEX", "1")) == "1"
 # Tier-1 reflex: answer product Q&A instantly from the local KB semantic index
 # (no LLM round trip), then verify with the full model in the background. See gateway.
 KB = os.path.join(DST_ROOT, "email", "kb", "kb")   # `kb ask "<question>" --json`
 # OFF by default (the owner, 2026-07-07): Telegram chat is Always Claude again — no Nemotron
-# quick answers. Set DST_KB_REFLEX=1 to re-enable.
-KB_REFLEX = os.environ.get("DST_KB_REFLEX", "0") == "1"
+# quick answers. Set TG_KB_REFLEX=1 to re-enable.
+KB_REFLEX = os.environ.get("TG_KB_REFLEX", os.environ.get("DST_KB_REFLEX", "0")) == "1"
 # Tier-1 quick answer: retrieve a few KB chunks, let a FAST grounded LLM (Nemotron via
 # OpenRouter) answer from JUST those snippets or say ESCALATE. Replaces the old score-band
 # reflex — cosine score is a good retrieval signal but a bad correctness arbiter (a wrong
@@ -113,7 +117,7 @@ MEDIA = os.path.join(DST_ROOT, "local-ai", "media")
 # WITH full chat history so it isn't context-blind; everything else goes to Claude
 # as normal. "strict" (mode B, shelved — broke chat 2026-07-06) = every message is
 # label-routed. "off" = no privacy gate.
-PRIVACY_MODE = os.environ.get("DST_PRIVACY_MODE", "targeted")  # off | targeted | strict
+PRIVACY_MODE = os.environ.get("TG_PRIVACY_MODE", os.environ.get("DST_PRIVACY_MODE", "targeted"))  # off | targeted | strict
 PRIVACY_ROUTER = PRIVACY_MODE != "off"
 # Chats where EVERY message runs a full Claude turn — the privacy gate and KB reflex
 # are skipped, so Nemotron/local models never handle the message. the owner 2026-07-07:

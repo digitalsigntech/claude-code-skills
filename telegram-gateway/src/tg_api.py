@@ -303,7 +303,7 @@ def deliver_final(chat_id, msg_id, text):
     message is sent as additional chunks.
 
     For table/task-list replies we do NOT upgrade the streamed placeholder in place
-    (per Neo: half-streamed / edited-text rich upgrades render inconsistently). Instead
+    (half-streamed / edited-text rich upgrades render inconsistently). Instead
     we send a fresh sendRichMessage with the COMPLETE markdown, then delete the interim
     placeholder — leaving it only if the delete fails."""
     if needs_rich(text) and len(text) <= C.RICH_MAX:

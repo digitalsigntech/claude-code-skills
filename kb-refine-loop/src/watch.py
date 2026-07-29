@@ -16,10 +16,11 @@ Usage: watch.py [--dry] [--limit N] [--force THREAD_ID:REPLY_ID]
 import argparse, json, os, re, sqlite3, subprocess, sys, datetime
 
 DIR = os.path.dirname(os.path.abspath(__file__))
-DB = "/home/mercury/DST/crm/contacts.db"
+ROOT = os.path.expanduser(os.environ.get("PROJECT_ROOT", "~/DST"))
+DB = os.environ.get("CRM_DB", os.path.join(ROOT, "crm", "contacts.db"))
 STATE = os.path.join(DIR, "state.json")
 PROMPT = os.path.join(DIR, "refine_prompt.md")
-CLAUDE = "/home/mercury/.local/bin/claude"
+CLAUDE = os.environ.get("CLAUDE_BIN", os.path.expanduser("~/.local/bin/claude"))
 MODEL = "claude-opus-4-8"
 TIMEOUT = 1800                      # 30 min per thread, matches other headless jobs
 PER_RUN = 2                        # max refine runs per cron tick

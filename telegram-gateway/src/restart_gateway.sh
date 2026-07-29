@@ -40,4 +40,4 @@ for pid in $(pgrep -f "gateway.py"); do
   [ "$(cat /proc/$pid/comm 2>/dev/null)" = "python3" ] && kill "$pid"
 done
 sleep 2
-exec /home/mercury/DST/telegram/start_telegram.sh
+exec "$(dirname "$0")/start_telegram.sh"

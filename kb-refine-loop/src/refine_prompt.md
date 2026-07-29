@@ -78,7 +78,7 @@ archive and the id of the owner's sent reply to test against.
    sentences: which customer/thread, what the KB got wrong or lacked, what you
    fixed):
    ```
-   python3 -c "import sys; sys.path.insert(0,'/home/mercury/DST/telegram'); import tg_api; tg_api.send_message(<OWNER_USER_ID>, '<message>')"
+   python3 -c "import sys; sys.path.insert(0,'<telegram-gateway dir>'); import tg_api; tg_api.send_message(<OWNER_USER_ID>, '<message>')"
    ```
    If nothing was changed (skip or converged on attempt 1), stay silent — the log
    is enough.

@@ -201,6 +201,8 @@ document→markdown conversion is still running).
 | `TG_MAX` / `RICH_MAX` | `4000` / `32768` | Message chunk size / rich-message payload cap. |
 | `KB_REFLEX` | `1` (env `TG_KB_REFLEX`) | Optional tier-1 KB quick-answer (DST-specific; set `0` to disable). |
 | `DOC_REFLEX` | `1` (env `TG_DOC_REFLEX`) | Optional instant delivery of curated documents from `doc_registry.json` (set `0` to disable). |
+| `OWNER_EMAIL` / `OWNER_PERSONAL_EMAIL` | empty (env `TG_OWNER_EMAIL`, `TG_OWNER_PERSONAL_EMAIL`) | Owner mailboxes for the email-injection flow (mail from these runs as a chat turn). |
+| `FRIEND_EMAIL` / `FRIEND_NAME` | empty = off (env `TG_FRIEND_EMAIL`, `TG_FRIEND_NAME`) | Optional trusted outside collaborator: their emails also run agent turns, and every reply to them CCs the owner. |
 
 **Switching the brain to a local/cheaper model:** every message currently spends
 Claude subscription tokens. To route to a local or hybrid model, change

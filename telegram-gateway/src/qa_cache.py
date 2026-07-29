@@ -25,7 +25,8 @@ import numpy as np
 
 DIR = os.path.dirname(os.path.abspath(__file__))
 DB = os.path.join(DIR, "state", "qa_cache.db")
-EMB_URL = os.environ.get("DST_EMBED_URL", "http://127.0.0.1:18183/v1/embeddings")
+EMB_URL = os.environ.get("TG_EMBED_URL", os.environ.get("DST_EMBED_URL",
+    "http://127.0.0.1:18183/v1/embeddings"))
 QUERY_PREFIX = "search_query: "     # nomic task prefix; symmetric Q-vs-Q comparison
 THRESHOLD = 0.90
 DEDUP = 0.97                        # near-identical stored question -> update in place

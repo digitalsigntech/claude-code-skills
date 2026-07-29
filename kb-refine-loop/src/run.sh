@@ -3,7 +3,7 @@
 # Watches for new sent replies from the owner to customer questions and runs the
 # refine loop (headless Claude) on each; see refine_prompt.md and README.md.
 set -u
-DIR="/home/mercury/DST/email/kb-refine"
+DIR="$(cd "$(dirname "$0")" && pwd)"
 LOG="$DIR/logs/refine.log"
 mkdir -p "$DIR/logs"
 

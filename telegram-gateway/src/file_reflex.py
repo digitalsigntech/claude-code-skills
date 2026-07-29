@@ -41,7 +41,7 @@ LEAD = r"(?:please\s+|pls\s+)?(?:can\s+you\s+|could\s+you\s+|would\s+you\s+)?"
 ASK = re.compile(
     rf"^{LEAD}{VERB}\s+(?:me\s+|us\s+)?(?:my\s+|the\s+|a\s+|an\s+|some\s+|our\s+"
     rf"|that\s+|this\s+)?(?P<q>.+?)(?:\s+(?:please|pls))?\s*[.!?]*$", re.I)
-# The object must be a noun phrase, not a question ("get me whatever Neo said" and
+# The object must be a noun phrase, not a question ("get me whatever Alex said" and
 # "show me how the pass looks" belong to Claude).
 QUESTION_WORD = re.compile(r"\b(how|why|when|who|whom|which|what|where|should|could|"
                            r"would|do|does|did|is|are|was|were)\b", re.I)

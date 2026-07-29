@@ -218,7 +218,7 @@ def try_handle(chat_id, text):
 
 # ---- prewarm: upload every KB image once (silently), cache ids, delete -------
 def prewarm(chat_id):
-    meta = json.load(open("/home/mercury/DST/local-ai/store/media_meta.json"))
+    meta = json.load(open(os.path.join(C.DST_ROOT, "local-ai", "store", "media_meta.json")))
     todo = [m["path"] for m in meta
             if os.path.exists(m["path"]) and not _file_id(m["path"])]
     print(f"{len(todo)} image(s) need a file_id")

@@ -19,7 +19,7 @@ import numpy as np
 # comma-separated, "." = whole tree) at any other directory to index it — the store
 # lives in <root>/.kb_index, so every root gets its own independent index
 # (used by projects/pk for per-project R&D indexes).
-KB_ROOT = os.environ.get("DST_KB_ROOT", "/home/mercury/DST/knowledge-base")
+KB_ROOT = os.path.expanduser(os.environ.get("DST_KB_ROOT", "~/DST/knowledge-base"))
 INDEX_DIRS = [d.strip() for d in os.environ.get(
     "DST_KB_DIRS", "products,company,faq,technical,from-emails").split(",") if d.strip()]
 STORE = os.path.join(KB_ROOT, ".kb_index")
