@@ -121,11 +121,30 @@ _ATT_METHODS = {"sendPhoto": "photo", "sendDocument": "document",
                 "sendAudio": "audio", "sendVoice": "voice"}
 
 
+_ATT_ARCHIVE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "state", "att-archive")
+_ATT_ARCHIVE_MAX = 50 * 1024 * 1024   # don't archive-copy huge videos
+
+
 def _spool_write(chat_id, caption, path=None, file_id=None):
     entry = {"ts": time.time(), "chat_id": int(chat_id or 0),
              "caption": str(caption or "")[:300]}
     if path:
-        entry["path"] = os.path.abspath(path)
+        path = os.path.abspath(path)
+        # Temp-file sends (make_login_qr etc.) get unlinked by the caller right
+        # after the send, so the attachments feed would find a dead path (app
+        # request #17). Archive a copy and spool that instead.
+        import tempfile
+        if (path.startswith(tempfile.gettempdir() + os.sep)
+                and os.path.getsize(path) <= _ATT_ARCHIVE_MAX):
+            import shutil
+            os.makedirs(_ATT_ARCHIVE, exist_ok=True)
+            dst = os.path.join(_ATT_ARCHIVE,
+                               f"{int(time.time() * 1000)}_"
+                               f"{os.path.basename(path)}")
+            shutil.copy2(path, dst)
+            path = dst
+        entry["path"] = path
     elif file_id:
         entry["file_id"] = file_id
     else:
