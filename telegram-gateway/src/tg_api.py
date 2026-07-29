@@ -1,5 +1,8 @@
 """Thin Telegram Bot API client (long-polling, no webhook — works behind NAT)."""
 import re
+import os
+import json
+import time
 import html
 import requests
 import tgconf as C
@@ -108,6 +111,34 @@ _SESSION.mount("https://", requests.adapters.HTTPAdapter(pool_connections=4,
                                                          pool_maxsize=16))
 
 
+# Attachment spool: every successful outbound media send is appended here so the
+# voice app can mirror chat attachments (voice/realtime GET /attachments).
+# Best-effort — must never break a Telegram send.
+_ATT_SPOOL = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "state", "attachments.jsonl")
+_ATT_METHODS = {"sendPhoto", "sendDocument", "sendVideo", "sendAnimation",
+                "sendAudio", "sendVoice"}
+
+
+def _spool_attachment(method, params, files):
+    if method not in _ATT_METHODS or not files:
+        return
+    try:
+        fh = next(iter(files.values()))
+        path = getattr(fh, "name", None)
+        if not isinstance(path, str) or not os.path.exists(path):
+            return
+        with open(_ATT_SPOOL, "a") as f:
+            f.write(json.dumps({
+                "ts": time.time(),
+                "chat_id": int(params.get("chat_id", 0)),
+                "path": os.path.abspath(path),
+                "caption": str(params.get("caption") or "")[:300],
+            }) + "\n")
+    except Exception:
+        pass
+
+
 def _call(method, _files=None, _timeout=60, **params):
     url = f"{C.API}/{method}"
     for attempt in (0, 1):
@@ -117,7 +148,10 @@ def _call(method, _files=None, _timeout=60, **params):
             else:
                 r = _SESSION.post(url, json=params, timeout=_timeout)
             j = r.json()
-            return j if j.get("ok") else {"ok": False, "error": j}
+            if j.get("ok"):
+                _spool_attachment(method, params, _files)
+                return j
+            return {"ok": False, "error": j}
         except requests.exceptions.ConnectionError as e:
             # A pooled keep-alive connection Telegram closed while idle — retry once
             # on a fresh one. Uploads (_files) aren't retried: the stream is consumed.
@@ -223,7 +257,7 @@ def deliver_final(chat_id, msg_id, text):
     message is sent as additional chunks.
 
     For table/task-list replies we do NOT upgrade the streamed placeholder in place
-    (half-streamed / edited-text rich upgrades render inconsistently). Instead
+    (per Neo: half-streamed / edited-text rich upgrades render inconsistently). Instead
     we send a fresh sendRichMessage with the COMPLETE markdown, then delete the interim
     placeholder — leaving it only if the delete fails."""
     if needs_rich(text) and len(text) <= C.RICH_MAX:
