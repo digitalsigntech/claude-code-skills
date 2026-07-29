@@ -2,8 +2,8 @@
 """User accounts: who may see private information, who may change the system.
 
 Registry of known people with per-user privileges, keyed by Telegram user id.
-Users have privileges (access to private information; permission to request
-code changes or skill installs), names, telegram ids and optional positions.
+Users have privileges (private information access; code/skill-change
+requests; account administration), names, telegram ids, optional positions.
 
     accounts.py add <telegram_id> <name> [--position "Co-owner"]
                     [--private-info] [--write-code]
@@ -17,8 +17,9 @@ API (used by telegram/bridge.py to brief every Claude turn):
     context_line(tg_id) -> one bracketed line for the turn prompt, ALWAYS
                            returned (unknown users get the guest denial line)
 
-Policy: account changes are made only on the owners' request (the owner's DM or
-this box's terminal) — same rule as the email whitelist. The registry file is
+Policy: account changes on request of the owners (the owner's side) or
+of a registered ADMIN (admin privilege; verified by sender id). Only owners
+grant/revoke admin itself. The registry file is
 data, not secrets; privileges gate what the AGENT does, and the hard technical
 walls (personal-notes gate, no-send accounts, masking) stay independent.
 """
@@ -29,7 +30,7 @@ import time
 
 DIR = os.path.dirname(os.path.abspath(__file__))
 USERS_FILE = os.environ.get("ACCOUNTS_FILE", os.path.join(DIR, "users.json"))
-PRIVS = ("private_info", "write_code")
+PRIVS = ("private_info", "write_code", "admin")
 
 
 def _load():
@@ -60,7 +61,8 @@ def context_line(tg_id):
                 "change the system or install skills on their request; "
                 "politely decline and refer them to the owner.]")
     priv = u.get("privileges", {})
-    pi, wc = priv.get("private_info"), priv.get("write_code")
+    pi, wc, adm = (priv.get("private_info"), priv.get("write_code"),
+                   priv.get("admin"))
     pos = f", {u['position']}" if u.get("position") else ""
     rules = []
     rules.append("may access private company information"
@@ -71,6 +73,12 @@ def context_line(tg_id):
                  "skills" if wc else
                  "NO code/system changes: do not write code, modify "
                  "configuration or install skills on their request")
+    if adm:
+        rules.append("ADMIN: may manage user accounts (add/remove users, "
+                     "grant/revoke private_info and write_code) — but only "
+                     "the owners may grant or revoke admin itself")
+    else:
+        rules.append("may NOT manage user accounts")
     return f"[Sender account: {u['name']}{pos} — {'; '.join(rules)}.]"
 
 
@@ -82,6 +90,7 @@ def main():
     a.add_argument("--position", default=None)
     a.add_argument("--private-info", action="store_true")
     a.add_argument("--write-code", action="store_true")
+    a.add_argument("--admin", action="store_true")
     s = sub.add_parser("set")
     s.add_argument("tg_id")
     s.add_argument("--grant", choices=PRIVS, action="append", default=[])
@@ -97,7 +106,8 @@ def main():
         users[str(args.tg_id)] = {
             "name": args.name, "position": args.position,
             "privileges": {"private_info": args.private_info,
-                           "write_code": args.write_code},
+                           "write_code": args.write_code,
+                           "admin": args.admin},
             "added": time.strftime("%Y-%m-%d")}
         _save(users)
         print(f"added {args.name} ({args.tg_id})")
