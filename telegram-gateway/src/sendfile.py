@@ -23,7 +23,7 @@ import tg_api
 def _pdf_thumb(path):
     """First-page JPEG thumbnail for a PDF (Bot API: <=320px, <=200KB).
     Telegram often shows NO preview for bot-sent PDFs unless the bot attaches
-    one explicitly (Vlad noticed, 2026-07-29). Returns a temp path or None."""
+    one explicitly (owner-reported, 2026-07-29). Returns a temp path or None."""
     try:
         out = tempfile.mktemp(suffix=".jpg")
         subprocess.run(["pdftoppm", "-jpeg", "-f", "1", "-l", "1",
