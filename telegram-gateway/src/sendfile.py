@@ -9,10 +9,28 @@ attachment spool (the voice app's GET /attachments feed misses the file), no
 [sent file:] archive marker in chat.db. Going through tg_api gives both.
 """
 import os
+import subprocess
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import tg_api
+
+
+def _pdf_thumb(path):
+    """First-page JPEG thumbnail for a PDF (Bot API: <=320px, <=200KB).
+    Telegram often shows NO preview for bot-sent PDFs unless the bot attaches
+    one explicitly. Returns a temp path or None."""
+    try:
+        out = tempfile.mktemp(suffix=".jpg")
+        subprocess.run(["pdftoppm", "-jpeg", "-f", "1", "-l", "1",
+                        "-scale-to", "320", "-singlefile", path, out[:-4]],
+                       check=True, timeout=20, capture_output=True)
+        if os.path.exists(out) and os.path.getsize(out) <= 200_000:
+            return out
+    except Exception:
+        pass
+    return None
 
 
 def main():
@@ -26,11 +44,18 @@ def main():
     as_photo = path.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
     attempts = ([("sendPhoto", "photo"), ("sendDocument", "document")]
                 if as_photo else [("sendDocument", "document")])
+    thumb = _pdf_thumb(path) if path.lower().endswith(".pdf") else None
     for method, field in attempts:
-        with open(path, "rb") as fh:
-            r = tg_api._call(method, _files={field: fh}, _timeout=120,
+        files = {field: open(path, "rb")}
+        if thumb and method == "sendDocument":
+            files["thumbnail"] = open(thumb, "rb")
+        try:
+            r = tg_api._call(method, _files=files, _timeout=120,
                              chat_id=chat_id,
                              **({"caption": caption} if caption else {}))
+        finally:
+            for fh in files.values():
+                fh.close()
         if r.get("ok"):
             try:                # archive marker, best-effort like the gateway
                 sys.path.insert(0, os.path.expanduser("~/DST/chatlog"))
