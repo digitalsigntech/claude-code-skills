@@ -3,7 +3,8 @@
 
 Registry of known people with per-user privileges, keyed by Telegram user id.
 Users have privileges (private information access; code/skill-change
-requests; account administration), names, telegram ids, emails, positions.
+requests; account administration), names, telegram ids, emails, positions
+and a preferred language.
 
     accounts.py add <telegram_id> <name> [--position "Co-owner"]
                     [--private-info] [--write-code]
@@ -48,6 +49,18 @@ def _save(users):
 
 def get(tg_id):
     return _load().get(str(tg_id))
+
+
+def set_language(tg_id, lang):
+    """Persist the user's preferred language (ISO 639-1). Used by the voice
+    backend: spoken 'switch to Russian' commands and auto-detection."""
+    users = _load()
+    u = users.get(str(tg_id))
+    if not u:
+        return False
+    u["language"] = lang
+    _save(users)
+    return True
 
 
 def get_by_email(email):
@@ -111,6 +124,7 @@ def main():
     s.add_argument("--email", action="append", default=[],
                    help="add an email address")
     s.add_argument("--rm-email", action="append", default=[])
+    s.add_argument("--language", help="preferred language, ISO 639-1")
     r = sub.add_parser("rm"); r.add_argument("tg_id")
     sub.add_parser("list")
     g = sub.add_parser("get"); g.add_argument("tg_id")
@@ -139,6 +153,8 @@ def main():
             u["name"] = args.name
         if args.position is not None:
             u["position"] = args.position
+        if args.language:
+            u["language"] = args.language
         if args.email or args.rm_email:
             ems = [e.lower() for e in u.get("emails", [])]
             ems += [e.lower() for e in args.email if e.lower() not in ems]
