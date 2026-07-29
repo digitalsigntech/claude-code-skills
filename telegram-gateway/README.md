@@ -231,7 +231,12 @@ guarded so it no-ops if the underlying tool/module is missing:
   Per-chat overrides: `ALWAYS_CLOUD_CHATS` (a group where every message is a cloud
   turn — e.g. a "Public" group) and `ALWAYS_PRIVATE_CHATS` (a group answered only
   by the private model, including file delivery — e.g. a "Private" group for
-  confidential matters). See the privacy-router skill's README for the hard-won
+  confidential matters). The private agent also has `read_pdf`/`edit_pdf` tools
+  (2026-07-27, PyMuPDF): value-level find/replace inside a PDF (quantities,
+  prices, dates on an invoice) that redacts each matched value and reinserts the
+  replacement at the same baseline/size/color, saving an edited COPY the agent
+  delivers via `send_file` — for uploaded PDFs the gateway's file note points the
+  model at these tools. See the privacy-router skill's README for the hard-won
   lessons (targeted-not-strict, full context, real tools not single-shot).
 - **Email → chat injection** (`inject/` queue + `email/gmailer.py`) — a mail watcher
   drops emails (body + downloaded attachments) as JSON into `inject/`; the gateway runs each as a chat turn and can

@@ -1,7 +1,7 @@
 """On-box PDF text editing (PyMuPDF) for the private agent.
 
-Built 2026-07-27 (Vlad: "we need to give Nemotron pdf editing capabilities" — after
-it refused to bump a quantity on a Claraprint proforma invoice in the Private group).
+Built 2026-07-27 (owner request: "we need to give Nemotron pdf editing capabilities" — after
+it refused to bump a quantity on a customer proforma invoice in the Private group).
 
 Approach: value-level find/replace. Each match's exact glyph area is redacted (white
 fill) and the replacement text re-inserted at the same baseline with the original
@@ -265,7 +265,8 @@ def apply_edits(path, edits, out_path):
                                  fontsize=m["size"],
                                  fontname="hebo" if bold else "helv",
                                  color=_int_color(m["color"]))
-        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        if os.path.dirname(out_path):
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
         doc.save(out_path, garbage=3, deflate=True)
 
         # Post-edit self-check data. rows_after_edit is the load-bearing part; the
