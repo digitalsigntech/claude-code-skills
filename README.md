@@ -38,6 +38,7 @@ See each skill's own `README.md` for configuration.
 | Skill | What it does | Location |
 |-------|--------------|----------|
 | **telegram-gateway** | Chat with a headless Claude Code agent over Telegram — real Claude turn per message, one persistent conversation per chat/group, file ingest/analyze/hold, allowlist-locked. Long-polling (works behind NAT). | [`telegram-gateway/`](telegram-gateway/) |
+| **voice-agent-connector** | Talk to your agent by voice from the Agent Voice Mode iOS app: a ~150-line stdlib webhook that relays spoken questions to your agent CLI (Claude Code by default) and answers back — pairing by terminal QR, HTTPS via cloudflared quick tunnel or your own host. No API keys; speech runs hosted-side. | [`voice-agent-connector/`](voice-agent-connector/) |
 | **projects** | R&D project chats: a Telegram group that files itself — every post (text/voice/photo/doc) auto-filed into a per-project directory (registry + wiki overview + dated files + lab notebook), photos/docs annotated by a local-policy model, answers grounded in the project's own files first. Per-chat `/privacy`·`/wisdom` model switch shown on the group title. | [`projects/`](projects/) |
 | **grammar-local** | On-box grammar/style fixer that never sends text to the cloud — slash command + CLI + a prompt-submit hook. Bring-your-own local model endpoint. | [`grammar-local/`](grammar-local/) |
 
