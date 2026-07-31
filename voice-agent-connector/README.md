@@ -19,6 +19,12 @@ you hear ◀─ iOS app ◀── hosted voice service ◀──JSON─── {"
   first), and prints a QR carrying the account — one scan signs the phone in
   with a welcome credit AND connects the agent. Nothing typed on a phone,
   no separate signup anywhere.
+- **QRs expire**: each `qr.py` run mints a short-lived scan-token
+  (~15 minutes; the exact expiry is printed). Unscanned it dies; the first
+  scan redeems it into a permanent sign-in. The account's real credential
+  stays in `connector.json` and is never rendered into a QR. If an agent
+  posts the QR into a chat, it should schedule deletion of that chat message
+  at expiry.
 - **Agent-agnostic**: any CLI that takes a question and prints an answer
   works via `agent_cmd` in `connector.json`.
 - **No keys, no voice code**: speech models run hosted-side; nothing here
