@@ -29,8 +29,9 @@ you hear ◀─ iOS app ◀── hosted voice service ◀──JSON─── {"
   additionally implement `group`, `groups`, `switch_group`, `leave_group`,
   `attachments` (`{token,ts,kind,filename,caption}` items),
   `file` (token → `{b64, content_type, filename}`), `branding`
-  (→ `{bot_name, company_name, user_name, user_email?, logo_token?}`) and `photo`
-  (`{b64, content_type, caption?}` → `{ok, token}`); unknown types should
+  (→ `{bot_name, company_name, user_name, user_email?, logo_token?}`), `photo`
+  (`{b64, content_type, caption?}` → `{ok, token}`) and `reset`
+  (clear the agent's conversation context → `{ok}`); unknown types should
   return HTTP 400, which the service treats as "not supported".
 
 Agent-executable install runbook: [`SKILL.md`](SKILL.md). Tell your agent to
