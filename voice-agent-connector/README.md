@@ -13,9 +13,12 @@ you hear ◀─ iOS app ◀── hosted voice service ◀──JSON─── {"
 - **~150 lines, stdlib-only** `connector.py`: bearer-authenticated webhook,
   runs your agent CLI per question (default: Claude Code with conversation
   continuity), returns the answer.
-- **Pairing by QR**: `start.sh` brings up an HTTPS tunnel (cloudflared
-  quick tunnel, or your own host via `PUBLIC_URL`) and prints a QR the app
-  scans — no URLs or secrets typed on a phone.
+- **One QR is the whole onboarding**: `start.sh` brings up an HTTPS tunnel
+  (cloudflared quick tunnel, or your own host via `PUBLIC_URL`), signs the
+  user up with the hosted voice service (which live-probes this webhook
+  first), and prints a QR carrying the account — one scan signs the phone in
+  with a welcome credit AND connects the agent. Nothing typed on a phone,
+  no separate signup anywhere.
 - **Agent-agnostic**: any CLI that takes a question and prints an answer
   works via `agent_cmd` in `connector.json`.
 - **No keys, no voice code**: speech models run hosted-side; nothing here
