@@ -30,11 +30,20 @@ etc.), also send them the PNG. For persistence add an `@reboot` cron running
 `start.sh`; note the quick tunnel's URL changes each restart — the user just
 re-scans a fresh QR (with a stable `PUBLIC_URL` this never happens).
 
-## Step 4 — the user pairs
+## Step 4 — the user pairs (one scan, that's everything)
 
-Tell the user: **Agent Voice Mode app → Settings → Scan QR** and scan the
-pairing QR. The app registers the webhook with the hosted service and runs a
-connection test; you'll see the test question hit `connector.log`.
+`start.sh` ends by running `qr.py`, which on first run **signs your user up
+with the hosted voice service automatically**: it presents this connector's
+webhook (the service probes it live before creating anything) and receives
+the account — new accounts start with a small welcome credit; talk minutes
+are billed by the hosted service, that's their product. The printed QR
+carries the account credential, so tell the user: **Agent Voice Mode app →
+Scan QR** — one scan signs the phone in AND connects you as their agent.
+
+Re-runs keep the account and just re-sync the webhook URL (quick tunnels get
+a new hostname per restart). Add `--name "Alice"` on the first `qr.py` run to
+set the display name. If signup answers 429, the service's daily signup cap
+is reached — try again tomorrow.
 
 ## Step 5 — verify
 

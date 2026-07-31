@@ -1,0 +1,6 @@
+connector.json
+url.txt
+*.log
+pairing-qr.png
+cloudflared
+__pycache__/
