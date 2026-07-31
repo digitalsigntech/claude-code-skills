@@ -26,9 +26,13 @@ secret and a random URL path; keep that file private (0600).
 
 Prints the public URL and a pairing QR in the terminal (plus
 `pairing-qr.png`). If you have a chat channel to your user (Telegram gateway
-etc.), also send them the PNG. For persistence add an `@reboot` cron running
-`start.sh`; note the quick tunnel's URL changes each restart — the user just
-re-scans a fresh QR (with a stable `PUBLIC_URL` this never happens).
+etc.), also send them the PNG — and because the QR expires in ~15 minutes
+(see step 4), **schedule deletion of that chat message at the expiry time**
+using whatever scheduler your gateway has (a chat is a terrible place for a
+credential to linger, even a short-lived one). For persistence add an
+`@reboot` cron running `start.sh`; note the quick tunnel's URL changes each
+restart — the user just re-scans a fresh QR (with a stable `PUBLIC_URL` this
+never happens).
 
 ## Step 4 — the user pairs (one scan, that's everything)
 
@@ -37,8 +41,14 @@ with the hosted voice service automatically**: it presents this connector's
 webhook (the service probes it live before creating anything) and receives
 the account — new accounts start with a small welcome credit; talk minutes
 are billed by the hosted service, that's their product. The printed QR
-carries the account credential, so tell the user: **Agent Voice Mode app →
+carries a **short-lived scan-token (expires in ~15 minutes** — `qr.py` prints
+the exact time**)**, so tell the user promptly: **Agent Voice Mode app →
 Scan QR** — one scan signs the phone in AND connects you as their agent.
+An unscanned QR simply dies (re-run `qr.py` for a fresh one); once scanned
+the phone stays signed in permanently. The account's own credential never
+leaves `connector.json`. Against an older hosted service that predates
+scan-tokens, `qr.py` falls back to the permanent credential and says so —
+then the QR must be deleted immediately after scanning.
 
 Re-runs keep the account and just re-sync the webhook URL (quick tunnels get
 a new hostname per restart). Add `--name "Alice"` on the first `qr.py` run to
@@ -63,6 +73,8 @@ Keep answers plain spoken prose — they are read aloud.
 
 - 401 in `connector.log` → the app holds an old secret: re-run `qr.py`,
   re-scan.
+- Scan fails / app says the code is invalid → the QR probably expired
+  (~15 min window): re-run `qr.py` and scan the fresh one.
 - "agent failed" → run the `agent_cmd` from `connector.json` by hand and read
   its stderr.
 - No question ever arrives → `curl -s -X POST <url from qr.py --payload> -H

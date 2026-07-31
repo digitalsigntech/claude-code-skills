@@ -13,6 +13,13 @@ webhook was registered at signup. On later runs (the quick tunnel's URL
 changes per restart) the stored account is kept and only the webhook URL is
 re-synced — re-scan only if the user got signed out.
 
+The QR carries a SHORT-LIVED scan-token (minted per run via POST /token/mint,
+~15 min): unscanned it simply dies; once scanned the phone stays signed in.
+The permanent account bearer stays in connector.json and never appears in a
+QR. If you post the QR into a chat, schedule that chat message's deletion at
+the printed expiry time (older hosted services without /token/mint fall back
+to the permanent bearer — then deleting the message after scanning is a MUST).
+
 `--payload` prints the JSON instead of rendering. `--name "Alice"` sets the
 display name (first run only). New accounts start with a small welcome credit;
 minutes are billed by the hosted service — that's their product.
@@ -21,6 +28,8 @@ import json
 import os
 import subprocess
 import sys
+import time
+import urllib.error
 import urllib.request
 
 DIR = os.path.dirname(os.path.abspath(__file__))
@@ -51,7 +60,6 @@ def main():
     if not conf.get("account_token"):
         # A fresh quick-tunnel hostname can take ~30 s to become resolvable
         # from the service's side — retry rather than fail the first run.
-        import time
         r = None
         for attempt in range(6):
             try:
@@ -81,20 +89,44 @@ def main():
                  bearer=conf["account_token"])
         print(f"[pair] webhook re-synced for {conf.get('account', '?')}")
 
+    # The QR gets a fresh SHORT-LIVED scan-token (never the stored bearer):
+    # unscanned it expires server-side in ~15 min; the first scan redeems it
+    # into a normal permanent sign-in. Older hosted services without
+    # POST /token/mint answer 404 — fall back to the stored bearer as before.
+    qr_token, note = conf["account_token"], ""
+    try:
+        t = api_call(api, "/token/mint", {"ttl": 900},
+                     bearer=conf["account_token"])
+        qr_token = t["token"]
+        exp = t.get("expires")
+        note = (f"This QR EXPIRES in ~{max(1, int(t.get('ttl', 900)) // 60)} "
+                "min"
+                + (time.strftime(" (at %H:%M)", time.localtime(exp))
+                   if exp else "")
+                + " if not scanned — re-run qr.py for a fresh one. If you "
+                  "send it into a chat, schedule that message's deletion at "
+                  "expiry.")
+    except urllib.error.HTTPError as e:
+        if e.code != 404:
+            raise
+        note = ("This hosted service predates expiring scan-tokens: the QR "
+                "carries the permanent account credential — share it only "
+                "with the person pairing and DELETE it after scanning (if "
+                "sent into a chat, delete that chat message).")
+
     payload = json.dumps({"v": 1, "type": "account",
-                          "token": conf["account_token"],
+                          "token": qr_token,
                           "name": conf.get("name") or conf.get("account", ""),
                           "api": api}, separators=(",", ":"))
     if "--payload" in sys.argv:
         print(payload)
+        print(f"[pair] {note}", file=sys.stderr)
         return
     png = os.path.join(DIR, "pairing-qr.png")
     subprocess.run(["qrencode", "-o", png, "-s", "8", payload], check=True)
     subprocess.run(["qrencode", "-t", "ANSIUTF8", payload], check=True)
     print(f"\nScan with Agent Voice Mode → Scan QR. One scan signs the phone "
-          f"in AND connects this agent.\nPNG copy: {png}\n"
-          f"(The QR contains the account credential — share it only with the "
-          f"person pairing, delete after scanning.)")
+          f"in AND connects this agent.\nPNG copy: {png}\n{note}")
 
 
 if __name__ == "__main__":
