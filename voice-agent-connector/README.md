@@ -20,6 +20,14 @@ you hear ◀─ iOS app ◀── hosted voice service ◀──JSON─── {"
   works via `agent_cmd` in `connector.json`.
 - **No keys, no voice code**: speech models run hosted-side; nothing here
   touches OpenAI or costs you API money.
+- **Capability handshake**: the voice service sends
+  `{"v":1,"type":"capabilities"}` and this connector answers `["ask"]` — the
+  app shows only the features a connection supports. Richer connectors may
+  additionally implement `group`, `groups`, `switch_group`, `leave_group`,
+  `attachments` (`{token,ts,kind,filename,caption}` items),
+  `file` (token → `{b64, content_type, filename}`) and `photo`
+  (`{b64, content_type, caption?}` → `{ok, token}`); unknown types should
+  return HTTP 400, which the service treats as "not supported".
 
 Agent-executable install runbook: [`SKILL.md`](SKILL.md). Tell your agent to
 follow it, then scan the QR it prints.

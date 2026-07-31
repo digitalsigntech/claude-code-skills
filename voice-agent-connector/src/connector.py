@@ -87,9 +87,19 @@ class H(BaseHTTPRequestHandler):
             return self._send(401, {"error": "unauthorized"})
         n = min(int(self.headers.get("Content-Length", 0)), 65536)
         try:
-            q = str(json.loads(self.rfile.read(n)).get("question", ""))[:4000]
+            d = json.loads(self.rfile.read(n))
         except Exception:
             return self._send(400, {"error": "bad body"})
+        t = d.get("type", "ask")
+        if t == "capabilities":
+            # Handshake: the voice service asks what this connector supports
+            # and the app shows only those features. A CLI agent is ask-only;
+            # richer connectors may add groups/attachments/photo/file — see
+            # the protocol notes in README.md.
+            return self._send(200, {"capabilities": ["ask"]})
+        if t != "ask":
+            return self._send(400, {"error": f"unsupported type {t!r}"})
+        q = str(d.get("question", ""))[:4000]
         if not q:
             return self._send(400, {"error": "no question"})
         self.log_message("ask: %.80r", q)
