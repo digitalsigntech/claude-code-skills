@@ -94,6 +94,13 @@ DOC_REFLEX = os.environ.get("TG_DOC_REFLEX", os.environ.get("DST_DOC_REFLEX", "1
 # KB image set, or (DM chats only) the closest-matching DST workspace file. Strict
 # all-tokens-match; anything ambiguous falls through. TG_FILE_REFLEX=0 off.
 FILE_REFLEX = os.environ.get("TG_FILE_REFLEX", os.environ.get("DST_FILE_REFLEX", "1")) == "1"
+# QR reflex: the owner asking for a login QR ("make me a qr for the app") runs
+# TG_QR_SCRIPT directly (called with `--chat <chat_id>`) — no LLM. Off unless
+# TG_QR_SCRIPT is set. TG_QR_CHATS = comma-separated chat ids where it may fire
+# (keep to owner-only chats — the QR usually carries a live credential).
+QR_SCRIPT = os.environ.get("TG_QR_SCRIPT", "")
+QR_CHATS = {int(x) for x in os.environ.get("TG_QR_CHATS", "").split(",") if x.strip()}
+QR_REFLEX = bool(QR_SCRIPT) and os.environ.get("TG_QR_REFLEX", "1") == "1"
 # Tier-1 reflex: answer product Q&A instantly from the local KB semantic index
 # (no LLM round trip), then verify with the full model in the background. See gateway.
 KB = os.path.join(DST_ROOT, "email", "kb", "kb")   # `kb ask "<question>" --json`
