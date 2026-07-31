@@ -113,6 +113,7 @@ NAT with no public IP or inbound ports.
 | `src/photo_reflex.py` | Optional sub-second image retrieval: intent detection → warm CLIP server → send via cached `file_id`s. |
 | `src/doc_reflex.py` | Optional ~1s document delivery: keyword match against a curated registry → `sendDocument` via cached `file_id`s. |
 | `src/file_reflex.py` | Optional generic file reflex: "show/fetch/get/give me <thing>" resolved against the CLIP image index and a cached workspace walk (workspace files in DMs + Always-Nemotron private groups only); sends only a full-token-coverage match (docs via `sendDocument`, images via the photo path), everything else falls through to the LLM turn. |
+| `src/qr_reflex.py` | Optional login-QR reflex: the owner asking for a QR ("make me a qr for the app") runs your minting script (`TG_QR_SCRIPT`, called with `--chat <id>`) directly — no LLM turn. Owner-only, gated to `TG_QR_CHATS`, since such QRs typically carry live credentials; question-shaped messages fall through. |
 | `src/personal_notes.py` | Optional owner-private note store: no-caption DM files auto-saved; strict delivery gate (owner DM / bot+owner-only group, fails closed). |
 | `src/voice_mode.py` | Optional on-box voice conversation: whisper.cpp STT (auto language) + Piper TTS; used by `handle_voice()` for chats in `VOICE_CHATS`. |
 | `src/qa_cache.py` | Semantic Q&A answer cache: repeat questions (even reworded) answered in ~0.1s from a local-embedding cache instead of an LLM turn; guards for product codes, TTL, and conversational fragments. |

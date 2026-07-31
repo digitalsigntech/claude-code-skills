@@ -16,6 +16,7 @@ import bridge
 import privacy_router
 import photo_reflex
 import doc_reflex
+import qr_reflex
 import file_reflex
 import personal_notes
 import voice_mode
@@ -886,6 +887,22 @@ def handle_text(msg, chat_id, text):
     if projects_mode.is_project_chat(chat_id) and not command.startswith("/"):
         handle_project_text(msg, chat_id, text)
         return
+
+    # QR reflex: the owner asking for a login QR runs the configured minting script
+    # directly (TG_QR_SCRIPT) — a few seconds, no LLM turn. Owner-only and gated to
+    # TG_QR_CHATS because the QR typically carries a live credential. Runs before the
+    # doc/file reflexes so a stale QR image on disk can never win.
+    if C.QR_REFLEX:
+        try:
+            summary = qr_reflex.try_handle(chat_id, text,
+                                           (msg.get("from") or {}).get("id"))
+        except Exception as e:
+            summary = None
+            log(f"qr reflex error: {e}")
+        if summary:
+            _arc_out(chat_id, summary)
+            log(f"qr reflex chat={chat_id} {summary}")
+            return
 
     # Doc reflex (2026-07-10, the owner: "make the labelexpo pass instant"): requests for a
     # CURATED registered document ("fetch my labelexpo pass") are answered by a direct
