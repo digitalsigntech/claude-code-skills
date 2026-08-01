@@ -51,9 +51,24 @@ scan-tokens, `qr.py` falls back to the permanent credential and says so —
 then the QR must be deleted immediately after scanning.
 
 Re-runs keep the account and just re-sync the webhook URL (quick tunnels get
-a new hostname per restart). Add `--name "Alice"` on the first `qr.py` run to
-set the display name. If signup answers 429, the service's daily signup cap
-is reached — try again tomorrow.
+a new hostname per restart). On the first `qr.py` run pass what you know
+about your user — **you are their agent, so you know this**:
+
+- `--name "Alice"` — their display name (the voice greets them with it);
+- `--language ru` — the ISO 639-1 code of the language **you and your user
+  actually converse in** (not the OS locale — qr.py only falls back to
+  `$LANG` if you omit this). It pre-sets the app's language so the very
+  first login is already localized.
+
+If signup answers 429, the service's daily signup cap is reached — try again
+tomorrow.
+
+Every `qr.py` run also pushes basic profile metadata to the hosted service's
+admin dashboard: the user's country (public-IP geolocation of this machine,
+locale fallback), the agent type behind this connector (from `agent_cmd`),
+and the display name. It is fill-if-empty on the server — never overwrites
+what the operator set by hand — and older hosted services without
+`POST /profile` are skipped silently.
 
 ## Step 5 — verify
 

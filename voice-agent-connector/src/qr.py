@@ -46,16 +46,67 @@ def api_call(base, path, body, bearer=None):
         return json.load(r)
 
 
+def detect_country():
+    """Best-effort country of THIS machine (≈ the user), for the service's
+    admin dashboard. Public-IP geolocation first, locale as fallback."""
+    for url in ("https://ipapi.co/country_name/",
+                "http://ip-api.com/line/?fields=country"):
+        try:
+            with urllib.request.urlopen(url, timeout=5) as r:
+                c = r.read().decode().strip()
+                if c and len(c) <= 56 and "error" not in c.lower():
+                    return c
+        except Exception:
+            pass
+    try:                                   # e.g. LANG=en_US.UTF-8 -> "US"
+        loc = (os.environ.get("LC_ALL") or os.environ.get("LANG") or "")
+        terr = loc.split(".")[0].split("_")
+        return terr[1] if len(terr) > 1 and terr[1].isalpha() else None
+    except Exception:
+        return None
+
+
+def detect_agent_type(conf):
+    """Readable label for the agent behind this connector, from agent_cmd."""
+    cmd = (conf.get("agent_cmd") or ["claude"])
+    exe = os.path.basename(str(cmd[0] if isinstance(cmd, list) else cmd)
+                           .split()[0])
+    return {"claude": "Claude Code"}.get(exe, exe.capitalize() or None)
+
+
+def push_profile(api, conf):
+    """Tell the service what we know about our user — country, agent type.
+    Fill-if-empty on the server; never overwrites the operator's edits.
+    Older hosted services answer 404 — fine, skip silently."""
+    meta = {"country": detect_country(),
+            "agent_type": detect_agent_type(conf),
+            "agent_name": conf.get("name") or None}
+    meta = {k: v for k, v in meta.items() if v}
+    if not meta:
+        return
+    try:
+        api_call(api, "/profile", meta, bearer=conf["account_token"])
+        print(f"[pair] profile pushed ({', '.join(sorted(meta))})")
+    except Exception:
+        pass
+
+
 def main():
     conf = json.load(open(CONF_PATH))
     base = open(os.path.join(DIR, "url.txt")).read().strip().rstrip("/")
     api = conf.get("api") or DEFAULT_API
     hook_url = f"{base}/{conf['path']}/hook"
-    for arg in sys.argv[1:]:
-        if arg.startswith("--name="):
-            conf["name"] = arg.split("=", 1)[1]
-    if "--name" in sys.argv:
-        conf["name"] = sys.argv[sys.argv.index("--name") + 1]
+    for flag in ("name", "language"):
+        for arg in sys.argv[1:]:
+            if arg.startswith(f"--{flag}="):
+                conf[flag] = arg.split("=", 1)[1]
+        if f"--{flag}" in sys.argv:
+            conf[flag] = sys.argv[sys.argv.index(f"--{flag}") + 1]
+    if not conf.get("language"):
+        # OS-locale fallback (en_US.UTF-8 -> en); the agent passing
+        # --language from its own conversations beats this every time.
+        loc = os.environ.get("LANG", "")[:2]
+        conf["language"] = loc if loc.isalpha() else ""
 
     if not conf.get("account_token"):
         # A fresh quick-tunnel hostname can take ~30 s to become resolvable
@@ -66,6 +117,8 @@ def main():
                 r = api_call(api, "/signup",
                              {"name": conf.get("name")
                                       or os.environ.get("USER", ""),
+                              **({"language": conf["language"]}
+                                 if conf.get("language") else {}),
                               "webhook_url": hook_url,
                               "webhook_secret": conf["secret"]})
                 break
@@ -88,6 +141,7 @@ def main():
         api_call(api, "/agent", {"url": hook_url, "secret": conf["secret"]},
                  bearer=conf["account_token"])
         print(f"[pair] webhook re-synced for {conf.get('account', '?')}")
+    push_profile(api, conf)
 
     # The QR gets a fresh SHORT-LIVED scan-token (never the stored bearer):
     # unscanned it expires server-side in ~15 min; the first scan redeems it
