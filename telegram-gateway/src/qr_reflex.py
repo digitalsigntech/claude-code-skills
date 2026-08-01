@@ -18,7 +18,7 @@ import re, shlex, subprocess, time
 import tgconf as C
 
 ACTION = re.compile(r"\b(create|make|generate|mint|send|give|get|need|want|"
-                    r"another|fresh|new|resend|re-send)\b", re.I)
+                    r"show|display|see|another|fresh|new|resend|re-send)\b", re.I)
 QR = re.compile(r"\bqr\b", re.I)
 CONTEXT = re.compile(r"\b(voice|app|login|log in|sign[- ]?in|account|phone)\b", re.I)
 # Informational questions about the QR system should reach Claude, not get a
