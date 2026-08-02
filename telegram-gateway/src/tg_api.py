@@ -187,7 +187,8 @@ def _spool_attachment(method, params, files):
 
 def _call(method, _files=None, _timeout=60, **params):
     url = f"{C.API}/{method}"
-    for attempt in (0, 1):
+    last = 2
+    for attempt in range(last + 1):
         try:
             if _files:
                 r = _SESSION.post(url, data=params, files=_files, timeout=_timeout)
@@ -197,11 +198,18 @@ def _call(method, _files=None, _timeout=60, **params):
             if j.get("ok"):
                 _spool_attachment(method, params, _files)
                 return j
+            # 429 flood control: Telegram tells us how long to wait. Without this the
+            # caller treats it as a hard failure and degrades to its plaintext path —
+            # which is how raw markdown used to leak into long streamed replies.
+            retry_after = (j.get("parameters") or {}).get("retry_after")
+            if retry_after and attempt < last and not _files:
+                time.sleep(min(float(retry_after) + 0.5, 10))
+                continue
             return {"ok": False, "error": j}
         except requests.exceptions.ConnectionError as e:
-            # A pooled keep-alive connection Telegram closed while idle — retry once
+            # A pooled keep-alive connection Telegram closed while idle — retry
             # on a fresh one. Uploads (_files) aren't retried: the stream is consumed.
-            if attempt or _files:
+            if attempt >= last or _files:
                 return {"ok": False, "error": str(e)}
         except Exception as e:
             return {"ok": False, "error": str(e)}
@@ -248,11 +256,34 @@ def send_message(chat_id, text, reply_to=None, reply_markup=None):
     return _send_html(chat_id, text, reply_to, reply_markup)
 
 
+def _is_parse_error(res):
+    """True when Telegram rejected the message because of the HTML itself (a tag split
+    across a chunk boundary, a stray '<', ...). Any OTHER failure — flood control, a
+    network blip, a transient 5xx — is NOT a reason to drop formatting: retrying the
+    same HTML is the right move, since the plaintext fallback leaks raw markdown."""
+    err = str((res or {}).get("error", "")).lower()
+    return ("parse entities" in err or "unsupported start tag" in err
+            or "unclosed" in err or "tag" in err and "parse" in err)
+
+
+def _log_plain_fallback(where, res):
+    """Record every time a reply had to go out unformatted, so the next leak is
+    diagnosable instead of guesswork."""
+    try:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "logs", "html_fallback.log")
+        with open(path, "a") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [{where}] "
+                    f"{str((res or {}).get('error'))[:400]}\n")
+    except Exception:
+        pass
+
+
 def _send_html(chat_id, text, reply_to=None, reply_markup=None):
     """Send (chunked) as Telegram HTML so markdown renders. reply_markup is
-    attached to the LAST chunk only. If a chunk's HTML is rejected (e.g. a tag
-    split across the chunk boundary), retry it as plaintext so the reply always
-    lands."""
+    attached to the LAST chunk only. A parse rejection (e.g. a tag split across the
+    chunk boundary) degrades that chunk to plaintext; any other failure is retried
+    as HTML first, so a rate-limit or blip never costs us the formatting."""
     last = None
     parts = list(_chunks(text))
     for i, part in enumerate(parts):
@@ -265,7 +296,11 @@ def _send_html(chat_id, text, reply_to=None, reply_markup=None):
         res = None
         if len(html_part) <= 4096:
             res = _call("sendMessage", text=html_part, parse_mode="HTML", **params)
+            if res and not res.get("ok") and not _is_parse_error(res):
+                time.sleep(1.0)
+                res = _call("sendMessage", text=html_part, parse_mode="HTML", **params)
         if not res or not res.get("ok"):
+            _log_plain_fallback("send", res)
             res = _call("sendMessage", text=part, **params)
         last = res
     return last
@@ -289,10 +324,16 @@ def edit_text(chat_id, msg_id, text, as_html=False):
     if as_html:
         h = md_to_html(text)
         if len(h) <= 4096:
-            r = _call("editMessageText", chat_id=chat_id, message_id=msg_id, text=h,
-                      parse_mode="HTML", disable_web_page_preview=True)
-            if r.get("ok") or "not modified" in str(r.get("error", "")).lower():
-                return r
+            for attempt in (0, 1):
+                r = _call("editMessageText", chat_id=chat_id, message_id=msg_id, text=h,
+                          parse_mode="HTML", disable_web_page_preview=True)
+                if r.get("ok") or "not modified" in str(r.get("error", "")).lower():
+                    return r
+                if _is_parse_error(r):        # the HTML itself is bad — plaintext it is
+                    break
+                if not attempt:               # rate limit / blip: keep the formatting
+                    time.sleep(1.0)
+            _log_plain_fallback("edit", r)
     r = _call("editMessageText", chat_id=chat_id, message_id=msg_id, text=text,
               disable_web_page_preview=True)
     return r
