@@ -30,6 +30,7 @@ import os
 import secrets
 import subprocess
 import sys
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 DIR = os.path.dirname(os.path.abspath(__file__))
@@ -115,10 +116,42 @@ class H(BaseHTTPRequestHandler):
         print("[connector]", fmt % args, flush=True)
 
 
+def resync_webhook():
+    """Re-point the hosted service at our CURRENT tunnel URL.
+
+    qr.py already does this, but only when it runs. Someone starting
+    connector.py directly — or a restart script that skips qr.py — would leave
+    the service holding a dead URL from the previous tunnel, and the service
+    can only reach us at what it holds. Doing it here means the URL is correct
+    after ANY start. No-ops silently when the account or the URL isn't there
+    yet (first run: qr.py does the signup)."""
+    try:
+        base = open(os.path.join(DIR, "url.txt")).read().strip().rstrip("/")
+    except OSError:
+        return
+    tok, api = CONF.get("account_token"), CONF.get("api")
+    if not (base and tok and api):
+        return
+    import urllib.request
+    req = urllib.request.Request(
+        api.rstrip("/") + "/agent",
+        data=json.dumps({"url": f"{base}/{CONF['path']}/hook",
+                         "secret": CONF["secret"]}).encode(),
+        headers={"Content-Type": "application/json",
+                 "Authorization": f"Bearer {tok}"})
+    try:
+        with urllib.request.urlopen(req, timeout=20):
+            print(f"[connector] webhook re-synced: {base}", flush=True)
+    except Exception as e:                # offline start is not fatal
+        print(f"[connector] webhook re-sync failed ({e}) — run qr.py once "
+              f"the tunnel is up", flush=True)
+
+
 if __name__ == "__main__":
     if "--print-config" in sys.argv:      # used by qr.py / start.sh
         print(json.dumps({"path": CONF["path"], "secret": CONF["secret"]}))
         sys.exit(0)
+    threading.Thread(target=resync_webhook, daemon=True).start()
     print(f"[connector] listening on 127.0.0.1:{PORT} "
           f"path=/{CONF['path']}/hook", flush=True)
     ThreadingHTTPServer(("127.0.0.1", PORT), H).serve_forever()
