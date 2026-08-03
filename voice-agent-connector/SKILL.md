@@ -51,7 +51,10 @@ scan-tokens, `qr.py` falls back to the permanent credential and says so —
 then the QR must be deleted immediately after scanning.
 
 Re-runs keep the account and just re-sync the webhook URL (quick tunnels get
-a new hostname per restart). On the first `qr.py` run pass what you know
+a new hostname per restart). `connector.py` also re-syncs on its own start, so
+a restart that skips `qr.py` still leaves the service able to reach you — the
+service can only call the URL it holds, and a stale one is indistinguishable
+from an agent that is simply down. On the first `qr.py` run pass what you know
 about your user — **you are their agent, so you know this**:
 
 - `--name "Alice"` — their display name (the voice greets them with it);
