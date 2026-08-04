@@ -129,6 +129,42 @@ def _body_text(payload):
     return text
 
 
+def _html_image_urls(payload, out=None):
+    """Remote image URLs from the mail's text/html part.
+
+    Stripping tags out of the HTML throws away every <img src>, so an email whose
+    real content is pictures arrives looking empty — e.g. an order confirmation
+    that shows a photo of each item. The plain-text body stays the body; these URLs
+    are appended as a short list so the turn can fetch a picture when it needs to
+    see the thing. Tracking pixels and the sender's own logos/chrome are dropped.
+    """
+    import re
+    if out is None:
+        out = []
+    if payload.get("mimeType", "").startswith("multipart"):
+        for p in payload.get("parts", []):
+            _html_image_urls(p, out)
+        return out
+    if payload.get("mimeType") != "text/html":
+        return out
+    data = payload.get("body", {}).get("data")
+    if not data:
+        return out
+    html_src = base64.urlsafe_b64decode(data).decode("utf-8", "replace")
+    for url in re.findall(r'<img[^>]+src="([^"]+)"', html_src, re.I):
+        url = url.replace("&amp;", "&")
+        if not url.lower().startswith("http"):
+            continue                                     # cid: inline parts arrive as attachments
+        low = url.lower()
+        if "/trk?" in low or "tracking" in low or "pixel" in low:
+            continue                                     # open-tracking beacons
+        if re.search(r"(logo|icon|banner|tagline|footer|header|social|facebook"
+                     r"|twitter|instagram|linkedin|youtube)", low):
+            continue                                     # sender chrome, not content
+        if url not in out:
+            out.append(url)
+    return out[:25]
+
 def gmail_auth_results(full):
     """The Authentication-Results header STAMPED BY GMAIL (authserv-id
     mx.google.com), topmost occurrence. Gmail strips inbound headers claiming its
@@ -254,7 +290,14 @@ def check_new(first_run=False):
             notify(f"POSSIBLE IMPERSONATION: mail claiming to be from {addr} failed "
                    f"DKIM/SPF verification. Subject: {subj}. Ignored — not queued.")
             continue
-        log(f"NEW {mid} | {frm} | {subj}  -> queued as chat message")
+        # Pictures carried in the HTML body (not as attachments) — see _html_image_urls.
+        img_urls = _html_image_urls(full.get("payload", {}))
+        if img_urls:
+            body = (body + "\n\nImages embedded in the HTML body of this email "
+                    "(fetch one if you need to see what it shows):\n"
+                    + "\n".join(f"- {u}" for u in img_urls))[:BODY_MAX + 4000]
+        log(f"NEW {mid} | {frm} | {subj}  -> queued as chat message"
+            + (f" ({len(img_urls)} inline image url(s))" if img_urls else ""))
         enqueue_injection({"id": mid, "from": frm, "subject": subj,
                            "body": body, "friend": addr in FRIEND_SENDERS,
                            "chat_id": target_chat(), "ts": int(time.time())})
