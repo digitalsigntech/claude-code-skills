@@ -24,6 +24,10 @@ watchdog wrapper keeps the connection alive and restarts it if it wedges.
   so those never trigger a downstream turn.
 - Qualifying messages are written atomically as `<ts>-<msgid>.json` into a queue
   directory. Each job carries `{id, from, subject, body, friend, chat_id, ts}`.
+- `body` is the plain-text part. Because tag-stripping HTML would discard every
+  `<img src>`, any content images in the HTML part are appended to `body` as a
+  short list of URLs (tracking pixels and sender logos/chrome filtered out), so a
+  mail whose real content is pictures does not arrive looking empty.
 - An optional `notify()` helper can ping a chat bot (a Telegram Bot API endpoint
   is shown as an example — swap for any backend).
 
