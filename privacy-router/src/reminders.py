@@ -11,6 +11,8 @@ cron:
 
 Kinds:
   ping — at fire time, send `text` verbatim to `chat_id` via the Telegram bot.
+         With --photo, it fires as a photo with `text` as the caption, so
+         "remind me to flip this" comes back with the picture that prompted it.
   task — at fire time, run `text` as an INSTRUCTION through the private agent
          loop (private_agent.run — with its CRM/email/KB tools) and post the
          answer. Use for conditional reminders like "ping only if we haven't
@@ -18,6 +20,7 @@ Kinds:
 
 CLI:
   reminders.py add "YYYY-MM-DD HH:MM" <chat_id> <ping|task> "<text>" [--by NAME]
+                                                                     [--photo PATH]
   reminders.py list [--all]
   reminders.py cancel <id>
   reminders.py fire
@@ -61,6 +64,10 @@ def _db():
         attempts INTEGER NOT NULL DEFAULT 0,
         fired_ts TEXT,
         result TEXT)""")
+    # optional image sent with the reminder (a camera shot, a screenshot)
+    if "photo" not in {r[1] for r in c.execute("PRAGMA table_info(reminders)")}:
+        c.execute("ALTER TABLE reminders ADD COLUMN photo TEXT")
+        c.commit()
     return c
 
 
@@ -74,8 +81,32 @@ def _tg_send(chat_id, text):
         raise RuntimeError(f"telegram: {out}")
 
 
-def add(when_local, chat_id, kind, text, created_by="agent"):
-    """Queue a reminder. Returns (id, when_local). Raises ValueError on bad input."""
+def _tg_photo(chat_id, path, caption):
+    """sendPhoto as multipart/form-data (stdlib only)."""
+    boundary = "----reminders" + str(int(time.time() * 1000))
+    body = bytearray()
+    for k, v in (("chat_id", str(chat_id)), ("caption", caption[:1000])):
+        body += (f"--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n"
+                 f"{v}\r\n").encode()
+    body += (f"--{boundary}\r\nContent-Disposition: form-data; name=\"photo\"; "
+             f"filename=\"{os.path.basename(path)}\"\r\n"
+             f"Content-Type: application/octet-stream\r\n\r\n").encode()
+    body += open(path, "rb").read() + f"\r\n--{boundary}--\r\n".encode()
+    req = urllib.request.Request(
+        f"https://api.telegram.org/bot{_token()}/sendPhoto", data=bytes(body),
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+    with urllib.request.urlopen(req, timeout=120) as r:
+        out = json.loads(r.read())
+    if not out.get("ok"):
+        raise RuntimeError(f"telegram: {out}")
+
+
+def add(when_local, chat_id, kind, text, created_by="agent", photo=None):
+    """Queue a reminder. Returns (id, when_local). Raises ValueError on bad input.
+
+    photo: optional path to an image sent with the reminder. Checked now, not at
+    fire time — a bad path should fail while the requester is still around.
+    """
     when_local = (when_local or "").strip()
     try:
         when_epoch = time.mktime(time.strptime(when_local, TIME_FMT))
@@ -85,12 +116,16 @@ def add(when_local, chat_id, kind, text, created_by="agent"):
         raise ValueError("kind must be 'ping' or 'task'")
     if not (text or "").strip():
         raise ValueError("text is empty")
+    if photo:
+        photo = os.path.abspath(os.path.expanduser(photo))
+        if not os.path.isfile(photo):
+            raise ValueError(f"photo not found: {photo}")
     c = _db()
     cur = c.execute(
-        "INSERT INTO reminders(created_ts, created_by, chat_id, when_local, when_epoch, kind, text) "
-        "VALUES(?,?,?,?,?,?,?)",
+        "INSERT INTO reminders(created_ts, created_by, chat_id, when_local, when_epoch, kind, text, photo) "
+        "VALUES(?,?,?,?,?,?,?,?)",
         (time.strftime("%Y-%m-%d %H:%M:%S"), created_by, int(chat_id),
-         when_local, when_epoch, kind, text.strip()))
+         when_local, when_epoch, kind, text.strip(), photo))
     c.commit(); c.close()
     return cur.lastrowid, when_local
 
@@ -105,10 +140,10 @@ def cancel(rid):
 
 def list_rows(all_rows=False):
     c = _db()
-    q = "SELECT id, when_local, chat_id, kind, status, created_by, text FROM reminders"
+    q = "SELECT id, when_local, chat_id, kind, status, created_by, text, photo FROM reminders"
     if not all_rows:
         q += " WHERE status='pending'"
-    rows = [dict(zip(("id", "when", "chat_id", "kind", "status", "by", "text"), r))
+    rows = [dict(zip(("id", "when", "chat_id", "kind", "status", "by", "text", "photo"), r))
             for r in c.execute(q + " ORDER BY when_epoch")]
     c.close()
     return rows
@@ -116,7 +151,13 @@ def list_rows(all_rows=False):
 
 def _fire_one(row):
     chat_id, kind, text = row["chat_id"], row["kind"], row["text"]
+    photo = row.get("photo")
+    if photo and not os.path.isfile(photo):
+        photo = None  # image cleaned up since queueing — still send the words
     if kind == "ping":
+        if photo:
+            _tg_photo(chat_id, photo, f"⏰ Reminder: {text}")
+            return f"ping sent with photo {os.path.basename(photo)}"
         _tg_send(chat_id, f"⏰ Reminder: {text}")
         return "ping sent"
     # task: run the instruction through the private agent loop, post its answer
@@ -135,8 +176,8 @@ def _fire_one(row):
 def fire():
     now = time.time()
     c = _db()
-    due = [dict(zip(("id", "chat_id", "kind", "text", "attempts"), r)) for r in c.execute(
-        "SELECT id, chat_id, kind, text, attempts FROM reminders "
+    due = [dict(zip(("id", "chat_id", "kind", "text", "attempts", "photo"), r)) for r in c.execute(
+        "SELECT id, chat_id, kind, text, attempts, photo FROM reminders "
         "WHERE status='pending' AND when_epoch<=? ORDER BY when_epoch", (now,))]
     c.close()
     for row in due:
@@ -170,13 +211,15 @@ def main():
     a.add_argument("when"); a.add_argument("chat_id", type=int)
     a.add_argument("kind", choices=("ping", "task")); a.add_argument("text")
     a.add_argument("--by", default="agent")
+    a.add_argument("--photo", help="image to send with the reminder")
     l = sub.add_parser("list"); l.add_argument("--all", action="store_true")
     ca = sub.add_parser("cancel"); ca.add_argument("id", type=int)
     sub.add_parser("fire")
     ns = ap.parse_args()
     if ns.cmd == "add":
-        rid, when = add(ns.when, ns.chat_id, ns.kind, ns.text, created_by=ns.by)
-        print(f"queued #{rid} for {when}")
+        rid, when = add(ns.when, ns.chat_id, ns.kind, ns.text, created_by=ns.by,
+                        photo=ns.photo)
+        print(f"queued #{rid} for {when}" + (" (with photo)" if ns.photo else ""))
     elif ns.cmd == "list":
         for r in list_rows(ns.all):
             print(f"#{r['id']} {r['when']} [{r['status']}] {r['kind']} chat={r['chat_id']} "
