@@ -17,6 +17,7 @@ import privacy_router
 import photo_reflex
 import doc_reflex
 import qr_reflex
+import feedback_reply
 import file_reflex
 import personal_notes
 import voice_mode
@@ -882,6 +883,21 @@ def handle_text(msg, chat_id, text):
         TG.send_message(chat_id, f"📌 This chat now files into `projects/{slug}/`."
                         if slug else "⚠️ Bad project name — use letters/digits/dashes.")
         return
+    # Dev reply in the feedback group: a swipe-reply to a feedback post, or
+    # "@acct-id ...", goes to that user's app — NOT to the model. Ahead of every
+    # reflex and of the model turn: the message is addressed to a user, and
+    # answering it here is a bug, not a feature. Off unless configured.
+    if feedback_reply.ENABLED and chat_id == feedback_reply.FEEDBACK_CHAT \
+            and not command.startswith("/"):
+        try:
+            summary = feedback_reply.try_handle(msg, chat_id, text)
+        except Exception as e:
+            summary = None
+            log(f"feedback reply error: {e}")
+        if summary:
+            log(f"feedback chat={chat_id} {summary}")
+            return
+
     # Project chats: file-then-answer, project files first. Handled BEFORE the KB
     # reflexes/caches on purpose — the KB is the wrong first source here.
     if projects_mode.is_project_chat(chat_id) and not command.startswith("/"):
