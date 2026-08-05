@@ -24,7 +24,7 @@ Config (all env, feature is OFF unless the first two are set):
 Owner-gated: this writes to a user's phone, so only OWNER_ID may send. Wire
 the map file from whatever posts the reports — without it only @id works.
 """
-import json, os, re
+import json, os, re, time
 import urllib.error, urllib.request
 
 import tgconf as C
@@ -66,6 +66,35 @@ def _lookup(mid):
         return json.load(open(MAP_FILE)).get(str(mid))
     except Exception:
         return None
+
+
+def _map_add(msg_ids, account):
+    """Extend the map so a THREAD keeps routing.
+
+    The report post is only the first message of a conversation: after a reply
+    goes out, the natural next move is to reply again — to one's own message or
+    to the confirmation. Mapping those too keeps the second message routed
+    instead of silently becoming an LLM turn.
+    """
+    ids = [i for i in msg_ids if i]
+    if not (MAP_FILE and ids and account):
+        return
+    try:
+        try:
+            m = json.load(open(MAP_FILE))
+        except Exception:
+            m = {}
+        for mid in ids:
+            m[str(mid)] = {"account": account, "ts": time.time()}
+        if len(m) > 500:
+            m = dict(sorted(m.items(), key=lambda kv: kv[1].get("ts", 0),
+                            reverse=True)[:500])
+        tmp = MAP_FILE + ".tmp"
+        with open(tmp, "w") as fh:
+            json.dump(m, fh)
+        os.replace(tmp, MAP_FILE)
+    except Exception:
+        pass          # routing already happened; a lost thread link is minor
 
 
 def _push(account, text, author):
@@ -122,9 +151,13 @@ def try_handle(msg, chat_id, text):
         return f"dev-reply BLOCKED (not owner: {uid}) -> {account}"
     author = ((msg.get("from") or {}).get("first_name") or "Support").strip()
     ok, note = _push(account, body[:2000], author)
-    TG.send_message(
+    conf = TG.send_message(
         chat_id,
         f"✅ Sent to `{account}` — it lands in their app." if ok else
         f"⚠️ NOT delivered to `{account}`{' — ' + note if note else ''}",
         reply_to=msg["message_id"])
+    if ok:
+        cid = ((conf or {}).get("result") or {}).get("message_id") \
+            if isinstance(conf, dict) else None
+        _map_add([msg["message_id"], cid], account)
     return f"dev-reply via {how} -> {account} ok={ok}{' ' + note if note else ''}"
