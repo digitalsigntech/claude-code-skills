@@ -10,7 +10,10 @@ Usage:
   gmailer.py draft  --to a@b.com [--cc ..] --subject "..." --body "..." [--body-file f] [--reply-to <msg_id>] [--md]
 
 --md: treat the body as markdown and send multipart/alternative (plaintext fallback +
-HTML) — Outlook/Gmail render **bold** etc. properly instead of showing literal markers.
+HTML) — Outlook/Gmail render **bold**, headings and tables properly instead of showing
+literal markers. Tables/blockquotes/code get inline styles, since mail clients strip
+<style> blocks. REQUIRES the 'markdown' package (pip install markdown); --md aborts
+rather than sending if it is missing.
 
 Pick the mailbox with the MAIL_ACCOUNT env var (default: primary).
 Gmail query examples: 'is:unread', 'from:bob newer_than:7d', 'subject:invoice'.
@@ -104,15 +107,38 @@ def _md_plain(md):
     return t
 
 
+# Mail clients strip <style> blocks, so table styling has to be inlined per tag.
+_INLINE_STYLES = [
+    ("<table>", '<table style="border-collapse:collapse;width:100%;margin:14px 0;'
+                'font-size:13px">'),
+    ("<th>", '<th style="border:1px solid #d0d0d0;background:#f4f4f4;padding:6px 9px;'
+             'text-align:left;vertical-align:top">'),
+    ("<td>", '<td style="border:1px solid #d0d0d0;padding:6px 9px;vertical-align:top">'),
+    ("<blockquote>", '<blockquote style="border-left:3px solid #d0d0d0;margin:12px 0;'
+                     'padding:2px 12px;color:#555">'),
+    ("<code>", '<code style="background:#f4f4f4;padding:1px 4px;border-radius:3px">'),
+    ("<hr />", '<hr style="border:0;border-top:1px solid #ddd;margin:20px 0">'),
+]
+
+
 def _md_html(md):
-    import html as html_lib
+    """Render markdown to inline-styled HTML for email.
+
+    Raises if the markdown package is missing — a silent plaintext fallback ships
+    broken-looking mail (tables as raw pipe rows), which is worse than failing loudly.
+    """
     try:
         import markdown
-        inner = markdown.markdown(md, extensions=["extra", "sane_lists", "nl2br"])
     except ImportError:
-        inner = "<br>\n".join(html_lib.escape(_md_plain(md)).splitlines())
+        raise SystemExit(
+            "gmailer: --md needs the 'markdown' package (pip install markdown).\n"
+            "Refusing to send: the fallback would mail raw markdown as plaintext."
+        )
+    inner = markdown.markdown(md, extensions=["extra", "sane_lists", "nl2br"])
+    for tag, styled in _INLINE_STYLES:
+        inner = inner.replace(tag, styled)
     return ('<div dir="ltr" style="font-family:Arial,Helvetica,sans-serif;'
-            f'font-size:14px;line-height:1.45">{inner}</div>')
+            f'font-size:14px;line-height:1.45;color:#222">{inner}</div>')
 
 
 def _mk_message(a, s):

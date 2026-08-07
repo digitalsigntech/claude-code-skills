@@ -41,8 +41,10 @@ primary, `token_<account>.json` for the others).
 - Python 3.8+.
 - Python deps:
   ```bash
-  pip install google-api-python-client google-auth google-auth-oauthlib
+  pip install google-api-python-client google-auth google-auth-oauthlib markdown
   ```
+  (`markdown` is needed only for `--md` HTML email, but install it — `--md`
+  refuses to send without it.)
   (The wrappers assume a virtualenv at `src/venv`; create one there or edit the
   wrapper to point at your interpreter.)
 - A Google Cloud project with the **Gmail API** enabled and a **Desktop** OAuth client.
@@ -139,7 +141,15 @@ refreshes only with the exact scopes it was originally granted.
 ## HTML email (`--md`)
 
 `send`/`draft` accept `--md`: the body is treated as markdown and sent as
-multipart/alternative — an HTML part (rendered via the `markdown` package,
-`pip install markdown`; graceful plain fallback if absent) plus a plaintext
-part with the markdown markers stripped. Use it for any formatted prose so
-recipients never see literal `**` markers.
+multipart/alternative — an HTML part (headings, tables, lists, `**bold**`)
+plus a plaintext part with the markdown markers stripped. Use it for any
+formatted prose so recipients never see literal `**` markers.
+
+**`pip install markdown` is required.** Without it `--md` aborts and sends
+nothing. It used to fall back to escaped plaintext, which silently shipped
+mail with literal `##` headings and tables as raw pipe rows — a broken send
+that looks successful is worse than a failed one.
+
+Table, blockquote and code styling is inlined per tag (`_INLINE_STYLES` in
+`gmailer.py`) because Gmail and Outlook strip `<style>` blocks; a bare
+`<table>` renders borderless and unreadable. Adjust that list to restyle.
