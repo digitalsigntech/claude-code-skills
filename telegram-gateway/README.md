@@ -52,6 +52,14 @@ NAT with no public IP or inbound ports.
   hits (`.mp4/.mov/.webm/.m4v`) are sent via `sendVideo` — the full clip, not
   the indexed mid-frame; their `file_id`s are cached the same way. Toggle
   `PHOTO_REFLEX` / env `TG_PHOTO_REFLEX`. Measured ~0.4s end-to-end.
+- **Reminders reflex (optional, ~5ms).** "Show me my reminders" is a SELECT, not
+  a question for a model. Renders a two-column table, then sends each attached
+  photo as a separate captioned message. The two-column shape is a finding, not
+  a preference: an image in a rich-message table cell is dropped by Telegram
+  without error, so the column looked correct in a client with its own renderer
+  and empty in Telegram.
+- **Tasks reflex (optional, ~50ms).** "What's running" answered from the live
+  task registry over a loopback hook — no model, no shelling out.
 - **Doc reflex (optional, ~1s).** Requests for a curated registered document
   ("fetch my expo pass", "send the price list") are answered by a direct
   `sendDocument` — no LLM turn. Docs live in `doc_registry.json` (copy
@@ -111,6 +119,8 @@ NAT with no public IP or inbound ports.
 | `src/tg_api.py` | Minimal Telegram Bot API client + markdown→HTML / rich-message rendering. No webhook. |
 | `src/tgconf.py` | All config: token, allowlist, paths, model, timeouts, feature flags. **Edit this first.** |
 | `src/photo_reflex.py` | Optional sub-second image retrieval: intent detection → warm CLIP server → send via cached `file_id`s. |
+| `src/reminders_reflex.py` | Optional ~5ms reminders list: SQLite SELECT → GFM table, **two columns only**. Telegram silently drops markdown image syntax inside a `sendRichMessage` table cell (probed live against the Bot API, 2026-08-07 — the cell returns with no text), so a Photo column renders as blanks. Instead each photo follows as its own message captioned with that reminder's time and text: one per message, never an album, since an album's single caption would sit under the wrong picture. Photos via `sendfile.py`; a missing file is skipped and the table always sends first. |
+| `src/tasks_reflex.py` | Optional ~50ms running-task list. Does not build the table — asks the companion voice server's `progress` hook, which renders it from the live task registry (cron jobs, dev-side scripts, agent turns). Two copies of the wording would drift the first time a catalogue entry changed. Silent fall-through if the hook is unreachable. |
 | `src/doc_reflex.py` | Optional ~1s document delivery: keyword match against a curated registry → `sendDocument` via cached `file_id`s. |
 | `src/file_reflex.py` | Optional generic file reflex: "show/fetch/get/give me <thing>" resolved against the CLIP image index and a cached workspace walk (workspace files in DMs + Always-Nemotron private groups only); sends only a full-token-coverage match (docs via `sendDocument`, images via the photo path), everything else falls through to the LLM turn. |
 | `src/qr_reflex.py` | Optional login-QR reflex: the owner asking for a QR ("make me a qr for the app", "show me my qr") runs your minting script (`TG_QR_SCRIPT`, called with `--chat <id>`) directly — no LLM turn. Owner-only, gated to `TG_QR_CHATS`, since such QRs typically carry live credentials; question-shaped messages fall through. Have your script render the QR large — e.g. `qrencode -s 24` (~1200px) — and send it via sendPhoto: small QRs come out soft after Telegram's photo compression. |
