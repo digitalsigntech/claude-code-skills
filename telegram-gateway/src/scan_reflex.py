@@ -126,6 +126,13 @@ def _index_later(filed):
 def scan_and_file(path, caption=""):
     """Find every document in `path`, extract and file each one.
 
+    THE ORIGINAL PHOTO IS NEVER TOUCHED (the owner) — not modified,
+    not moved, not deleted. Extraction is lossy and one-way: the crop can take
+    the wrong quad, the whitening can eat a faint pencil note, and the inbox
+    photo is the only full-resolution copy of what he actually sent. Everything
+    here writes to WORK_DIR and lands in DEST; `path` is opened read-only, and
+    the check at the end makes that a guarantee rather than a habit.
+
     Returns a list of {path, kind, white, size, annotation, auto} — empty when
     the photo holds no document, which is the common case and costs ~1s.
     """
@@ -134,6 +141,7 @@ def scan_and_file(path, caption=""):
     os.makedirs(WORK_DIR, exist_ok=True)
     os.makedirs(DEST, exist_ok=True)
     stem = f"{time.strftime('%Y%m%d-%H%M%S')}-{_slug(caption)}"
+    before = (os.path.getsize(path), os.path.getmtime(path))
     found = autoscan.scan(path, WORK_DIR, stem=stem, preview_dir=WORK_DIR)
     filed = []
     for f in found:
@@ -151,6 +159,11 @@ def scan_and_file(path, caption=""):
                       "auto": auto})
         if f["preview"] != f["path"] and os.path.exists(f["preview"]):
             os.remove(f["preview"])
+    # Loud if the original ever changed: silence here would mean the one
+    # full-resolution copy was damaged and nobody found out until it was needed.
+    if not os.path.exists(path) or (os.path.getsize(path),
+                                    os.path.getmtime(path)) != before:
+        _log(f"WARNING: the source photo changed during extraction: {path}")
     if filed:
         threading.Thread(target=_index_later, args=(filed,), daemon=True).start()
     return filed
