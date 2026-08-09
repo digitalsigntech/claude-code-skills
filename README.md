@@ -46,6 +46,7 @@ See each skill's own `README.md` for configuration.
 | Skill | What it does | Location |
 |-------|--------------|----------|
 | **local-doc-qa** | Private on-box document ingest + RAG Q&A (PDF/CSV/text → citable chunks), plus exact structured-table queries. Swappable embedding + chat endpoints. | [`local-doc-qa/`](local-doc-qa/) |
+| **docscan** | Phone photo of a page → small, square, clean document PDF/JPEG: page detection (both polarities), perspective rectification at the *true* aspect (EXIF focal length when the geometry is degenerate), auto-upright, paper whitening that is skipped on non-white stock. ~50× smaller, measured against a commercial scanner app. Pillow + numpy, no OpenCV, fully on-box. | [`docscan/`](docscan/) |
 | **clip-media-search** | Neural image search over a media folder via CLIP — annotation-aware, with a warm localhost server. | [`clip-media-search/`](clip-media-search/) |
 | **kb-semantic-index** | Unified semantic search over a knowledge base (`search`/`ask`) plus a grounded tier-1 quick-answer that answers from retrieved chunks or escalates. | [`kb-semantic-index/`](kb-semantic-index/) |
 | **privacy-router** | Label data public/private and route private-intent chat queries to a private tool-calling LLM (CRM/email/KB lookup tools, full chat context) instead of the cloud agent. Fail-closed. | [`privacy-router/`](privacy-router/) |
