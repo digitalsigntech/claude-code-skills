@@ -12,6 +12,34 @@ python3 src/docscan.py a.jpg b.jpg -o out.pdf  # one multi-page PDF
 python3 -c "import docscan; docscan.to_image('photo.jpg')"   # JPEG instead
 ```
 
+`autoscan.py` is the pointed-at-anything layer on top: docscan handles ONE known
+page, autoscan finds however many documents are in a photo, decides whether there
+is a document there at all, and lets each one's paper choose its format.
+
+```bash
+python3 src/autoscan.py photo.jpg -o out/     # every document in the photo
+```
+
+Two things it adds:
+
+* **Find all of them, not one.** docscan flood-fills from the centre of frame
+  because "the document is what you aimed at". That is exactly wrong with two
+  sheets side by side, so autoscan labels every connected region across a LADDER
+  of thresholds in both polarities — one global split assumes the scene has two
+  levels, and a white sheet plus a dark card on a mid-tone desk has three — then
+  collapses the repeats by overlap, ranking by how RECTANGULAR each reading is.
+* **Decide whether there is a document at all.** A photo of a flowerbed must
+  produce nothing rather than a confident crop of some leaves. Two independent
+  tests have to agree: the region fills its own corner quad, and it carries
+  ink structure (real pages score 11-17 on the line-organisation measure, a
+  photographed flowerbed 2.3).
+
+Routing follows the paper, which docscan already classifies: white stock is a
+document and becomes a **PDF**; coloured or dark stock is artwork and becomes a
+**JPEG**, because wrapping a picture in a PDF adds a container and nothing else.
+`preview_dir=` also writes a small JPEG of each page — a vision model cannot look
+at a PDF, so that is what a caller captions it from.
+
 ## Why it exists
 
 A phone photo of a page is a photo of a *scene*: a skewed sheet seen at an angle,

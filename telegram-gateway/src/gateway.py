@@ -22,6 +22,7 @@ import file_reflex
 import personal_notes
 import voice_mode
 import qa_cache
+import scan_reflex
 import projects_mode   # R&D project chats — see ../../projects/ skill
 
 # Searchable chat archive (every message + reply -> SQLite/FTS5). Best-effort: if the
@@ -436,6 +437,24 @@ def handle_file(msg, chat_id):
             log(f"personal note save FAILED: {e}")
             TG.send_message(chat_id, f"⚠️ Couldn't save that as a personal note: {e}")
         return
+    # A photo OF A DOCUMENT files itself: autoscan finds every sheet in the frame,
+    # extracts each (white paper -> PDF, other stock -> JPEG) and files it
+    # annotated. Fires only when a document is actually detected, so an ordinary
+    # photo costs ~1s and falls through to everything below.
+    if scan_reflex.should_try(path, caption):
+        try:
+            with Typing(chat_id):
+                summary = scan_reflex.try_handle(
+                    chat_id, path, caption,
+                    lambda cid, text: (TG.send_message(cid, text,
+                                                       reply_to=msg["message_id"]),
+                                       _arc_out(cid, text)))
+        except Exception as e:
+            summary = None
+            log(f"scan reflex error chat={chat_id}: {e}")
+        if summary:
+            log(f"scan chat={chat_id} {summary}")
+            return
     # Private group, no caption = ingest by default: a bare document goes straight
     # into the KB — no action keyboard — and the reply confirms the ingest AND what
     # the document is (title/gist).
