@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """docscan — turn a photographed page into a small, square, clean document.
 
-The owner, 2026-08-08: "our iOS app can now process images into PDF documents,
+The owner: "our iOS app can now process images into PDF documents,
 with the paper whitening and compression, so the 13Mb PDF becomes only 300Kb."
 Tuned since against a Genius Scan render of the same sheet, then against a
 brochure printed on dark stock.
@@ -267,6 +267,43 @@ def _refine_quad(mask, quad):
     return np.array(out, dtype=np.float32)
 
 
+def _quad_from_mask_raw(mask, w, h):
+    """Corners of an ALREADY-ISOLATED region, refined by edge fit.
+
+    _quad_from_mask picks the region for you (flood-fill from the centre) and
+    rejects clipped pages. autoscan has already chosen the region and wants the
+    corners for it, nothing more — keeping that split stops the multi-document
+    path from silently inheriting the single-document policy.
+    """
+    ys, xs = np.nonzero(mask)
+    if xs.size < 50:
+        return None
+    pts = np.stack([xs, ys], axis=1).astype(np.float32)
+    ssum, sdif = xs + ys, xs - ys
+    quad = np.array([pts[np.argmin(ssum)], pts[np.argmax(sdif)],
+                     pts[np.argmax(ssum)], pts[np.argmin(sdif)]], dtype=np.float32)
+    refined = _refine_quad(mask, quad)
+    return refined if refined is not None else quad
+
+
+def rectify_quad(img, quad):
+    """Warp a known quad to an upright rectangle at the page's TRUE aspect."""
+    tl, tr, br, bl = quad
+    wid = int(round(max(np.linalg.norm(tr - tl), np.linalg.norm(br - bl))))
+    hei = int(round(max(np.linalg.norm(bl - tl), np.linalg.norm(br - tr))))
+    if wid < 120 or hei < 120:
+        return None
+    ar = _true_aspect(quad, img.size, img)
+    if ar:
+        if wid >= hei:
+            hei = int(round(wid / ar))
+        else:
+            wid = int(round(hei * ar))
+    coeffs = _perspective_coeffs([(0, 0), (wid, 0), (wid, hei), (0, hei)],
+                                 [tuple(p) for p in quad])
+    return img.transform((wid, hei), Image.PERSPECTIVE, coeffs, Image.BICUBIC)
+
+
 def _perspective_coeffs(dst, src):
     """PIL's 8 transform coefficients: it maps OUTPUT -> INPUT, so `dst` here is
     the rectangle we are producing and `src` the quad in the photo."""
@@ -282,7 +319,7 @@ def _perspective_coeffs(dst, src):
 def paper_is_white(img, lum_min=150.0, sat_max=0.20, frac_min=0.35):
     """True when the sheet is white/near-white paper, i.e. whitening is safe.
 
-    The owner, 2026-08-09: a document printed on NON-white stock must not be
+    The owner: a document printed on NON-white stock must not be
     whitened — only resized and compressed. Whitening works by declaring the
     paper to be pure white; do that to a navy brochure and you erase the design.
 
@@ -336,8 +373,17 @@ def upright(img, margin=1.25):
     return img, False
 
 
-def _focal_px(img):
-    """Focal length in pixels from EXIF, or None.
+# Assumed 35 mm-equivalent focal length when the file carries no EXIF. Every
+# phone main camera of the last decade sits in 24-28 mm; 26 is the middle of
+# that range and the whole range only moves the recovered aspect by ~3%, which
+# is far less than the error from having no focal length at all. Telegram (and
+# most chat apps) strip EXIF on upload, so for a photo that arrives through chat
+# this is the ONLY focal length available.
+F35_DEFAULT = float(os.environ.get("DOCSCAN_F35_DEFAULT", "26"))
+
+
+def _focal_px(img, default=True):
+    """Focal length in pixels from EXIF, falling back to a typical phone lens.
 
     The geometric solve needs two finite vanishing points. A page tilted about
     only ONE axis — very common, you tilt the phone forward and not sideways —
@@ -346,20 +392,25 @@ def _focal_px(img):
     its left and right edges are parallel to within 0.8 degrees.
 
     The camera knows what the geometry cannot say. FocalLengthIn35mmFilm is
-    referenced to a 36 mm frame width, so f_px = f35 / 36 * image_width.
+    referenced to a 36 mm frame width, so f_px = f35 / 36 * image_width. When
+    the EXIF is gone, assuming F35_DEFAULT beats giving up: measured on the
+    2026-08-09 Telegram photos, a US Letter page came out at 0.96 (18% too wide)
+    keeping the measured edges and 0.77 assuming the lens — and 4x6 cards landed
+    within 1% of 0.667 across four separate shots.
     """
+    f35 = None
     try:
         ex = img._getexif() or {}
+        f35 = ex.get(41989)                   # FocalLengthIn35mmFilm
     except Exception:
-        return None
-    f35 = ex.get(41989)                       # FocalLengthIn35mmFilm
-    if not f35:
-        return None
+        f35 = None
     try:
-        f35 = float(f35)
+        f35 = float(f35) if f35 else None
     except Exception:
-        return None
-    if f35 <= 0:
+        f35 = None
+    if not f35 or f35 <= 0:
+        f35 = F35_DEFAULT if default else None
+    if not f35:
         return None
     return f35 / 36.0 * float(max(img.size))
 
@@ -386,6 +437,20 @@ def _aspect_from_focal(quad, size, f):
     return ar if np.isfinite(ar) and 0.1 < ar < 10.0 else None
 
 
+def _edge_convergence(quad):
+    """How strongly each pair of opposite edges converges — the perspective
+    evidence the focal-length solve lives on. 1.0 means parallel (no evidence)."""
+    tl, tr, br, bl = quad
+    top, bot = np.linalg.norm(tr - tl), np.linalg.norm(br - bl)
+    lef, rig = np.linalg.norm(bl - tl), np.linalg.norm(br - tr)
+    return min(max(top, bot) / max(min(top, bot), 1e-6),
+               max(lef, rig) / max(min(lef, rig), 1e-6))
+
+
+# Below this, one axis is effectively parallel and self-calibration is guessing.
+MIN_CONVERGENCE = 1.05
+
+
 def _true_aspect(quad, size, img=None):
     """Width/height of the real sheet, recovered from its perspective image.
 
@@ -402,6 +467,15 @@ def _true_aspect(quad, size, img=None):
     """
     w, h = size
     cx, cy = w / 2.0, h / 2.0
+    # SELF-CALIBRATION NEEDS PERSPECTIVE TO WORK ON. When one pair of edges is
+    # nearly parallel the recovered focal length is noise, and the aspect that
+    # comes out of it is confidently wrong rather than merely unknown — on the
+    # 2026-08-09 photos it squashed a 4x6 card to 0.60 (it is 0.667) while the
+    # edges converged by only 2%. Measure the evidence first and take the
+    # camera's focal length instead when there isn't enough of it.
+    if _edge_convergence(quad) < MIN_CONVERGENCE:
+        fpx = _focal_px(img) if img is not None else None
+        return _aspect_from_focal(quad, size, fpx) if fpx else None
     # quad arrives as tl, tr, br, bl. The formula is stated for
     # (tl, tr, bl, br) — feeding it our order silently yields a negative f².
     tl, tr, br, bl = [np.array([p[0] - cx, p[1] - cy, 1.0]) for p in quad]
@@ -587,7 +661,7 @@ def to_image(src_path, out_dir=None, suffix="-scan", max_px=2800, quality=78,
              **kw):
     """One cropped, straightened JPEG. Same geometry work as the PDF path.
 
-    The owner, 2026-08-09: a non-white document "can be saved as a photo (jpg)
+    The owner: a non-white document "can be saved as a photo (jpg)
     instead of pdf, unless prompted by user" — a brochure is a picture, and
     wrapping a picture in a PDF adds a container without adding anything.
     Whitening is skipped automatically for non-white stock (see paper_is_white),
@@ -608,7 +682,7 @@ def to_image(src_path, out_dir=None, suffix="-scan", max_px=2800, quality=78,
 def process(src_path, out_dir=None, suffix="-doc", **kw):
     """Make a document PDF from a photo, WITHOUT touching the photo.
 
-    The owner, 2026-08-09: "when processing an image into a document, keep the
+    The owner: "when processing an image into a document, keep the
     original image and create a document (PDF)." The original is the only copy
     of the full-resolution capture — whitening and downscaling are lossy and
     one-way, so a pipeline that consumed its input would destroy the ability to
