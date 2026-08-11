@@ -175,3 +175,12 @@ def allowlist():
         return set(int(x) for x in json.load(open(ALLOWLIST_FILE)))
     except Exception:
         return set()
+
+# Reminder ownership (per-user reminders). Each reminder belongs to one of
+# these keys; "my reminders" lists the asker's own and "our reminders" the
+# shared ones, never merged. Rename them for your own install.
+PRIMARY_OWNER_KEY = os.environ.get("TG_PRIMARY_OWNER_KEY", "owner")
+SECOND_OWNER_KEY = os.environ.get("TG_SECOND_OWNER_KEY", "second")
+REMINDER_OWNERS = (PRIMARY_OWNER_KEY, SECOND_OWNER_KEY, "shared")
+SECOND_OWNER_ID = int(os.environ.get("TG_SECOND_OWNER_ID", "0"))
+SECOND_OWNER_EMAIL = os.environ.get("TG_SECOND_OWNER_EMAIL", "")
