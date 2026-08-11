@@ -52,6 +52,11 @@ NAT with no public IP or inbound ports.
   hits (`.mp4/.mov/.webm/.m4v`) are sent via `sendVideo` — the full clip, not
   the indexed mid-frame; their `file_id`s are cached the same way. Toggle
   `PHOTO_REFLEX` / env `TG_PHOTO_REFLEX`. Measured ~0.4s end-to-end.
+- **Reminders are per-user.** Each row belongs to one person (or `shared`); a
+  viewer sees their own plus shared and nobody else's, in listings, in the
+  amend path, and when naming a row by id. Firing goes to the owner's own
+  chat and emails that owner. Resolved from the sender's Telegram id via the
+  accounts registry; unknown senders get nothing.
 - **Reminders reflex (optional, ~5ms).** "Show me my reminders" is a SELECT, not
   a question for a model. Renders a two-column table, then sends each attached
   photo as a separate captioned message. The two-column shape is a finding, not
