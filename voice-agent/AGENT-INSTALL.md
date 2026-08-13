@@ -78,7 +78,22 @@ into a chat, never commit it. The QR is a different, short-lived thing (~15 min,
 one scan) — that one is safe to show, but if you put it in a chat, delete the
 message at expiry.
 
-## 4. Run both pieces as services
+## 4. Fill in the identity, or the app looks broken
+
+`agent_name`, `company_name`, `user_name` and `logo` in `config.json` are what the app
+displays after the QR is scanned. Left unset it shows no name, no logo, and calls the
+agent by whatever it is built on — which reads as a broken install rather than an
+unconfigured one, and is the single most common thing missed here.
+
+**You know most of these** — the company from its files, the user from working with
+them, the logo from the brand directory (`find . -iname '*logo*'`). `agent_name` is the
+one to ask about: it is what the operator calls *you*, and it is not derivable.
+
+The plane caches capabilities and branding for a few minutes, so after editing:
+restart the adapter, re-run `pair.py --url <your URL>` to force a fresh capability
+probe, and give it a minute before judging the app.
+
+## 5. Run both pieces as services
 
 The adapter, and — on a NAT machine — the tunnel. Templates are in `src/`.
 
@@ -92,7 +107,7 @@ Second trap, if the service runs as root: the CLI refuses
 `--dangerously-skip-permissions` for root. The adapter handles this (`IS_SANDBOX=1`,
 then a prompt-limited retry), but a non-root user is better where the machine allows it.
 
-## 5. Verify from the plane's side, not yours
+## 6. Verify from the plane's side, not yours
 
 A local `curl` proving your own server answers proves nothing about whether the plane
 can reach it. Run:
@@ -112,13 +127,14 @@ Do not report success on a running process. Then ask the operator to speak to th
 and confirm the answer came from this machine's files — something only these files
 would know is the honest test.
 
-## 6. Report back with
+## 7. Report back with
 
 - The `workdir`, and why you chose it
 - The transport, and the public URL the plane will call
 - Service names, and how to check status, logs and restart
 - Where `config.json` lives and that it is `chmod 600`
 - The result of `pair.py --test`, verbatim
+- The identity fields you set, and where the logo came from
 
 ---
 
@@ -130,5 +146,6 @@ would know is the honest test.
 - [ ] `config.json` is `chmod 600` and uncommitted
 - [ ] Absolute `PATH` in the unit so `claude` resolves
 - [ ] On NAT: tunnel runs as a service so a new URL re-pairs by itself
+- [ ] Identity fields set: agent name, company, user, logo
 - [ ] `pair.py --test` returns ok
 - [ ] A real spoken question answered from this machine's files
