@@ -33,9 +33,43 @@ The voice plane holds one webhook per account. This adapter is that webhook:
 - **`history`** — the conversation, so the app's chat is populated on launch rather
   than blank. From the machine's message archive if it has one, otherwise from its own
   Claude Code session transcripts — see below. Nothing is kept in parallel to sync.
+- **`photo` / `photos`** — a picture taken in the app, stored on this machine, written
+  into the archive as a message, and mirrored into your chat. A caption runs as a real
+  turn with the saved paths named, so "remind me at 5:30 to analyse this sample" reaches
+  an agent that can act on it instead of dying with the upload.
+- **`attachments`** — the files this agent holds, newest last, each with a token the app
+  fetches through `file`. **Only files that made it into the archive are listed**: the app
+  treats presence in this feed as presence in the conversation, and it is right to.
 - **`capabilities`** — tells the plane what this agent supports, from what is actually
   configured. Claiming `branding` and then 404-ing it makes the plane ask a question it
   already knows the answer to.
+
+### What `posted` means, and why it is worth being strict about
+
+An upload answers with `posted`, and the app draws a delivery tick from it. It is true only
+when the file is somewhere **the user can actually open** — stored, recorded as a message,
+and fetchable. If a Telegram gateway is installed (see below) that also means Telegram
+accepted it; without one, the app's own chat is the destination. A failed send writes
+`[NOT delivered to the chat]` into the archive row, so the written record cannot disagree
+with the tick on screen.
+
+This is stricter than it looks and deliberately so. On 2026-08-13 three photos were
+uploaded to an agent that did not implement `photo`; the app showed an error *and* ticks
+beside them, and it took an afternoon across two machines to establish that nothing had
+arrived anywhere. A flag that means "handed over" rather than "delivered" is a flag that
+will eventually lie.
+
+### If the machine has a Telegram gateway
+
+Voice traffic mirrors into it: the spoken question labelled with the speaker's name, the
+agent's answer, and uploads as real photos or documents. Archive rows are filed under the
+**Telegram chat id** rather than a separate pseudo-chat, so the app's history and the chat
+are one conversation instead of two half-records of the same one.
+
+The destination is resolved, never hardcoded — `telegram_chat` in `config.json`, then the
+gateway's own owner id, then a single-entry allowlist. More than one candidate and it stays
+unset rather than guessing: guessing here posts one person's conversation into another
+person's window.
 
 Anything else returns HTTP 400, which the plane reads as "ask-only agent" rather than
 as a failure. That is how an adapter stays compatible with a plane that grows.

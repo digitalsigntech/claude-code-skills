@@ -202,19 +202,297 @@ def _chatdb():
         return None
 
 
-def archive(text, direction, sender, account_name=""):
-    """Record a voice turn in the machine's archive, if there is one.
+# ---------------------------------------------------------------- telegram
+# 2026-08-13, from the owner of an install that had both: "it has a telegram
+# gateway. Messages must be synched to telegram, too."
+#
+# So this machine has the same two channels the box has, and the same rule
+# follows: a voice conversation is not a separate conversation. What is said to
+# the phone appears in the chat, what is answered appears in the chat, and a
+# photo sent by voice arrives there as a photo. Otherwise the same person
+# talking to the same agent has two half-records and neither is the truth.
+#
+# Best-effort in one direction only: a failed Telegram send must never fail a
+# voice turn, but it MUST be visible — `posted` goes false, so the app draws no
+# tick, and the archive row says the same thing.
+_TG_CACHE = {}
 
-    Best-effort by design: the archive is a bonus, and a voice turn must never
-    fail because writing it down did."""
-    db = _chatdb()
-    if not db or not text:
-        return
+
+def telegram():
+    """The gateway's own send API, if this machine has one installed."""
+    if "mod" in _TG_CACHE:
+        return _TG_CACHE["mod"]
+    _TG_CACHE["mod"] = None
+    d = os.path.join(os.path.expanduser(config()["workdir"]), "telegram")
+    if os.path.isfile(os.path.join(d, "tg_api.py")):
+        if d not in sys.path:
+            sys.path.insert(0, d)
+        try:
+            import tg_api
+            _TG_CACHE["mod"] = tg_api
+        except Exception:
+            pass
+    return _TG_CACHE["mod"]
+
+
+def telegram_chat():
+    """Which chat voice traffic mirrors into.
+
+    `telegram_chat` in config wins. Failing that the gateway's own owner id,
+    and failing THAT a single-entry allowlist — an install with exactly one
+    permitted user has no ambiguity about whose chat this is. More than one and
+    it stays unset rather than guessing, because guessing here posts somebody's
+    conversation into somebody else's window.
+    """
+    if "chat" in _TG_CACHE:
+        return _TG_CACHE["chat"]
+    chat = 0
+    cfg = config()
     try:
-        db.record(text[:4000], direction, sender=sender, chat_id=0,
-                  chat_title="Voice", kind="text")
+        chat = int(cfg.get("telegram_chat") or 0)
+    except (TypeError, ValueError):
+        chat = 0
+    d = os.path.join(os.path.expanduser(cfg["workdir"]), "telegram")
+    if not chat and os.path.isdir(d):
+        if d not in sys.path:
+            sys.path.insert(0, d)
+        try:
+            import tgconf
+            chat = int(getattr(tgconf, "OWNER_ID", 0) or 0)
+        except Exception:
+            chat = 0
+        if not chat:
+            try:
+                ids = json.loads(open(os.path.join(d, "allowlist.json")).read())
+                if isinstance(ids, list) and len(ids) == 1:
+                    chat = int(ids[0])
+            except Exception:
+                chat = 0
+    _TG_CACHE["chat"] = chat
+    return chat
+
+
+def _chat_title():
+    """The archive's name for that chat. Derived, never hardcoded: an upstream
+    install spent a week filing one person's words under another's name, because
+    a name was written into the code back when only one person used it."""
+    if not telegram_chat():
+        return "Voice"
+    return branding().get("user_name") or "Chat"
+
+
+def tg_text(text, who=None):
+    """Mirror one spoken line. `who` names the speaker; the agent's own words go
+    in unlabelled, exactly as they do when it answers in the chat itself."""
+    api, chat = telegram(), telegram_chat()
+    if not api or not chat or not text:
+        return False
+    body = f"🎙 {who}: {text}" if who else text
+    try:
+        res = api.send_message(chat, body[:3900])
+        return bool(res and res.get("ok"))
     except Exception:
-        pass
+        return False
+
+
+def tg_file(path, caption=None):
+    """Mirror one upload. Photos go as photos so they render in the chat;
+    anything else as a document, which is what the box does and for the same
+    reason — a PDF sent as a photo is a PDF nobody can open."""
+    api, chat = telegram(), telegram_chat()
+    if not api or not chat:
+        return False
+    method = "sendPhoto" if _att_kind(path) == "photo" else "sendDocument"
+    field = "photo" if method == "sendPhoto" else "document"
+    try:
+        with open(path, "rb") as fh:
+            res = api._call(method, _files={field: fh}, _timeout=90,
+                            chat_id=chat, caption=(caption or "")[:1000] or None)
+        return bool(res and res.get("ok"))
+    except Exception:
+        return False
+
+
+def archive(text, direction, sender, account_name="", mirror=True):
+    """Record a voice turn in the machine's archive, and mirror it to Telegram.
+
+    The archive write is best-effort by design — a voice turn must never fail
+    because writing it down did. The row is filed under the TELEGRAM chat when
+    there is one, not under a separate "Voice" pseudo-chat: one person talking
+    to one agent should read back as one conversation, whichever way the words
+    arrived."""
+    chat = telegram_chat()
+    db = _chatdb()
+    if db and text:
+        try:
+            db.record(text[:4000], direction,
+                      sender=sender, chat_id=chat or 0,
+                      chat_title=_chat_title(), kind="text")
+        except Exception:
+            pass
+    if mirror and text:
+        tg_text(text, who=(sender if direction == "in" else None))
+
+
+# ------------------------------------------------------------- attachments
+# 2026-08-13: a user sent three photos with the caption "Remind me at 5:30 p.m.
+# to analyze this sample." All three failed — this adapter answered HTTP 400 to
+# `photo`, because it had no idea what one was — and the app showed "internal
+# error" with delivery ticks beside them. The ask that followed: an agent must
+# be as capable as the one it was extracted from, and it must store attachments
+# to the messages.
+#
+# WHAT "DELIVERED" MEANS, which depends on what this machine has. With a chat
+# gateway installed the answer is that chat: `posted` is true once the gateway
+# accepts the picture, exactly as upstream. WITHOUT one, the app's own window is
+# the only place the user can look, so a photo is delivered when it is (a)
+# stored, (b) written into the archive as a message, and (c) fetchable by token
+# so history renders it. All three, or `posted` is false — a tick that means
+# less than that is a tick that will eventually lie, and did.
+UPLOAD_DIR = "voice-uploads"            # under workdir; created on first upload
+UPLOAD_MAX = 36 * 1024 * 1024           # matches the plane's own ceiling
+_EXT = {"image/jpeg": ".jpg", "image/png": ".png", "image/heic": ".heic",
+        "image/webp": ".webp", "application/pdf": ".pdf"}
+
+
+def upload_dir():
+    d = os.path.join(os.path.expanduser(config()["workdir"]), UPLOAD_DIR,
+                     time.strftime("%Y-%m-%d"))
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def save_upload(blob, content_type="image/jpeg", stem="photo"):
+    """Bytes to a file nobody else will collide with, and its stable token."""
+    ext = _EXT.get((content_type or "").split(";")[0].strip().lower())
+    if not ext:
+        ext = mimetypes.guess_extension(content_type or "") or ".bin"
+    name = f"{stem}-{time.strftime('%H%M%S')}-{secrets.token_hex(3)}{ext}"
+    path = os.path.join(upload_dir(), name)
+    with open(path, "wb") as f:
+        f.write(blob)
+    return path, media_token(path)
+
+
+def _att_kind(path):
+    ext = os.path.splitext(path)[1].lower()
+    if ext in (".jpg", ".jpeg", ".png", ".heic", ".webp", ".gif"):
+        return "photo"
+    if ext == ".pdf":
+        return "pdf"
+    return "file"
+
+
+# The marker the archive stores, and the one thing that has to agree between
+# the writer and the reader. Same convention the box uses, so a row means the
+# same in both archives.
+_MARKER = re.compile(r"^\[(camera photo|camera photos|file): ([^\]]+)\]\s*(.*)$",
+                     re.S)
+
+
+def archive_file(paths, caption, sender):
+    """One archive row for an upload, carrying the filenames in its text.
+
+    The schema has no attachment column and inventing one would fork the
+    archive away from the box's. The marker convention costs nothing and
+    survives anything that reads the table as plain messages."""
+    db = _chatdb()
+    if not db or not paths:
+        return False
+    names = ",".join(os.path.basename(p) for p in paths)
+    tag = "camera photos" if len(paths) > 1 else "camera photo"
+    text = f"[{tag}: {names}]" + (f" {caption}" if caption else "")
+    # The chat gets the PICTURES, not the marker: a line reading
+    # "[camera photo: photo-210115.png]" in somebody's Telegram is a filename
+    # where a photograph should be. The marker is the archive's business.
+    sent = True
+    if telegram_chat():
+        for i, p in enumerate(paths):
+            sent = tg_file(p, caption if i == 0 else None) and sent
+    try:
+        db.record(text[:4000] + ("" if sent else " [NOT delivered to the chat]"),
+                  "in", sender=sender or "you", chat_id=telegram_chat() or 0,
+                  chat_title=_chat_title(), kind="photo")
+    except Exception:
+        return False
+    # Delivered means it is somewhere the user can actually see it. With a
+    # Telegram gateway installed that is Telegram, and a picture only this
+    # machine can see is not a delivered picture.
+    return sent
+
+
+def _resolve_upload(name):
+    """A filename from an archive row back to a path on disk.
+
+    Newest day first: the same picture is never stored twice, and a scan that
+    walks every day for every history poll would grow into the poll budget."""
+    root = os.path.join(os.path.expanduser(config()["workdir"]), UPLOAD_DIR)
+    if not os.path.isdir(root):
+        return None
+    for day in sorted(os.listdir(root), reverse=True):
+        p = os.path.join(root, day, name)
+        if os.path.exists(p):
+            return p
+    return None
+
+
+def list_attachments(since=0.0, limit=30):
+    """Files this agent holds, newest last — the feed the app reads back.
+
+    Only files that made it into the archive appear here. An upload that failed
+    to record is not listed, because the app treats presence in this feed as
+    presence in the conversation, and it is right to.
+    """
+    d = archive_dir()
+    if not d:
+        return []
+    try:
+        import sqlite3
+        cx = sqlite3.connect(f"file:{d / 'chat.db'}?mode=ro", uri=True, timeout=3)
+        rows = cx.execute(
+            "SELECT epoch, text FROM messages WHERE epoch > ? AND "
+            "(text LIKE '[camera photo%' OR text LIKE '[file: %') "
+            "ORDER BY epoch DESC LIMIT ?", (since, limit)).fetchall()
+        cx.close()
+    except Exception:
+        return []
+    items = []
+    for ep, text in reversed(rows):
+        m = _MARKER.match(str(text).strip())
+        if not m:
+            continue
+        caption = m.group(3).strip()
+        for nm in m.group(2).split(","):
+            path = _resolve_upload(nm.strip())
+            if not path:
+                continue                # deleted since: not an attachment now
+            items.append({"token": media_token(path), "ts": float(ep),
+                          "kind": _att_kind(path),
+                          "filename": os.path.basename(path),
+                          "caption": caption})
+    return items
+
+
+def _already_archived(text, within=180):
+    """Has this line just been written? Used only to stop a double entry.
+
+    Compared on the first 200 characters: the voice model's `log` call and the
+    answer `ask` archived are the same sentence, but one of them can arrive
+    truncated or with trailing punctuation from the speech pipeline."""
+    d = archive_dir()
+    if not d or not text:
+        return False
+    try:
+        import sqlite3
+        cx = sqlite3.connect(f"file:{d / 'chat.db'}?mode=ro", uri=True, timeout=3)
+        rows = cx.execute("SELECT text FROM messages WHERE epoch > ? "
+                          "ORDER BY epoch DESC LIMIT 4",
+                          (time.time() - within,)).fetchall()
+        cx.close()
+    except Exception:
+        return False
+    head = " ".join(text.split())[:200]
+    return any(" ".join(str(r[0] or "").split())[:200] == head for r in rows)
 
 
 def _archive_history(limit, since):
@@ -242,10 +520,23 @@ def _archive_history(limit, since):
         # the agent's own words in the user's bubble the first time anything
         # else writes to the archive.
         role = "agent" if direction == "out" else "user"
-        msgs.append({"role": role,
-                     "sender": name if role == "agent" else (sender or "you"),
-                     "text": _strip_injected_prefix(str(text))[:2000],
-                     "ts": float(ep)})
+        m = {"role": role,
+             "sender": name if role == "agent" else (sender or "you"),
+             "text": _strip_injected_prefix(str(text))[:2000],
+             "ts": float(ep)}
+        # A row that names files carries their tokens, so a restored chat shows
+        # the picture instead of the words "[camera photo: …]". Same fields the
+        # box sends: `token` flat for one file, `tokens` for an album.
+        mk = _MARKER.match(str(text).strip())
+        if mk:
+            paths = [p for p in (_resolve_upload(n.strip())
+                                 for n in mk.group(2).split(",")) if p]
+            if paths:
+                toks = [media_token(p) for p in paths]
+                m.update(token=toks[0], tokens=toks,
+                         kind=_att_kind(paths[0]),
+                         filename=os.path.basename(paths[0]))
+        msgs.append(m)
     return msgs
 
 
@@ -369,7 +660,15 @@ def remember_session(account, sid):
         save(STATE, st)
 
 
-def ask(account, question, account_name=""):
+def ask(account, question, account_name="", archive_question=True):
+    """`archive_question=False` for a turn whose words are already recorded.
+
+    A captioned upload writes ONE row — the marker with the caption on it — and
+    then runs the caption as a turn. Left to archive itself, that turn added a
+    second user bubble saying the same thing, with the internal file paths we
+    appended for the agent visible on the end of it: words the user never said,
+    on their own screen, which is the bug we chased all afternoon in another
+    form."""
     cfg = config()
     exe = claude_bin()
     if not exe:
@@ -398,7 +697,8 @@ def ask(account, question, account_name=""):
     turn_id = secrets.token_hex(8)
     with _inflight_lock:
         INFLIGHT[turn_id] = {"started": time.time(), "question": question}
-    archive(question, "in", sender=account_name or "you")
+    if archive_question:
+        archive(question, "in", sender=account_name or "you")
 
     sid = session_id(account)
     if sid:
@@ -753,6 +1053,29 @@ def ensure_identity(force=False, timeout=180):
         _identity_lock.release()
 
 
+def _remint(token):
+    """A token from before the last restart, back to its path.
+
+    MEDIA is memory only, and the app caches history rows containing tokens on
+    disk — so without this every restart quietly kills every picture in the
+    conversation, and the older the chat the more of it is dead. Tokens are
+    derived from the path, so the map can be rebuilt by walking the uploads.
+    """
+    if not token:
+        return None
+    root = os.path.join(os.path.expanduser(config()["workdir"]), UPLOAD_DIR)
+    for day in sorted(os.listdir(root), reverse=True) if os.path.isdir(root) else []:
+        dd = os.path.join(root, day)
+        for nm in os.listdir(dd) if os.path.isdir(dd) else []:
+            p = os.path.join(dd, nm)
+            if media_token(p) == token:      # mints into MEDIA as a side effect
+                return p
+    logo = os.path.expanduser(str(branding().get("logo") or ""))
+    if logo and os.path.exists(logo) and media_token(logo) == token:
+        return logo
+    return None
+
+
 def media_token(path):
     """Stable token for a file: same path, same token, across restarts.
 
@@ -797,8 +1120,17 @@ def capabilities():
     b = branding()
     if b:
         caps.append("branding")
-    if b.get("logo_token"):
-        caps.append("file")
+    # `file` used to be claimed only when a logo existed, which was true when
+    # the only servable file WAS the logo. Uploads are servable by the same
+    # route, so it is now unconditional — and the plane checks this list before
+    # relaying, so an unclaimed capability is a feature that silently is not
+    # there rather than one that fails loudly.
+    caps.append("file")
+    # Claimed only if there is somewhere to record an upload. Without an
+    # archive a photo could be stored but never appear in the conversation,
+    # and the honest answer to "can you take a photo" is then no.
+    if _chatdb():
+        caps += ["photo", "photos", "attachments", "log", "reset"]
     return caps
 
 
@@ -868,7 +1200,8 @@ class Handler(BaseHTTPRequestHandler):
         if kind == "file":
             # Only paths this process minted a token for are servable — the
             # plane asking for a file is not authority to read arbitrary ones.
-            path = MEDIA.get(str(d.get("token") or ""))
+            tok = str(d.get("token") or "")
+            path = MEDIA.get(tok) or _remint(tok)
             if not path or not os.path.exists(path):
                 return self._send(404, {"error": "no such token"})
             if os.path.getsize(path) > 25 * 1024 * 1024:
@@ -879,10 +1212,120 @@ class Handler(BaseHTTPRequestHandler):
                 "b64": base64.b64encode(blob).decode(),
                 "content_type": mimetypes.guess_type(path)[0] or "application/octet-stream",
                 "filename": os.path.basename(path)})
+        if kind == "log":
+            # The app calls this beside every turn to mirror what was SPOKEN.
+            # It answered 400 until now — visible in the plane's log as
+            # `POST /log 400` on every exchange — so anything the voice said
+            # that did not come back through `ask` was never written down.
+            #
+            # DEDUP IS THE WHOLE JOB. ask() already archives its own answer, so
+            # logging the same words again puts the agent's reply on screen
+            # twice. Compare with the last row before writing.
+            who = str(d.get("who") or "you")
+            text = str(d.get("text") or "").strip()
+            if not text:
+                return self._send(200, {"ok": True, "mirrored": False})
+            if _already_archived(text):
+                return self._send(200, {"ok": True, "mirrored": False,
+                                        "suppressed": "already_archived"})
+            nm = branding().get("bot_name") or "agent"
+            archive(text, "out" if who != "you" else "in",
+                    sender=nm if who != "you" else (name or "you"))
+            return self._send(200, {"ok": True, "mirrored": True})
+        if kind == "reset":
+            # A new conversation: the next turn opens a fresh session instead
+            # of resuming. The transcript stays — this ends a thread, it does
+            # not erase one.
+            with _lock:
+                st = load(STATE, {})
+                st.setdefault("sessions", {}).pop(account, None)
+                save(STATE, st)
+            archive("[cleared context — new conversation]", "in",
+                    sender=name or "you")
+            self.log_message("reset: session cleared for %s", account)
+            return self._send(200, {"ok": True})
+        if kind == "attachments":
+            try:
+                since = float(d.get("since") or 0)
+            except (TypeError, ValueError):
+                since = 0.0
+            items = list_attachments(since)
+            self.log_message("attachments -> %d item(s)", len(items))
+            return self._send(200, {"items": items})
+        if kind in ("photo", "photos"):
+            # ONE PATH FOR BOTH, because the difference is only how many files
+            # arrived: a single photo is an album of one, and splitting them
+            # gave the box two code paths that drifted.
+            raw = d.get("items") if kind == "photos" else [
+                {"b64": d.get("b64"), "content_type": d.get("content_type")}]
+            saved = []
+            for it in (raw or [])[:10]:
+                b64 = str((it or {}).get("b64") or "")
+                if not b64:
+                    continue
+                try:
+                    blob = base64.b64decode(b64)
+                except Exception:
+                    continue
+                if not blob or len(blob) > UPLOAD_MAX:
+                    continue            # empty or over the ceiling: not stored
+                saved.append(save_upload(
+                    blob, str((it or {}).get("content_type") or "image/jpeg")))
+            if not saved:
+                return self._send(400, {"error": "no photos"})
+            paths = [p for p, _ in saved]
+            toks = [t for _, t in saved]
+            cap = str(d.get("caption") or "").strip() or None
+            # `posted` is the whole contract: TRUE only once the upload is in
+            # the archive, which is what makes it show up in history and in the
+            # attachments feed. Stored-but-unrecorded is a file nobody can
+            # reach, and reporting that as delivered is the exact lie the app
+            # spent this afternoon drawing on his screen.
+            posted = archive_file(paths, cap, name or "you")
+            self.log_message("%s: %d file(s) %s", kind, len(paths),
+                             "archived" if posted else "STORED BUT NOT ARCHIVED")
+            answer = None
+            if cap:
+                # The caption is a real instruction — "Remind me at 5:30 p.m. to
+                # analyze this sample" was one, and it died with the upload.
+                # It runs as a turn, with the filenames named so the agent can
+                # open them.
+                try:
+                    where = ", ".join(paths)
+                    answer = ask(account, f"{cap}\n\n[The user just sent "
+                                          f"{len(paths)} file(s), saved at: "
+                                          f"{where}]", name,
+                                 archive_question=False).get("answer")
+                except Exception as e:
+                    self.log_message("caption turn failed: %s", e)
+            body = {"ok": True, "posted": posted,
+                    "posted_to": "Telegram" if telegram_chat() else "your chat",
+                    "count": len(paths),
+                    **({"answer": answer} if answer else {})}
+            if kind == "photos":
+                body["tokens"] = toks
+            else:
+                body.update(token=toks[0], name=os.path.basename(paths[0]))
+            return self._send(200, body)
         if kind == "ask":
             q = str(d.get("question") or "").strip()
             if not q:
                 return self._send(400, {"error": "no question"})
+            # 2026-08-13: "what reminders do I have" came back as a bulleted
+            # list here and as a grid on the box, because the box answers it
+            # WITHOUT a model — a deterministic reflex emits the markdown table
+            # the app turns into a tappable grid. A model asked to produce a
+            # table produces one shaped however it feels that turn, and the row
+            # ids that make a row openable cannot survive that. So the same
+            # reflex answers here, from this machine's own reminder store.
+            quick = reflex_answer(q)
+            if quick:
+                self.log_message("reflex answered: %.40s", q)
+                archive(q, "in", sender=name or "you")
+                archive(quick, "out",
+                        sender=branding().get("bot_name") or "agent",
+                        mirror=False)     # the table is for the app's grid
+                return self._send(200, {"answer": quick})
             self.log_message("ask from %s: %.60s", name or account, q)
             t0 = time.time()
             res = ask(account, q, name)
