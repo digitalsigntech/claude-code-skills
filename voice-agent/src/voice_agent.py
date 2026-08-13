@@ -206,6 +206,177 @@ def ask(account, question, account_name=""):
 
 # ---------------------------------------------------------------- identity
 MEDIA = {}                              # token -> absolute path, minted here only
+IDENTITY_TTL = 7 * 86400                # re-derive weekly; names change slowly
+_identity_lock = threading.Lock()
+
+LOGO_DIRS = ("brand", "branding", "assets", "static", "public", "img", "images",
+             "media", "knowledge-base/company/assets", "docs")
+LOGO_EXT = (".png", ".jpg", ".jpeg", ".webp")
+
+IDENTITY_PROMPT = """\
+Output ONE JSON object and nothing else. No prose, no code fence.
+
+You are being asked to describe yourself for the identity panel of a voice app
+that speaks with your user. Answer ONLY from files inside this project directory —
+CLAUDE.md, README, company or brand files. Not from your own account, not from
+global configuration, not from any conversation you remember, not from general
+knowledge. If this project does not state a fact, it is null, even if you believe
+you know it: the wrong person's name on a stranger's phone is the failure here.
+
+{"agent_name": "the name your user calls YOU in this project, e.g. from CLAUDE.md;
+                null if this project gives you no name of your own",
+ "company_name": "the company or organisation whose work lives here; null if none",
+ "user_name": "the full name of the person you work for here; null if unknown",
+ "user_email": "their email address; null if unknown",
+ "logo_path": "absolute path to this company's logo image on this machine
+               (png/jpg/webp, not svg); null if there is none"}
+
+Use null, never a guess or a placeholder. It is better to say null than to invent
+a name a real person will see on their phone."""
+
+
+def scan_logo(workdir):
+    """A logo file, found rather than configured. Preferred directories first,
+    then anything named like a logo — the file is nearly always sitting in the
+    project already, and asking a human to type its path is how it stays unset."""
+    root = pathlib.Path(workdir)
+    for sub in LOGO_DIRS:
+        d = root / sub
+        if not d.is_dir():
+            continue
+        for p in sorted(d.iterdir()):
+            if p.suffix.lower() in LOGO_EXT and "logo" in p.name.lower():
+                return str(p.resolve())
+    try:
+        for p in sorted(root.rglob("*logo*")):
+            if p.suffix.lower() in LOGO_EXT and ".git" not in p.parts:
+                return str(p.resolve())
+    except OSError:
+        pass
+    return ""
+
+
+SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".cache",
+             "dist", "build", ".next", "target"}
+
+
+def attested(value, workdir, max_files=2000, max_bytes=2_000_000):
+    """Does this string actually appear in the project's own files?
+
+    The check that turns a model's answer into evidence. Cheap, and it only ever
+    removes: a name the project never writes down does not go on the panel."""
+    needle = value.strip().lower()
+    if len(needle) < 2:
+        return False
+    seen = 0
+    for dp, dn, fn in os.walk(workdir):
+        dn[:] = [d for d in dn if d not in SKIP_DIRS and not d.startswith(".")]
+        for f in fn:
+            if seen >= max_files:
+                return False
+            p = os.path.join(dp, f)
+            try:
+                if os.path.getsize(p) > max_bytes:
+                    continue
+                seen += 1
+                with open(p, "r", errors="ignore") as fh:
+                    if needle in fh.read().lower():
+                        return True
+            except OSError:
+                continue
+    return False
+
+
+def derive_identity(timeout=180):
+    """Ask the agent who it is, once, and cache the answer.
+
+    Everything here is knowable on this machine — the agent's own name lives in
+    CLAUDE.md, the company in its files, the user in the work they do together —
+    so requiring an operator to type any of it is asking for the one thing they
+    will skip. The agent reads its own project and answers.
+
+    NEVER on the request path: the plane relays `branding` with a 15s timeout and
+    a cold model turn takes longer, so this runs at startup and from pair.py, and
+    the panel is served from cache."""
+    cfg = config()
+    exe = claude_bin()
+    if not exe:
+        return {}
+    workdir = os.path.expanduser(cfg["workdir"])
+    env = dict(os.environ)
+    if os.geteuid() == 0:
+        env.setdefault("IS_SANDBOX", "1")
+
+    cmd = [exe, "-p", IDENTITY_PROMPT, "--dangerously-skip-permissions"]
+    if cfg.get("model"):
+        cmd += ["--model", cfg["model"]]
+    try:
+        r = subprocess.run(cmd, cwd=workdir, capture_output=True, text=True,
+                           timeout=timeout, env=env)
+        if r.returncode != 0 and "cannot be used with root" in (r.stdout or "") + (r.stderr or ""):
+            r = subprocess.run([c for c in cmd if c != "--dangerously-skip-permissions"],
+                               cwd=workdir, capture_output=True, text=True,
+                               timeout=timeout, env=env)
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return {}
+
+    out = (r.stdout or "").strip()
+    m = re.search(r"\{.*\}", out, re.S)
+    if not m:
+        return {}
+    try:
+        got = json.loads(m.group(0))
+    except json.JSONDecodeError:
+        return {}
+
+    ident = {}
+    for k in ("agent_name", "company_name", "user_name", "user_email"):
+        v = got.get(k)
+        if isinstance(v, str) and v.strip() and v.strip().lower() not in ("null", "none", "unknown"):
+            v = v.strip()[:120]
+            # Attested by the project or dropped. Asked who its user is, an agent
+            # with nothing to read will answer from the account the CLI is signed
+            # in as — which on a shared build is a real person with no connection
+            # to this install. A fact the project cannot show in writing is not a
+            # fact about this project.
+            if attested(v, workdir):
+                ident[k] = v
+            else:
+                print(f"[voice-agent] identity: dropping {k}={v!r} — not found in "
+                      f"{workdir}", file=sys.stderr, flush=True)
+    logo = got.get("logo_path")
+    logo = logo if isinstance(logo, str) and os.path.exists(os.path.expanduser(logo or "")) else ""
+    # The filesystem is the more reliable witness of its own contents: a model
+    # asked for a path will occasionally produce a plausible one that is not there.
+    ident["logo"] = os.path.expanduser(logo) if logo else scan_logo(workdir)
+    return {k: v for k, v in ident.items() if v}
+
+
+def cached_identity():
+    st = load(STATE, {})
+    return st.get("identity") or {}
+
+
+def ensure_identity(force=False, timeout=180):
+    """Derive if missing or stale. Returns what the panel should show."""
+    st = load(STATE, {})
+    age = time.time() - float(st.get("identity_ts") or 0)
+    if not force and st.get("identity") and age < IDENTITY_TTL:
+        return st["identity"]
+    if not _identity_lock.acquire(blocking=False):
+        return st.get("identity") or {}       # a refresh is already running
+    try:
+        ident = derive_identity(timeout=timeout)
+        if ident:
+            with _lock:
+                st = load(STATE, {})
+                st["identity"] = ident
+                st["identity_ts"] = time.time()
+                save(STATE, st)
+            return ident
+        return st.get("identity") or {}
+    finally:
+        _identity_lock.release()
 
 
 def media_token(path):
@@ -223,31 +394,34 @@ def media_token(path):
 def branding():
     """The identity panel the app shows: who is speaking, for whom, and the logo.
 
-    Without this the app has nothing to display, so it falls back to its own
-    defaults — a blank name and the generic assistant. That fallback is correct
-    when nothing is configured and wrong the moment someone installs this for a
-    company, which is why every field comes from config.json rather than from
-    what the agent happens to be built on."""
+    Derived, not configured. Without it the app shows a blank name and a generic
+    assistant — the honest look for a machine nobody has set up, and the wrong one
+    for an install that had every fact available on disk the whole time. config.json
+    still wins where it is set, for the operator who wants a different answer than
+    the true one."""
     cfg = config()
+    ident = cached_identity()
     b = {}
     for key, field in (("agent_name", "bot_name"), ("company_name", "company_name"),
                        ("user_name", "user_name"), ("user_email", "user_email")):
-        val = str(cfg.get(key) or "").strip()
+        val = str(cfg.get(key) or ident.get(key) or "").strip()
         if val:
             b[field] = val
-    logo = os.path.expanduser(str(cfg.get("logo") or "").strip())
+    logo = os.path.expanduser(str(cfg.get("logo") or ident.get("logo") or "").strip())
     if logo and os.path.exists(logo):
         b["logo_token"] = media_token(logo)
     return b
 
 
 def capabilities():
-    """Declared per install, not per build: an agent that claims `branding` and
-    then 404s it makes the plane relay a question it already knows the answer to."""
+    """Declared from what this install can actually answer. `branding` is claimed
+    whenever a panel exists — including one derived a moment ago, which is why the
+    derivation runs before pair.py registers rather than after."""
     caps = ["ask", "health"]
-    if branding():
+    b = branding()
+    if b:
         caps.append("branding")
-    if config().get("logo"):
+    if b.get("logo_token"):
         caps.append("file")
     return caps
 
@@ -332,6 +506,23 @@ class Handler(BaseHTTPRequestHandler):
         self._send(400, {"error": f"unsupported type: {kind}"})
 
 
+def _identity_worker():
+    """Keep the panel current in the background. It costs a model turn, so it
+    never runs while the plane is waiting on a request — the panel is always
+    served from cache, and this is what fills the cache."""
+    ident = ensure_identity()
+    if ident:
+        print(f"[voice-agent] identity: {ident.get('agent_name') or '?'} "
+              f"at {ident.get('company_name') or '?'} "
+              f"for {ident.get('user_name') or '?'}"
+              + (f", logo {os.path.basename(ident['logo'])}" if ident.get("logo") else ""),
+              flush=True)
+    else:
+        print("[voice-agent] identity: could not derive one — the app will show its "
+              "generic panel. Set agent_name/company_name/user_name in config.json "
+              "to override.", flush=True)
+
+
 def serve():
     cfg = config()
     srv = ThreadingHTTPServer((cfg["bind"], int(cfg["port"])), Handler)
@@ -340,15 +531,21 @@ def serve():
     h = health()
     if not h["ok"]:
         print(f"[voice-agent] WARNING: {h.get('detail')}", flush=True)
+    threading.Thread(target=_identity_worker, daemon=True).start()
     srv.serve_forever()
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true", help="print health and exit")
+    ap.add_argument("--identity", action="store_true",
+                    help="derive the identity panel now and print it")
     a = ap.parse_args()
     if a.check:
         print(json.dumps({**health(), "claude": claude_bin(),
-                          "workdir": os.path.expanduser(config()["workdir"])}, indent=2))
+                          "workdir": os.path.expanduser(config()["workdir"]),
+                          "branding": branding()}, indent=2))
+    elif a.identity:
+        print(json.dumps(ensure_identity(force=True), indent=2))
     else:
         serve()
