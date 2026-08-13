@@ -209,8 +209,8 @@ def show_qr(api, token, name=None, payload_only=False):
         mins = max(1, int(t.get("ttl", 900)) // 60)
         note = (f"Expires in ~{mins} min"
                 + (time.strftime(" (at %H:%M)", time.localtime(exp)) if exp else "")
-                + " if not scanned — re-run `pair.py --qr` for a fresh one. If you send "
-                  "it into a chat, schedule that message's deletion at expiry.")
+                + " if not scanned — re-run `pair.py --qr` for a fresh one. A QR sent "
+                  "to a chat from here is deleted at that time, image and all.")
     except SystemExit as e:
         if "HTTP 404" not in str(e):
             raise
@@ -254,7 +254,8 @@ def main():
     ap.add_argument("--language", help="ISO 639-1 code you and your user converse in")
     ap.add_argument("--qr", action="store_true", help="print the phone login QR")
     ap.add_argument("--payload", action="store_true", help="with --qr: print JSON, do not render")
-    ap.add_argument("--telegram", help="chat id to send the QR to; it is deleted at expiry")
+    ap.add_argument("--telegram", help="override the chat the QR is sent to (it is "
+                                       "discovered otherwise, and deleted at expiry)")
     ap.add_argument("--test", action="store_true", help="plane-side connection test")
     ap.add_argument("--status", action="store_true", help="what the plane has registered")
     a = ap.parse_args()
@@ -311,17 +312,23 @@ def main():
                            identity().get("user_name") or c.get("user_name")
                            or c.get("account"),
                            a.payload)
-        chat = a.telegram or c.get("telegram_chat")
+        import qr_send
+        # Discovered, not demanded: --telegram is for overriding, not for
+        # remembering. An untracked QR is the one nothing can delete, so the
+        # tracked path is what happens when nobody says otherwise.
+        chat = a.telegram or qr_send.chat_id()
         if chat and png and exp:
             # Sending it and forgetting it are the same operation: whatever posts
             # the credential is what records that it has to come back out.
-            import qr_send
             qr_send.send(chat, png, exp,
                          caption="Agent Voice Mode — scan to sign in. "
                                  "This code expires and deletes itself.")
         elif chat:
-            print("[pair] --telegram needs a rendered PNG and an expiry; not sent.",
+            print("[pair] no rendered PNG or expiry to send; showed it here instead.",
                   file=sys.stderr)
+        else:
+            print("[pair] no chat to send this to — show the PNG yourself, and "
+                  "delete it at the printed expiry.", file=sys.stderr)
         return
     if a.test:
         r = call(api, "/agent/test", token, {})
