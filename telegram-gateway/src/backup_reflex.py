@@ -240,7 +240,8 @@ def render(rows=None):
     # Three columns, not four: the transcript scrolls a wide table sideways,
     # so a fourth turns a glance into a drag on the screen where a glance was
     # the whole point. State folds into the last-run cell and nothing is lost.
-    out = ["| Backup | Last run | Size |", "|---|---|---|"]
+    # Bold header, same reason as the reminders table (the owner 2026-08-13).
+    out = ["| **Backup** | **Last run** | **Size** |", "|---|---|---|"]
     for r in rows:
         when = (f"{_ago(r['last'])}, {r['state']}" if r["last"]
                 else r["state"])

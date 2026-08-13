@@ -440,8 +440,12 @@ def render(rows=None, title="Reminders", empty="No reminders set.",
     if not rows:
         return empty
     ios = client == "ios"
-    head = (["| When | Reminder | Photo |", "|---|---|---|"] if ios
-            else ["| When | Reminder |", "|---|---|"])
+    # Bold header cells (the owner 2026-08-13: he wanted the header row to read
+    # differently from the body; Telegram draws the cell backgrounds itself and
+    # exposes no styling, so weight is the only lever we have — and he approved
+    # it on sight).
+    head = (["| **When** | **Reminder** | **Photo** |", "|---|---|---|"] if ios
+            else ["| **When** | **Reminder** |", "|---|---|"])
     out = list(head)
     for r in rows:
         # The comment goes to the APP only. Telegram has no HTML comments in

@@ -95,7 +95,8 @@ def render(data=None, client="ios"):
     if not rows:
         return "*Nothing waiting on a reply* — every thread this week has our answer on it."
     # #131, one word, the owner looking at the live table: Summary.
-    out = ["| From | When | Summary |", "|---|---|---|"]
+    # Bold header, same reason as the reminders table (the owner 2026-08-13).
+    out = ["| **From** | **When** | **Summary** |", "|---|---|---|"]
     for r in rows:
         # The urgency FLAGS stay out of the cell. They are ranking signals —
         # the word "today" found in a body — and printed beside a four-day-old
