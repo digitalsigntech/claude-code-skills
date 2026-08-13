@@ -13,10 +13,10 @@ send-everything behavior.
 import sys, os, json, argparse, urllib.parse, urllib.request
 
 sys.path.insert(0, os.path.expanduser(
-    os.environ.get("TELEGRAM_GATEWAY_DIR", "~/DST/telegram")))
+    os.environ.get("TELEGRAM_GATEWAY_DIR", "~/workspace/telegram")))
 import tg_api
 
-CHAT = os.environ.get("DST_CHAT_ID", "")  # your Telegram chat id (or pass --chat)
+CHAT = os.environ.get("TELEGRAM_CHAT_ID", "")  # your Telegram chat id (or pass --chat)
 SERVER = "http://127.0.0.1:8477/find"
 
 

@@ -27,7 +27,7 @@ Three retrieval paths by design: a **per-project vector index** first —
 `src/pk <slug> search "question"` runs a ~0.15s semantic search over PROJECT.md,
 REGISTRY.md, notes/ and the `.meta.md` sidecars, powered by the
 [kb-semantic-index](../kb-semantic-index/) engine pointed at the project root via
-`DST_KB_ROOT`/`DST_KB_DIRS` (store: `projects/<slug>/.kb_index/`, refreshed
+`KB_ROOT`/`KB_DIRS` (store: `projects/<slug>/.kb_index/`, refreshed
 incrementally in the background on every filed item, so new posts are searchable
 within seconds) — then **REGISTRY.md** (grep one file, newest last) for "where is
 that thing", and the wiki-style **PROJECT.md** for "what's the state of this
@@ -76,7 +76,7 @@ works and the bot tells you to grant admin.
 2. Create a Telegram group with the bot; make the bot admin (*Change group info*).
 3. Bind it: add `{<chat_id>: "<slug>"}` to `PROJECT_CHATS` in `tgconf.py`, or just
    send `/project <slug>` in the group.
-4. Optional: set `DST_PROJECTS_VISION_MODEL` (default: a Nemotron VL model on
+4. Optional: set `PROJECTS_VISION_MODEL` (default: a Nemotron VL model on
    OpenRouter) for photo auto-annotation; `OPENROUTER_API_KEY` in
    `~/.config/dst/secrets.env`.
 

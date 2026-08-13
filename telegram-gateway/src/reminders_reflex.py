@@ -41,10 +41,10 @@ HOME = os.path.expanduser("~")
 # Discipline lost both times, so it is an env var now: point REMINDERS_DB at a
 # copy and every read AND write follows it.
 DB = os.environ.get("REMINDERS_DB",
-                    f"{HOME}/DST/operations/reminders/reminders.db")
-REALTIME = f"{HOME}/DST/voice/realtime"
+                    f"{C.WORKSPACE_ROOT}/operations/reminders/reminders.db")
+REALTIME = f"{C.WORKSPACE_ROOT}/voice/realtime"
 MINT_URL = "http://127.0.0.1:8478/{secret}/mint-token"
-SENDFILE = f"{HOME}/DST/telegram/sendfile.py"
+SENDFILE = f"{C.WORKSPACE_ROOT}/telegram/sendfile.py"
 LIMIT = 20
 
 
@@ -92,7 +92,7 @@ def _summarize(text):
     a reminder says."""
     try:
         import sys
-        sys.path.insert(0, f"{HOME}/DST/operations/reminders")
+        sys.path.insert(0, f"{C.WORKSPACE_ROOT}/operations/reminders")
         import reminders
         return reminders.summarize(text)
     except Exception:
@@ -1134,7 +1134,7 @@ def resolve(q, owner=None):
 
 
 AUDIT = os.environ.get("AMEND_AUDIT",
-                       f"{HOME}/DST/voice/realtime/amend_audit.log")
+                       f"{C.WORKSPACE_ROOT}/voice/realtime/amend_audit.log")
 
 
 def _audit(question, rid, note):
@@ -1194,7 +1194,7 @@ def amend(question, owner=None):
     else:
         rid = int(m.group(1))
         _audit(question, rid, "id taken FROM THE SENTENCE")
-    sys.path.insert(0, f"{HOME}/DST/operations/reminders")
+    sys.path.insert(0, f"{C.WORKSPACE_ROOT}/operations/reminders")
     import reminders
     row = None
     # Scoped to the asker: naming a number must not reach past ownership. A row

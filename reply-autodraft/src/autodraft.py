@@ -62,7 +62,7 @@ INTERNAL = {OWNER, CC_TEAMMATE,
             f"assistant@{INTERNAL_DOMAIN}", f"support@{INTERNAL_DOMAIN}"}
 
 STATE_DB = os.path.join(HERE, "state.db")         # created empty on first run
-CRM_DB = os.environ.get("DST_CRM_DB", "")         # optional contacts.db for sender names
+CRM_DB = os.environ.get("CRM_DB", "")         # optional contacts.db for sender names
 SKILL_MD = os.path.join(HERE, "SKILL.md")         # holds the learned-instructions block
 LEARN_KB = os.path.join(PROJECT_ROOT, "knowledge-base", "from-emails", "reply-learnings.md")
 PRODUCTS_DIR = os.path.join(PROJECT_ROOT, "knowledge-base", "products")

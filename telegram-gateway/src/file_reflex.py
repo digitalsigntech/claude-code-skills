@@ -11,7 +11,7 @@ random." One verb surface, three sources, strict matching, no LLM turn:
     and EVERY distinctive query token must appear in the hit's tags/annotation/name
     (the old reflex sent a printhead photo for "label expo pass" because one token,
     'label', matched a barcode-label tag).
- 3. workspace files — a cached walk of the DST tree (~4k files, refreshed every
+ 3. workspace files — a cached walk of the workspace tree (~4k files, refreshed every
     2 min); a file qualifies only when every distinctive query token appears in its
     name or parent folders. Best precision wins; ties go to the newest file.
     DM chats + the Always-Nemotron private group ONLY (the owner 2026-07-27: that group
@@ -22,7 +22,7 @@ random." One verb surface, three sources, strict matching, no LLM turn:
 
 If a query plausibly matches BOTH a document and KB images (no type hint either
 way), or several unrelated files match equally, it falls through to the normal
-Claude turn — a miss costs ~10ms and hijacks nothing. Toggle: DST_FILE_REFLEX=0.
+Claude turn — a miss costs ~10ms and hijacks nothing. Toggle: TG_FILE_REFLEX=0.
 """
 import os, re, time, threading
 
@@ -98,10 +98,10 @@ def _index():
         if time.time() - _WALK["ts"] < WALK_TTL:
             return _WALK["files"]
     files = []
-    for root, dirs, names in os.walk(C.DST_ROOT):
+    for root, dirs, names in os.walk(C.WORKSPACE_ROOT):
         dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS
                    and not d.startswith(EXCLUDE_DIR_PREFIXES)]
-        rel = os.path.relpath(root, C.DST_ROOT)
+        rel = os.path.relpath(root, C.WORKSPACE_ROOT)
         dtoks = _toks(" ".join(rel.split(os.sep)[-2:])) if rel != "." else []
         for n in names:
             if n.startswith(".") or SENSITIVE.search(n):
@@ -211,7 +211,7 @@ def resolve(chat_id, text):
 
 # ---- sending --------------------------------------------------------------------
 def _send_doc(chat_id, path, t0):
-    rel = os.path.relpath(path, C.DST_ROOT)
+    rel = os.path.relpath(path, C.WORKSPACE_ROOT)
     params = {"chat_id": chat_id, "caption": rel[:1000]}
     fid = doc_reflex._cache().get(path)
     if fid:                              # cached -> no re-upload
@@ -261,7 +261,7 @@ if __name__ == "__main__":
     if not r:
         print("-> fall through to Claude")
     elif r[0] == "doc":
-        print("-> sendDocument:", os.path.relpath(r[1], C.DST_ROOT))
+        print("-> sendDocument:", os.path.relpath(r[1], C.WORKSPACE_ROOT))
     else:
         print(f"-> send {len(r[1])} photo(s):",
               ", ".join(os.path.basename(h["path"]) for h in r[1]))

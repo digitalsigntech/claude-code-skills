@@ -40,9 +40,9 @@ import tgconf as C
 import projects_mode
 
 sys.path.insert(0, os.environ.get("TG_AUTOSCAN_DIR",
-                                  os.path.join(C.DST_ROOT, "local-ai")))
+                                  os.path.join(C.WORKSPACE_ROOT, "local-ai")))
 
-DEST = os.path.join(C.DST_ROOT, "knowledge-base", "from-scans")
+DEST = os.path.join(C.WORKSPACE_ROOT, "knowledge-base", "from-scans")
 WORK_DIR = os.path.join(C.STATE_DIR, "autoscan")
 PHOTO_EXTS = (".jpg", ".jpeg", ".png", ".webp")
 

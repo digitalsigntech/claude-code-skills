@@ -32,8 +32,8 @@ Other `.md` files are chunked heading-aware and size-bounded (`MAX_CHARS`); Mark
 split **one chunk per data row** (with the header row prepended) so a single distinctive row
 isn't averaged into a 20-row blob. Files/dirs starting with `_` and `*.bak` are skipped.
 
-**Multiple roots.** The engine is root-agnostic: set `DST_KB_ROOT` (index root) and
-`DST_KB_DIRS` (comma-separated subdirs to index; `.` = the whole tree) to point the same
+**Multiple roots.** The engine is root-agnostic: set `KB_ROOT` (index root) and
+`KB_DIRS` (comma-separated subdirs to index; `.` = the whole tree) to point the same
 script at any Markdown folder. Each root keeps its own independent store in
 `<root>/.kb_index/`, so one install can serve the company KB plus any number of
 per-project indexes (see the [projects](../projects/) skill's `pk` wrapper).

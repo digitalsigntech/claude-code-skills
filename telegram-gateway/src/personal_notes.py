@@ -2,14 +2,14 @@
 
 the owner (2026-07-10): any file (photo, PDF, doc, anything) sent in his DM with NO
 caption is a personal note. Notes live in their own store + SQLite db, separate
-from the DST knowledge base, and are deliverable ONLY to:
+from the the workspace knowledge base, and are deliverable ONLY to:
   • his DM (chat C.OWNER_ID), or
   • a group whose only human member is the owner (bot + the owner, member_count == 2,
     verified live via getChatMemberCount + getChatMember, cached 10 min).
-NEVER to the DST groups (Public / Wise / Private) or to any other user's DM.
+NEVER to the the workspace groups (Public / Wise / Private) or to any other user's DM.
 
-Storage: DST/personal/notes/<YYYYMMDD-HHMMSS>_<original-name>  (files)
-         DST/personal/notes.db                                  (metadata)
+Storage: workspace/personal/notes/<YYYYMMDD-HHMMSS>_<original-name>  (files)
+         workspace/personal/notes.db                                  (metadata)
 Notes may carry a `label` (human description, e.g. the email subject that came
 with the file) and `keywords` (extracted from the file's content) — search()
 matches both (the owner, 2026-07-11).
@@ -26,7 +26,7 @@ import tgconf as C
 import tg_api as TG
 
 VLAD = C.OWNER_ID                       # the owner's Telegram user id == his DM chat id
-PERSONAL_DIR = os.path.join(C.DST_ROOT, "personal")
+PERSONAL_DIR = os.path.join(C.WORKSPACE_ROOT, "personal")
 NOTES_DIR = os.path.join(PERSONAL_DIR, "notes")
 DB = os.path.join(PERSONAL_DIR, "notes.db")
 MAX_MB = 49

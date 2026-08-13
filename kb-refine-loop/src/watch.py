@@ -16,7 +16,7 @@ Usage: watch.py [--dry] [--limit N] [--force THREAD_ID:REPLY_ID]
 import argparse, json, os, re, sqlite3, subprocess, sys, datetime
 
 DIR = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.expanduser(os.environ.get("PROJECT_ROOT", "~/DST"))
+ROOT = os.path.expanduser(os.environ.get("PROJECT_ROOT", "~/workspace"))
 DB = os.environ.get("CRM_DB", os.path.join(ROOT, "crm", "contacts.db"))
 STATE = os.path.join(DIR, "state.json")
 PROMPT = os.path.join(DIR, "refine_prompt.md")
@@ -79,7 +79,7 @@ def outbound_rows(c):
 
 
 def has_inbound_question(c, thread_id, before_ts):
-    """True if the thread has an earlier substantive inbound (non-DST) message.
+    """True if the thread has an earlier substantive inbound (non-owner) message.
 
     Deliberately loose: customers often ask without a question mark ("So best
     lowest cost option is ideal" — Ashton Potter 2026-07-13, which the old

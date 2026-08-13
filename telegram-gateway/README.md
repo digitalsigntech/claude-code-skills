@@ -29,9 +29,13 @@ hold them for the conversation.
 It long-polls the Telegram Bot API (no webhook), so it runs fine on a box behind
 NAT with no public IP or inbound ports.
 
-> This is the gateway that runs on **Mercury** (the DST appliance). Some features
-> below (KB reflex, docpipe ingest, CLIP media search, email injection, chat
-> archive) are DST-specific integrations. They **degrade
+> This is a generated copy of a gateway that runs on a private workspace box, with
+> the original owner's identity, paths and group ids replaced by config. Set your
+> own in `src/tgconf.py` (or the `TG_*` env vars) — `BOT_NAME`, `HOST_LABEL`,
+> `WORKSPACE_LABEL` and `WORKSPACE_ROOT` are what the bot says about itself and
+> where it looks for files. Some features below (KB reflex, docpipe ingest, CLIP
+> media search, email injection, chat archive) are integrations with companion
+> tools you may not have. They **degrade
 > gracefully** — if the referenced tools/modules aren't present, that feature just
 > no-ops and the core chat gateway runs unaffected. See
 > [Optional integrations](#optional-integrations) for how to strip or keep them.
@@ -238,9 +242,9 @@ document→markdown conversion is still running).
 | `CLAUDE_TIMEOUT` | `900`s (env `TG_TIMEOUT`) | Per-turn hard timeout. |
 | `STREAMING` | `False` | `True` = live-edit a placeholder as Claude generates (shows tool activity); `False` = wait for the full reply, send once. |
 | `EDIT_INTERVAL` | `1.5`s | Min seconds between live edits while streaming. |
-| `APPEND_SYSTEM` | (concise-reply prompt) | Passed via `--append-system-prompt`; biases Claude toward short, direct replies. **Customize this for your project** — it currently mentions DST specifics. |
+| `APPEND_SYSTEM` | (concise-reply prompt) | Passed via `--append-system-prompt`; biases Claude toward short, direct replies. **Customize this for your project** — the shipped text is deliberately generic. |
 | `TG_MAX` / `RICH_MAX` | `4000` / `32768` | Message chunk size / rich-message payload cap. |
-| `KB_REFLEX` | `1` (env `TG_KB_REFLEX`) | Optional tier-1 KB quick-answer (DST-specific; set `0` to disable). |
+| `KB_REFLEX` | `1` (env `TG_KB_REFLEX`) | Optional tier-1 KB quick-answer (needs the companion KB tooling; set `0` to disable). |
 | `DOC_REFLEX` | `1` (env `TG_DOC_REFLEX`) | Optional instant delivery of curated documents from `doc_registry.json` (set `0` to disable). |
 | `OWNER_EMAIL` / `OWNER_PERSONAL_EMAIL` | empty (env `TG_OWNER_EMAIL`, `TG_OWNER_PERSONAL_EMAIL`) | Owner mailboxes for the email-injection flow (mail from these runs as a chat turn). |
 | `FRIEND_EMAIL` / `FRIEND_NAME` | empty = off (env `TG_FRIEND_EMAIL`, `TG_FRIEND_NAME`) | Optional trusted outside collaborator: their emails also run agent turns, and every reply to them CCs the owner. |
@@ -251,10 +255,11 @@ Claude subscription tokens. To route to a local or hybrid model, change
 
 ---
 
-## Optional integrations (DST-specific — safe to remove)
+## Optional integrations (companion tools — safe to remove)
 
-These are wired into `gateway.py`/`tgconf.py` for the DST appliance. Each is
-guarded so it no-ops if the underlying tool/module is missing:
+These are wired into `gateway.py`/`tgconf.py` and expect companion tools that live
+in the same workspace. Each is guarded so it no-ops if the underlying tool/module
+is missing:
 
 - **Chat archive** (`chatlog/chatdb`, `classify`) — logs every message + reply to
   SQLite/FTS5 and tags each with a project. If the module can't import, archiving

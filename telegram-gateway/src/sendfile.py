@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Send a file into a Telegram chat THROUGH tg_api — the one supported way.
 
-    python3 ~/DST/telegram/sendfile.py [--document] <chat_id> <path> [caption]
+    python3 <workspace>/telegram/sendfile.py [--document] <chat_id> <path> [caption]
 
 --document forces sendDocument even for image files (uncompressed, lands in
 the attachments feed as a file).
@@ -18,6 +18,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import tg_api
+import tgconf as C
 
 
 def _pdf_thumb(path):
@@ -66,7 +67,7 @@ def main():
                 fh.close()
         if r.get("ok"):
             try:                # archive marker, best-effort like the gateway
-                sys.path.insert(0, os.path.expanduser("~/DST/chatlog"))
+                sys.path.insert(0, os.path.join(C.WORKSPACE_ROOT, "chatlog"))
                 import chatdb
                 chatdb.record(f"[sent file: {name}]"
                               + (f" {caption}" if caption else ""),

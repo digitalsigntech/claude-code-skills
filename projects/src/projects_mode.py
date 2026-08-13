@@ -1,7 +1,7 @@
 """R&D project chats — every post in a project group is FILED into the project.
 
 A "project chat" is a Telegram group bound to a project directory under
-DST/projects/<slug>/ (e.g. "PHD R&D with Claude" → projects/phd-rd/). Everything
+workspace/projects/<slug>/ (e.g. "PHD R&D with Claude" → projects/phd-rd/). Everything
 the owner posts there — text, voice notes, photos, documents — is filed
 deterministically into the project (the owner, 2026-07-19), organized for quick
 retrieval:
@@ -27,7 +27,7 @@ import requests
 import tgconf as C
 import tg_api as TG
 
-PROJECTS_DIR = os.path.join(C.DST_ROOT, "projects")
+PROJECTS_DIR = os.path.join(C.WORKSPACE_ROOT, "projects")
 STATE_FILE = os.path.join(C.STATE_DIR, "projects.json")
 _LOCK = threading.Lock()
 
@@ -35,7 +35,7 @@ _LOCK = threading.Lock()
 # email-KB pipeline. Text = the standard Nemotron; vision = NVIDIA's Nemotron VL.
 OR_URL = "https://openrouter.ai/api/v1/chat/completions"
 OR_TEXT_MODEL = os.environ.get("OR_MODEL", "nvidia/nemotron-3-super-120b-a12b")
-OR_VISION_MODEL = os.environ.get("DST_PROJECTS_VISION_MODEL",
+OR_VISION_MODEL = os.environ.get("TG_PROJECTS_VISION_MODEL",
                                  "nvidia/nemotron-nano-12b-v2-vl:free")
 
 TITLE_SUFFIX = {"wisdom": "💡 Wisdom", "privacy": "🔒 Privacy"}

@@ -6,7 +6,7 @@ A voice note in a VOICE_CHATS chat becomes a spoken conversation turn:
   picked by detected language) -> ogg/opus voice note back, plus full text.
 
 Everything runs on-box: whisper at ~/whisper.cpp (build-vulkan), Piper in
-DST/voice/venv with voices in DST/voice/voices. All entry points raise on
+<workspace>/voice/venv with voices in <workspace>/voice/voices. All entry points raise on
 failure — the gateway catches and falls back to a plain text reply.
 """
 import os, re, json, subprocess, tempfile

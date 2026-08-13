@@ -1,7 +1,7 @@
 # KB self-refinement loop (one customer thread)
 
-You are running headless on Mercury. Work SILENTLY (no emails, no drafts, no files
-outside `~/DST/knowledge-base/`). Your job: test whether the DST knowledge base could
+You are running headless on the box. Work SILENTLY (no emails, no drafts, no files
+outside `~/workspace/knowledge-base/`). Your job: test whether the knowledge base could
 have answered a customer's questions as well as the owner's actual reply did — in BOTH
 facts and writing style — and if not, fix the KB / style profile until it can. This
 is a loop the owner approved; style capture added at their request.
@@ -12,7 +12,7 @@ archive and the id of the owner's sent reply to test against.
 ## Procedure
 
 1. **Load the thread** (oldest first):
-   `sqlite3 ~/DST/crm/contacts.db "SELECT id, date, from_addr, subject, body_new FROM emails WHERE thread_id='<THREAD_ID>' ORDER BY internal_date;"`
+   `sqlite3 ~/workspace/crm/contacts.db "SELECT id, date, from_addr, subject, body_new FROM emails WHERE thread_id='<THREAD_ID>' ORDER BY internal_date;"`
    Read everything EXCEPT the body of REPLY_ID. Do NOT read REPLY_ID's body yet —
    that is the answer key. (Earlier replies from the owner in the thread are fine to read.)
 
@@ -25,7 +25,7 @@ archive and the id of the owner's sent reply to test against.
    print `REFINE-RESULT: skip (not addressed to the customer)` and stop.
 
 3. **Attempt N (start N=1): draft the full reply from the KB only, as the owner.**
-   Facts: use `~/DST/knowledge-base/` (product-qa.md, manuals,
+   Facts: use `~/workspace/knowledge-base/` (product-qa.md, manuals,
    phd-recovery-fluids.md, price-list.md, from-emails/, `ug -in` searches).
    Style: write it as an email the owner would actually send, following
    `knowledge-base/writing-styles/<owner>.md` + `learned-<owner>.md`
@@ -84,9 +84,9 @@ archive and the id of the owner's sent reply to test against.
    is enough.
 
 ## Guard rails
-- Read-only everywhere except `~/DST/knowledge-base/**`.
-- Never send email; never create drafts; never touch `~/DST/personal/`.
-- the owner's sent reply is ground truth for DST facts. If a reply looks like a typo or
+- Read-only everywhere except `~/workspace/knowledge-base/**`.
+- Never send email; never create drafts; never touch `~/workspace/personal/`.
+- the owner's sent reply is ground truth for company facts. If a reply looks like a typo or
   contradicts the machine manual, do NOT silently overwrite the manual — record the
   conflict in the QA entry and flag it in the Telegram note.
 - The semantic index refreshes on the next 15-min cron; no need to rebuild it.

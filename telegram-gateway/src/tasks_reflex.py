@@ -13,9 +13,12 @@ prints what comes back. One local HTTP call, single-digit milliseconds.
 The table is built THERE, not here, on purpose: two copies of the same wording
 drift the first time a catalogue entry changes.
 """
-import json, os, re, urllib.request
+import json, os, re, sys, urllib.request
 
-REALTIME = os.path.expanduser("~/DST/voice/realtime")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import tgconf as C
+
+REALTIME = os.path.join(C.WORKSPACE_ROOT, "voice", "realtime")
 SECRET_FILE = os.path.join(REALTIME, ".secret")
 HOOK_SECRET_FILE = os.path.join(REALTIME, ".hook_secret")
 PORT = 8478

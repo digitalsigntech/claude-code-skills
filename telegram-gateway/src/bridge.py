@@ -153,7 +153,7 @@ def _account_line(sender):
         if not m or m.group(1) == "C.OWNER_ID":     # the owner: owner baseline
             return None
         import sys as _sys
-        _sys.path.insert(0, os.path.expanduser("~/DST/operations/accounts"))
+        _sys.path.insert(0, os.path.join(C.WORKSPACE_ROOT, "operations/accounts"))
         import accounts
         return accounts.context_line(int(m.group(1)))
     except Exception:
