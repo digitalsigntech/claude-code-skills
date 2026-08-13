@@ -24,8 +24,7 @@ The voice plane holds one webhook per account. This adapter is that webhook:
   only**. A connection test must never cost a model turn, or the test times out behind
   the very turn it started.
 - **`branding`** — the identity panel the app shows: your name, your company, what the
-  agent is called, and a logo. Unset, the app falls back to its generic assistant —
-  which is why the first thing a company install gets wrong is leaving it unset.
+  agent is called, and a logo. **Derived, not configured** — see below.
 - **`file`** — serves the logo's bytes back when the plane asks for the token branding
   handed it. Only paths this process minted a token for; nothing else is readable.
 - **`capabilities`** — tells the plane what this agent supports, from what is actually
@@ -36,6 +35,35 @@ Anything else returns HTTP 400, which the plane reads as "ask-only agent" rather
 as a failure. That is how an adapter stays compatible with a plane that grows.
 
 Stdlib only. No dependencies to install.
+
+## Identity works itself out
+
+After the QR is scanned the app shows who it is talking to: the user's name, the
+company, what the agent is called, and a logo. None of that is typed in.
+
+On startup — and again before pairing, so the very first scan is already right — the
+adapter spends one turn asking the agent to describe itself **from this project's
+files**, and caches the answer (`state.json`, re-derived weekly). The agent's own name
+is usually in `CLAUDE.md`, the company in its documents, the user in the work they do
+together; the logo is found on disk. The account created by `--signup` is named from
+the same answer, so nobody ends up with an account called `root`.
+
+**Every derived value must appear in the project's own files or it is dropped.** Asked
+who its user is, an agent with nothing to read will happily answer from the account the
+CLI is signed in as — which is a real person with no connection to the install. A name
+the project never writes down does not go on the panel; the app falls back to its
+generic one, which is the honest look for a machine that has nothing to say about
+itself.
+
+It costs a model turn, so it never happens while the plane is waiting: `branding` is
+served from cache in about a millisecond.
+
+    python3 voice_agent.py --identity     # show what it worked out (re-derives)
+    python3 pair.py --identity            # same, from the pairing side
+
+To override any field — a nickname the files do not use, a different logo — set
+`agent_name`, `company_name`, `user_name`, `user_email` or `logo` in `config.json`.
+Config always wins.
 
 ## Two ways the plane can reach you
 
@@ -65,9 +93,8 @@ address, use a Cloudflare *named* tunnel and pass its hostname to `pair.py --url
    `workdir` to the directory the agent should work in. This is the whole value of the
    thing: the agent answers out of *those* files.
 
-   Set the identity fields in the same file, or the app shows a nameless user and a
-   generic assistant: `agent_name` (what the app calls your agent), `company_name`,
-   `user_name`, and `logo` (path to an image on this machine).
+   That is the only thing you have to decide. The identity panel works itself out
+   (below).
 3. **Start it** (`voice-agent.service.example` is a systemd unit):
 
        python3 voice_agent.py

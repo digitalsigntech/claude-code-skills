@@ -48,6 +48,23 @@ def cfg():
         return {}
 
 
+def identity(force=False):
+    """Who this machine's agent is, derived by the adapter from its own project.
+
+    Pairing is the moment it matters: the plane probes capabilities the instant we
+    register, and an identity that arrives a minute later means the first QR scan
+    shows a blank panel. So this blocks here rather than leaving it to the
+    background refresh — once, at install, for the run that has nobody watching."""
+    sys.path.insert(0, str(HERE))
+    try:
+        import voice_agent
+    except ImportError:
+        return {}
+    if force or not voice_agent.cached_identity():
+        print("[pair] working out who this agent is (one turn, cached)…", flush=True)
+    return voice_agent.ensure_identity(force=force)
+
+
 def save(d):
     CONFIG.write_text(json.dumps(d, indent=2) + "\n")
     try:
@@ -112,7 +129,11 @@ def signup(api, url, secret, name=None, language=None):
     the first attempt means "not yet", not "never" — retry rather than fail the
     install on DNS propagation."""
     body = {"webhook_url": url, "webhook_secret": secret,
-            "name": name or os.environ.get("USER", "") or "agent"}
+            # The account is named after the PERSON, not the unix user that
+            # happened to run the install — "root" is the name they would
+            # otherwise see on their own account.
+            "name": name or identity().get("user_name")
+                    or os.environ.get("USER", "") or "agent"}
     if language:
         body["language"] = language
     try:
@@ -186,12 +207,18 @@ def main():
     ap.add_argument("--signup", action="store_true",
                     help="create the account from here (no app token needed)")
     ap.add_argument("--name", help="display name for the account (signup only)")
+    ap.add_argument("--identity", action="store_true",
+                    help="re-derive the identity panel now (names or logo changed)")
     ap.add_argument("--language", help="ISO 639-1 code you and your user converse in")
     ap.add_argument("--qr", action="store_true", help="print the phone login QR")
     ap.add_argument("--payload", action="store_true", help="with --qr: print JSON, do not render")
     ap.add_argument("--test", action="store_true", help="plane-side connection test")
     ap.add_argument("--status", action="store_true", help="what the plane has registered")
     a = ap.parse_args()
+
+    if a.identity:
+        print(json.dumps(identity(force=True), indent=2))
+        return
 
     c = cfg()
     api = a.api or c.get("api") or DEFAULT_API
@@ -213,6 +240,7 @@ def main():
     if a.signup and not token:
         if not url:
             raise SystemExit("--signup needs --url (or run tunnel.py, which supplies one)")
+        identity()
         r = signup(api, url, secret, c.get("name"), c.get("language"))
         token = r["token"]
         c.update({"token": token, "account": r["account"]})
@@ -228,7 +256,9 @@ def main():
         print(json.dumps(call(api, "/agent", token), indent=2))
         return
     if a.qr:
-        show_qr(api, token, c.get("name") or c.get("account"), a.payload)
+        show_qr(api, token,
+                c.get("name") or identity().get("user_name") or c.get("account"),
+                a.payload)
         return
     if a.test:
         r = call(api, "/agent/test", token, {})
@@ -251,6 +281,9 @@ def main():
 
     if not url:
         raise SystemExit("need --url (or run tunnel.py if this machine has no public address)")
+    # Before registering, not after: registering is what makes the plane ask what
+    # this agent can do, and the answer includes whether it has an identity panel.
+    identity()
     register(api, token, url, secret)
     print("now run:  python3 pair.py --test")
 

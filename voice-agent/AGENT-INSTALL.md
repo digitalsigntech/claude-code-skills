@@ -78,20 +78,28 @@ into a chat, never commit it. The QR is a different, short-lived thing (~15 min,
 one scan) — that one is safe to show, but if you put it in a chat, delete the
 message at expiry.
 
-## 4. Fill in the identity, or the app looks broken
+## 4. Check the identity it worked out — do not fill it in
 
-`agent_name`, `company_name`, `user_name` and `logo` in `config.json` are what the app
-displays after the QR is scanned. Left unset it shows no name, no logo, and calls the
-agent by whatever it is built on — which reads as a broken install rather than an
-unconfigured one, and is the single most common thing missed here.
+The app's panel (user's name, company, your own name, logo) is derived, not
+configured: `pair.py` spends one turn before registering asking you to describe
+yourself from this project's files, and caches it. You do not have to do anything
+for this to happen. Look at the result:
 
-**You know most of these** — the company from its files, the user from working with
-them, the logo from the brand directory (`find . -iname '*logo*'`). `agent_name` is the
-one to ask about: it is what the operator calls *you*, and it is not derivable.
+    python3 voice_agent.py --identity
 
-The plane caches capabilities and branding for a few minutes, so after editing:
-restart the adapter, re-run `pair.py --url <your URL>` to force a fresh capability
-probe, and give it a minute before judging the app.
+**A field that came back empty is usually correct.** Every value has to appear in the
+project's own files or it is dropped, because an agent asked who its user is will
+otherwise answer from the account the CLI is signed in as — a real person with nothing
+to do with this install. If a name is missing and the operator wants it shown, the fix
+is to write it where it belongs (`CLAUDE.md`, a company file) and re-derive — not to
+hand-set it here. That way the next agent to read this project knows it too.
+
+Override in `config.json` (`agent_name`, `company_name`, `user_name`, `user_email`,
+`logo`) only for something the files genuinely should not say.
+
+If you change any of it later: restart the adapter, then re-run `pair.py --url <your
+URL>` so the plane re-probes capabilities, and give it a minute — it caches both for
+about five.
 
 ## 5. Run both pieces as services
 
@@ -134,7 +142,8 @@ would know is the honest test.
 - Service names, and how to check status, logs and restart
 - Where `config.json` lives and that it is `chmod 600`
 - The result of `pair.py --test`, verbatim
-- The identity fields you set, and where the logo came from
+- The identity it derived, verbatim — and anything it could not, with where you
+  would write that fact so it can
 
 ---
 
@@ -146,6 +155,6 @@ would know is the honest test.
 - [ ] `config.json` is `chmod 600` and uncommitted
 - [ ] Absolute `PATH` in the unit so `claude` resolves
 - [ ] On NAT: tunnel runs as a service so a new URL re-pairs by itself
-- [ ] Identity fields set: agent name, company, user, logo
+- [ ] Identity derived and checked; blanks understood, not papered over
 - [ ] `pair.py --test` returns ok
 - [ ] A real spoken question answered from this machine's files
