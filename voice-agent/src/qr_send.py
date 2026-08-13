@@ -34,6 +34,44 @@ def _cfg():
         return {}
 
 
+def chat_id():
+    """Where to send it, without being told.
+
+    A flag that has to be remembered is a flag that gets forgotten — and a QR
+    posted by hand is the one nothing can take back. So the chat is discovered
+    the same way the token is: config, environment, then the gateway's own
+    config if this machine runs one."""
+    c = _cfg()
+    if c.get("telegram_chat"):
+        return str(c["telegram_chat"])
+    for env in ("TELEGRAM_CHAT_ID", "TG_CHAT_ID", "TG_OWNER_ID"):
+        if os.environ.get(env):
+            return os.environ[env].strip()
+    workdir = os.path.expanduser(str(c.get("workdir") or ""))
+    tg = pathlib.Path(workdir) / "telegram"
+    if (tg / "tgconf.py").exists():
+        try:
+            sys.path.insert(0, str(tg))
+            import tgconf
+            owner = getattr(tgconf, "OWNER_ID", 0)
+            if owner:
+                return str(owner)
+        except Exception:
+            pass
+    # The gateway's allowlist, but ONLY when it names exactly one private chat.
+    # Positive ids are people, negative ones are groups, and a credential goes to
+    # a person. One entry is unambiguous; two is a guess, and a guess here posts
+    # a login code to the wrong reader.
+    try:
+        allowed = json.loads((tg / "allowlist.json").read_text())
+        private = [i for i in allowed if isinstance(i, int) and i > 0]
+        if len(private) == 1:
+            return str(private[0])
+    except (OSError, json.JSONDecodeError, TypeError):
+        pass
+    return ""
+
+
 def bot_token():
     for env in ("TELEGRAM_BOT_TOKEN", "TG_BOT_TOKEN"):
         if os.environ.get(env):
@@ -74,6 +112,20 @@ def _call(token, method, params=None, files=None):
         return json.load(r)
 
 
+def _drop_png(path):
+    """Delete the rendered QR once it expires.
+
+    The token inside dies on the server, but a PNG left on disk is a credential
+    -shaped file that an agent can find later and post again — and the copy it
+    posts is the one nothing recorded."""
+    if not path:
+        return
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
 def _pending():
     try:
         return json.loads(PENDING.read_text())
@@ -89,22 +141,23 @@ def _save_pending(rows):
         pass
 
 
-def send(chat_id, png, expires, caption=""):
+def send(chat, png, expires, caption=""):
     """Post the QR and write down what has to be taken back."""
     token = bot_token()
     if not token:
         raise SystemExit(
             "no Telegram bot token found. Set $TELEGRAM_BOT_TOKEN, or show the PNG "
             "to your user another way — but then delete it yourself at expiry.")
-    r = _call(token, "sendPhoto", {"chat_id": str(chat_id), "caption": caption},
+    r = _call(token, "sendPhoto", {"chat_id": str(chat), "caption": caption},
               {"photo": str(png)})
     if not r.get("ok"):
         raise SystemExit(f"Telegram refused the photo: {r}")
     mid = r["result"]["message_id"]
     rows = _pending()
-    rows.append({"chat_id": chat_id, "message_id": mid, "expires": float(expires)})
+    rows.append({"chat_id": chat, "message_id": mid, "expires": float(expires),
+                 "png": str(png)})
     _save_pending(rows)
-    print(f"[qr] sent to chat {chat_id} (message {mid}); deletes at "
+    print(f"[qr] sent to chat {chat} (message {mid}); deletes at "
           + time.strftime("%H:%M", time.localtime(expires)))
     return mid
 
@@ -128,12 +181,14 @@ def sweep(now=None):
             _call(token, "deleteMessage", {"chat_id": str(row["chat_id"]),
                                            "message_id": row["message_id"]})
             gone += 1
+            _drop_png(row.get("png"))
         except urllib.error.HTTPError as e:
             # Already deleted, too old to delete, or the bot lost access: the
             # record has no future either way, so drop it rather than retry it
             # forever. Anything else is transient — keep it for the next sweep.
             if e.code in (400, 403):
                 gone += 1
+                _drop_png(row.get("png"))
             else:
                 keep.append(row)
         except (urllib.error.URLError, OSError):
