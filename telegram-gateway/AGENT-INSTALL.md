@@ -13,17 +13,36 @@ not replace the README.
 ## 1. Decide where it lives — this is the important choice
 
 `tgconf.py` treats its **parent directory** as the Claude working directory. Whatever
-folder you put `telegram/` inside becomes the folder every Telegram turn operates in.
+folder you put `telegram/` inside becomes the folder every Telegram turn operates in:
 
-So put it inside the project you want to be able to talk to:
+    <PROJECT>/telegram/     <- copy src/* here, so turns run inside <PROJECT>
 
-    <the project you work on>/telegram/     <- copy src/* here
+Chatting from a phone to an agent that can already see the real files is the whole
+point of installing this. A gateway in an empty home directory technically works and
+is worth very little.
 
-If the operator has a working project on this box — a company's files, a repo, a
-knowledge base — put the gateway inside it, and say so when you report back. Chatting
-from a phone to an agent that can already see the real files is the whole point. If
-there is no obvious project, ask the operator where it should live rather than
-defaulting to a home directory.
+**You are expected to work out what `<PROJECT>` is on this machine — nobody can put it
+in this file.** Look around before you ask:
+
+```bash
+ls -la ~                      # obvious working folders
+find ~ -maxdepth 3 -name CLAUDE.md -not -path '*/.*' 2>/dev/null
+find ~ -maxdepth 3 -name '.git' -type d 2>/dev/null
+```
+
+- A directory containing a `CLAUDE.md` is a strong signal: someone has already set it
+  up as a project for an agent to work in. Read it — it usually says what the machine
+  is for.
+- Otherwise look for a git repo, a knowledge base, a company's document tree, or
+  whatever this box clearly exists to do.
+- If your own session was started in a project directory, that is a strong default.
+
+Then **state your choice and why, and let the operator confirm or redirect** before you
+copy anything. One line is enough: "I found X, which looks like the working project —
+installing there unless you say otherwise." Do not silently pick, and do not fall back
+to a home directory just because nothing stood out; ask.
+
+Use absolute paths throughout the install, and report the one you settled on.
 
 ## 2. Ask the operator for these — do not guess
 
@@ -92,7 +111,7 @@ came back. Then check the logs for exceptions on that turn.
 
 ## Quick sanity checklist
 
-- [ ] `telegram/` sits inside the project the operator wants to talk to
+- [ ] `telegram/` sits inside the project the operator confirmed, not a default
 - [ ] `bot_token` exists, `chmod 600`, never printed or committed
 - [ ] `allowlist.json` contains only the intended IDs
 - [ ] Group privacy disabled (only if they want group chats)
