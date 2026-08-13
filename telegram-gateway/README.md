@@ -160,6 +160,20 @@ document→markdown conversion is still running).
 
 ## Install
 
+> **Installing this with an agent?** Point it at
+> [`AGENT-INSTALL.md`](AGENT-INSTALL.md) instead of pasting instructions:
+>
+> ```
+> Install the Telegram gateway from
+> https://github.com/vladeasytag/claude-code-skills — clone it, then read and
+> follow telegram-gateway/AGENT-INSTALL.md.
+> ```
+>
+> That brief tells the agent to read this README first, then covers the judgement
+> calls a copy-paste of the steps below misses: where to put the gateway so it can
+> see your files, what to ask you for rather than guess, the service-manager `PATH`
+> trap, and what to verify before claiming success.
+
 1. **Place the code.** Copy `src/*` into a working directory, e.g.
    `~/myproject/telegram/`. `tgconf.py` treats its **parent directory** as the
    Claude working directory (`CLAUDE_WORKDIR = PROJECT_ROOT`), i.e. the folder the agent
