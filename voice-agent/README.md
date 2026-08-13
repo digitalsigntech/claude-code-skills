@@ -23,7 +23,14 @@ The voice plane holds one webhook per account. This adapter is that webhook:
 - **`health`** — answers whether this machine's Claude is signed in, from **file reads
   only**. A connection test must never cost a model turn, or the test times out behind
   the very turn it started.
-- **`capabilities`** — tells the plane what this agent supports.
+- **`branding`** — the identity panel the app shows: your name, your company, what the
+  agent is called, and a logo. Unset, the app falls back to its generic assistant —
+  which is why the first thing a company install gets wrong is leaving it unset.
+- **`file`** — serves the logo's bytes back when the plane asks for the token branding
+  handed it. Only paths this process minted a token for; nothing else is readable.
+- **`capabilities`** — tells the plane what this agent supports, from what is actually
+  configured. Claiming `branding` and then 404-ing it makes the plane ask a question it
+  already knows the answer to.
 
 Anything else returns HTTP 400, which the plane reads as "ask-only agent" rather than
 as a failure. That is how an adapter stays compatible with a plane that grows.
@@ -57,6 +64,10 @@ address, use a Cloudflare *named* tunnel and pass its hostname to `pair.py --url
 2. **Point it at your project** — copy `config.example.json` to `config.json` and set
    `workdir` to the directory the agent should work in. This is the whole value of the
    thing: the agent answers out of *those* files.
+
+   Set the identity fields in the same file, or the app shows a nameless user and a
+   generic assistant: `agent_name` (what the app calls your agent), `company_name`,
+   `user_name`, and `logo` (path to an image on this machine).
 3. **Start it** (`voice-agent.service.example` is a systemd unit):
 
        python3 voice_agent.py
@@ -128,7 +139,7 @@ with a command-not-found for `claude` — invisible unless you read the logs.
 
 | File | What it is |
 |---|---|
-| `src/voice_agent.py` | The webhook server. Protocol, health, turns. |
+| `src/voice_agent.py` | The webhook server. Protocol, health, turns, identity panel. |
 | `src/pair.py` | Sign up or register with the plane; `--qr`, `--test`, `--status`. |
 | `src/tunnel.py` | Public URL for machines behind NAT; signs up on first run, re-pairs on URL change. |
 | `src/config.example.json` | Copy to `config.json`. |

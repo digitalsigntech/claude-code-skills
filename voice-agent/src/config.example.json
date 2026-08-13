@@ -5,5 +5,10 @@
   "model": "",
   "turn_timeout": 870,
   "api": "https://app.agentvoicemode.ai/api/",
-  "token": "<account token from the app>"
+  "token": "<account token from the app>",
+  "agent_name": "<what the app should call your agent, e.g. Max>",
+  "company_name": "<your company, shown in the app>",
+  "user_name": "<who the voice is speaking with>",
+  "user_email": "",
+  "logo": "/path/to/logo.png"
 }

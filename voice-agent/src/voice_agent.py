@@ -11,13 +11,17 @@ in your project directory, so the answer comes out of your own files.
 Protocol (POST /, JSON, `Authorization: Bearer <secret>`):
 
     {"v":1, "account":"…", "account_name":"…", "type":"capabilities"}
-        -> {"capabilities": ["ask", "health"]}
+        -> {"capabilities": ["ask", "health", "branding", "file"]}
     {"v":1, …, "type":"health"}
         -> {"ok": true}                       agent up and signed in
         -> {"ok": false, "signed_out": true, "detail": "…"}
     {"v":1, …, "type":"ask", "question":"…"}
         -> {"answer": "…"}
         -> {"answer": "", "agent_error": "signed_out", "detail": "…"}
+
+`branding` is the app's identity panel — the user's name, the company, the agent's
+own name and logo. It is configuration, not code: an agent that does not set it gets
+the app's generic assistant, which is why an install for a company must.
 
 `health` must never cost a model turn — it is a file read, so a connection test
 stays instant. Unknown types get HTTP 400, which the plane reads as "this agent
@@ -26,7 +30,8 @@ speaks ask only" rather than as a failure.
 Sessions are per account: the first turn opens one, later turns resume it, so a
 conversation over voice keeps its thread.
 """
-import argparse, json, os, pathlib, re, secrets, shutil, subprocess, sys, threading, time
+import argparse, base64, hashlib, json, mimetypes, os, pathlib, re, secrets, shutil, \
+    subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -199,6 +204,54 @@ def ask(account, question, account_name=""):
     return {"answer": out[:8000]}
 
 
+# ---------------------------------------------------------------- identity
+MEDIA = {}                              # token -> absolute path, minted here only
+
+
+def media_token(path):
+    """Stable token for a file: same path, same token, across restarts.
+
+    The plane never receives bytes it did not ask for — it gets a token in the
+    branding panel and fetches it back through `file`, like any attachment."""
+    cfg = config()
+    tok = hashlib.sha256((cfg["secret"] + "|" + os.path.abspath(path))
+                         .encode()).hexdigest()[:32]
+    MEDIA[tok] = os.path.abspath(path)
+    return tok
+
+
+def branding():
+    """The identity panel the app shows: who is speaking, for whom, and the logo.
+
+    Without this the app has nothing to display, so it falls back to its own
+    defaults — a blank name and the generic assistant. That fallback is correct
+    when nothing is configured and wrong the moment someone installs this for a
+    company, which is why every field comes from config.json rather than from
+    what the agent happens to be built on."""
+    cfg = config()
+    b = {}
+    for key, field in (("agent_name", "bot_name"), ("company_name", "company_name"),
+                       ("user_name", "user_name"), ("user_email", "user_email")):
+        val = str(cfg.get(key) or "").strip()
+        if val:
+            b[field] = val
+    logo = os.path.expanduser(str(cfg.get("logo") or "").strip())
+    if logo and os.path.exists(logo):
+        b["logo_token"] = media_token(logo)
+    return b
+
+
+def capabilities():
+    """Declared per install, not per build: an agent that claims `branding` and
+    then 404s it makes the plane relay a question it already knows the answer to."""
+    caps = ["ask", "health"]
+    if branding():
+        caps.append("branding")
+    if config().get("logo"):
+        caps.append("file")
+    return caps
+
+
 # ---------------------------------------------------------------- server
 class Handler(BaseHTTPRequestHandler):
     server_version = "voice-agent/1.0"
@@ -239,9 +292,31 @@ class Handler(BaseHTTPRequestHandler):
         name = str(d.get("account_name") or "")
 
         if kind == "capabilities":
-            return self._send(200, {"capabilities": ["ask", "health"]})
+            return self._send(200, {"capabilities": capabilities()})
         if kind == "health":
             return self._send(200, health())
+        if kind == "branding":
+            b = branding()
+            if not b:
+                # No identity configured. Answering with an empty panel would
+                # have the app render blanks; the plane's 404 makes it fall back
+                # to its own plain panel, which is the honest look for "unset".
+                return self._send(404, {"error": "no branding"})
+            return self._send(200, b)
+        if kind == "file":
+            # Only paths this process minted a token for are servable — the
+            # plane asking for a file is not authority to read arbitrary ones.
+            path = MEDIA.get(str(d.get("token") or ""))
+            if not path or not os.path.exists(path):
+                return self._send(404, {"error": "no such token"})
+            if os.path.getsize(path) > 25 * 1024 * 1024:
+                return self._send(413, {"error": "file too large for relay"})
+            with open(path, "rb") as f:
+                blob = f.read()
+            return self._send(200, {
+                "b64": base64.b64encode(blob).decode(),
+                "content_type": mimetypes.guess_type(path)[0] or "application/octet-stream",
+                "filename": os.path.basename(path)})
         if kind == "ask":
             q = str(d.get("question") or "").strip()
             if not q:
