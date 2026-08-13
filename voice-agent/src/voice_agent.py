@@ -174,6 +174,81 @@ HISTORY_TAIL_BYTES = 512 * 1024         # per session file, newest first
 HISTORY_MAX_FILES = 6
 
 
+def archive_dir():
+    """A message archive on this machine, if it has one.
+
+    Transcripts are what EVERY Claude Code machine has, so they are the floor.
+    A machine that also archives its chats has something better: one timeline
+    across every channel the agent talks on, so a conversation that happened in
+    chat this morning is there when the phone asks about it tonight."""
+    cfg = config()
+    if cfg.get("archive_dir"):
+        d = pathlib.Path(os.path.expanduser(cfg["archive_dir"]))
+        return d if (d / "chatdb.py").exists() else None
+    d = pathlib.Path(os.path.expanduser(cfg["workdir"])) / "chatlog"
+    return d if (d / "chatdb.py").exists() else None
+
+
+def _chatdb():
+    d = archive_dir()
+    if not d:
+        return None
+    if str(d) not in sys.path:
+        sys.path.insert(0, str(d))
+    try:
+        import chatdb
+        return chatdb
+    except ImportError:
+        return None
+
+
+def archive(text, direction, sender, account_name=""):
+    """Record a voice turn in the machine's archive, if there is one.
+
+    Best-effort by design: the archive is a bonus, and a voice turn must never
+    fail because writing it down did."""
+    db = _chatdb()
+    if not db or not text:
+        return
+    try:
+        db.record(text[:4000], direction, sender=sender, chat_id=0,
+                  chat_title="Voice", kind="text")
+    except Exception:
+        pass
+
+
+def _archive_history(limit, since):
+    """The tail of the archive, newest-last, across every chat it holds."""
+    db = _chatdb()
+    if not db:
+        return None
+    d = archive_dir()
+    try:
+        import sqlite3
+        cx = sqlite3.connect(f"file:{d / 'chat.db'}?mode=ro", uri=True, timeout=3)
+        rows = cx.execute(
+            "SELECT epoch, sender, text, direction FROM messages "
+            "WHERE epoch > ? ORDER BY epoch DESC LIMIT ?",
+            (since, limit)).fetchall()
+        cx.close()
+    except Exception:
+        return None
+    name = branding().get("bot_name") or "agent"
+    msgs = []
+    for ep, sender, text, direction in reversed(rows):
+        if not isinstance(ep, (int, float)) or ep <= 0 or not text:
+            continue
+        # Direction is the authoritative field: keying on the sender's name puts
+        # the agent's own words in the user's bubble the first time anything
+        # else writes to the archive.
+        role = "agent" if direction == "out" else "user"
+        msgs.append({"role": role,
+                     "sender": name if role == "agent" else (sender or "you"),
+                     "text": _strip_injected_prefix(str(text))[:2000],
+                     "ts": float(ep)})
+    return msgs
+
+
 def _tail_lines(path, max_bytes=HISTORY_TAIL_BYTES):
     """Last lines of a JSONL file without reading the whole thing.
 
@@ -225,11 +300,19 @@ def _strip_injected_prefix(text):
 def history(limit=50, since=0.0):
     """The conversation with this agent, from its own session transcripts.
 
-    The box this was extracted from served its Telegram chat log. A machine that
-    has no Telegram still has this: Claude Code writes every session to
-    ~/.claude/projects/<project>/, and voice turns are resumed sessions in that
-    same project — so the app's own conversation is in there too, and restoring
-    it is restoring the real thread rather than a copy kept in parallel."""
+    Two sources, in order. A machine with a message archive (the chat-archive
+    component) has one timeline across every channel its agent talks on, voice
+    turns included — that is what the box this was extracted from served, and it
+    is the better answer whenever it exists.
+
+    Failing that, Claude Code writes every session to ~/.claude/projects/<project>/
+    and voice turns are resumed sessions in that same project, so the app's own
+    conversation is in there too. Either way it is the real thread, not a copy
+    kept in parallel."""
+    archived = _archive_history(limit, since)
+    if archived is not None:
+        return archived
+
     cfg = config()
     root = pathlib.Path.home() / ".claude" / "projects" / _project_slug(
         os.path.expanduser(cfg["workdir"]))
@@ -315,6 +398,7 @@ def ask(account, question, account_name=""):
     turn_id = secrets.token_hex(8)
     with _inflight_lock:
         INFLIGHT[turn_id] = {"started": time.time(), "question": question}
+    archive(question, "in", sender=account_name or "you")
 
     sid = session_id(account)
     if sid:
@@ -360,6 +444,7 @@ def ask(account, question, account_name=""):
 
     remember_session(account, sid)
     _finish_turn(turn_id)
+    archive(out, "out", sender=branding().get("bot_name") or "agent")
     return {"answer": out[:8000]}
 
 

@@ -31,9 +31,8 @@ The voice plane holds one webhook per account. This adapter is that webhook:
   probes this to decide whether an agent is *there*: refuse it and the connect button
   is drawn crossed out on a machine that is answering fine.
 - **`history`** — the conversation, so the app's chat is populated on launch rather
-  than blank. Read from this machine's own Claude Code session transcripts, which is
-  where the conversation already is — voice turns included, since they are resumed
-  sessions in the same project. Nothing is kept in parallel and nothing to sync.
+  than blank. From the machine's message archive if it has one, otherwise from its own
+  Claude Code session transcripts — see below. Nothing is kept in parallel to sync.
 - **`capabilities`** — tells the plane what this agent supports, from what is actually
   configured. Claiming `branding` and then 404-ing it makes the plane ask a question it
   already knows the answer to.
@@ -88,6 +87,25 @@ is named and what a login QR carries, and it has to be able to change. An instal
 guessed wrong once would otherwise pin that guess forever — every later correction
 overwritten by the oldest value in the system. `--name` still overrides, and is stored
 under `user_name` where a deliberate choice belongs.
+
+## Where history comes from
+
+Two sources, in order, and both are the real thread rather than a copy:
+
+1. **A message archive**, if the machine has one — the [`chat-archive`](../chat-archive/)
+   component. That is one timeline across every channel the agent talks on, so a
+   conversation that happened in chat this morning is there when the phone asks about
+   it tonight. Voice turns are written into it as they happen, which is what makes the
+   timeline whole rather than a second stream beside it.
+2. **Claude Code's own session transcripts** (`~/.claude/projects/<project>/`) — every
+   machine has these, so this is the floor, not a fallback to apologise for. Voice
+   turns are resumed sessions in the same project, so the app's own conversation is in
+   there too.
+
+Detected, not configured: an archive is used if `chatlog/chatdb.py` sits in your
+workdir (`archive_dir` in `config.json` overrides). Either way the app polls this
+every few seconds, so reads tail the newest data rather than scanning from the front,
+and skip the machinery — thinking, tool calls, tool results — that the user never saw.
 
 ## The QR deletes itself
 

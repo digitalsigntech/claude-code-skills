@@ -109,7 +109,18 @@ URL>` so the plane re-probes capabilities, and give it a minute — it caches bo
 about five. That re-run also re-asserts the account's display name from the derived
 identity, which is what the app's Account screen shows.
 
-## 5. Run both pieces as services
+## 5. History is automatic — check which source it found
+
+The app restores the conversation from your message archive if this machine has one
+(`chatlog/chatdb.py` in the workdir — the `chat-archive` component), and otherwise
+from your own session transcripts. Nothing to configure either way.
+
+Worth telling the operator which one is in use: with an archive, the app shows one
+timeline across every channel you talk on, and voice turns join it. Without, it shows
+this project's sessions. If they want the first and have the second, installing
+`chat-archive` is the change — not a setting here.
+
+## 6. Run both pieces as services
 
 The adapter, and — on a NAT machine — the tunnel. Templates are in `src/`.
 
@@ -123,7 +134,7 @@ Second trap, if the service runs as root: the CLI refuses
 `--dangerously-skip-permissions` for root. The adapter handles this (`IS_SANDBOX=1`,
 then a prompt-limited retry), but a non-root user is better where the machine allows it.
 
-## 6. Verify from the plane's side, not yours
+## 7. Verify from the plane's side, not yours
 
 A local `curl` proving your own server answers proves nothing about whether the plane
 can reach it. Run:
@@ -143,7 +154,7 @@ Do not report success on a running process. Then ask the operator to speak to th
 and confirm the answer came from this machine's files — something only these files
 would know is the honest test.
 
-## 7. Report back with
+## 8. Report back with
 
 - The `workdir`, and why you chose it
 - The transport, and the public URL the plane will call
