@@ -48,6 +48,18 @@ def cfg():
         return {}
 
 
+def qr_sweep():
+    """Delete any QR posted into a chat that is now past its expiry. Cheap, and
+    it runs from here as well as from the adapter because neither can be assumed
+    to be running when the clock runs out."""
+    sys.path.insert(0, str(HERE))
+    try:
+        import qr_send
+        qr_send.sweep()
+    except Exception:
+        pass
+
+
 def identity(force=False):
     """Who this machine's agent is, derived by the adapter from its own project.
 
@@ -179,11 +191,11 @@ def show_qr(api, token, name=None, payload_only=False):
     scan redeems it into a normal permanent sign-in. A plane too old to mint one
     falls back to the permanent bearer — then the code must be deleted the moment
     it is scanned, and never left sitting in a chat."""
-    qr_token, note = token, ""
+    qr_token, note, exp = token, "", None
     try:
         t = call(api, "/token/mint", token, {"ttl": 900})
         qr_token = t["token"]
-        exp = t.get("expires")
+        exp = t.get("expires") or (time.time() + int(t.get("ttl", 900)))
         mins = max(1, int(t.get("ttl", 900)) // 60)
         note = (f"Expires in ~{mins} min"
                 + (time.strftime(" (at %H:%M)", time.localtime(exp)) if exp else "")
@@ -201,7 +213,7 @@ def show_qr(api, token, name=None, payload_only=False):
     if payload_only:
         print(blob)
         print(f"[pair] {note}", file=sys.stderr)
-        return
+        return None, exp
     png = HERE / "pairing-qr.png"
     try:
         subprocess.run(["qrencode", "-o", str(png), "-s", "8", blob], check=True)
@@ -216,6 +228,7 @@ def show_qr(api, token, name=None, payload_only=False):
                     "raw — install qrencode for an actual QR, or encode it yourself.")
     print(f"\nApp → Scan QR. One scan signs the phone in AND connects this agent."
           f"{png_line}\n{note}")
+    return (png if png.exists() else None), exp
 
 
 def main():
@@ -231,6 +244,7 @@ def main():
     ap.add_argument("--language", help="ISO 639-1 code you and your user converse in")
     ap.add_argument("--qr", action="store_true", help="print the phone login QR")
     ap.add_argument("--payload", action="store_true", help="with --qr: print JSON, do not render")
+    ap.add_argument("--telegram", help="chat id to send the QR to; it is deleted at expiry")
     ap.add_argument("--test", action="store_true", help="plane-side connection test")
     ap.add_argument("--status", action="store_true", help="what the plane has registered")
     a = ap.parse_args()
@@ -279,9 +293,23 @@ def main():
         print(json.dumps(call(api, "/agent", token), indent=2))
         return
     if a.qr:
-        show_qr(api, token,
-                c.get("name") or identity().get("user_name") or c.get("account"),
-                a.payload)
+        # Sweep first: a QR posted by an earlier run may be past its expiry, and
+        # the run that posted it is long gone.
+        qr_sweep()
+        png, exp = show_qr(api, token,
+                           c.get("name") or identity().get("user_name") or c.get("account"),
+                           a.payload)
+        chat = a.telegram or c.get("telegram_chat")
+        if chat and png and exp:
+            # Sending it and forgetting it are the same operation: whatever posts
+            # the credential is what records that it has to come back out.
+            import qr_send
+            qr_send.send(chat, png, exp,
+                         caption="Agent Voice Mode — scan to sign in. "
+                                 "This code expires and deletes itself.")
+        elif chat:
+            print("[pair] --telegram needs a rendered PNG and an expiry; not sent.",
+                  file=sys.stderr)
         return
     if a.test:
         r = call(api, "/agent/test", token, {})
