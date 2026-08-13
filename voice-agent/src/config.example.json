@@ -4,6 +4,6 @@
   "bind": "127.0.0.1",
   "model": "",
   "turn_timeout": 870,
-  "api": "https://2-24-102-182.sslip.io/api/",
+  "api": "https://app.agentvoicemode.ai/api/",
   "token": "<account token from the app>"
 }

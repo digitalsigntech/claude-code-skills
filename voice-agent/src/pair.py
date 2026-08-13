@@ -10,7 +10,9 @@
     python3 pair.py --status        # what the plane currently has registered
 
 `--api` defaults to the plane behind the Agent Voice Mode app; pass it only to point
-at a different deployment. `--url` is the address the PLANE will call. It must be reachable from the public
+at a different deployment.
+
+`--url` is the address the PLANE will call. It must be reachable from the public
 internet and serve HTTPS. If this machine has no public address, run `tunnel.py`
 instead — it creates the URL, signs up or re-registers with it, and keeps it fresh.
 
@@ -32,7 +34,11 @@ CONFIG = HERE / "config.json"
 # Mode app. An installer cannot derive this and has nowhere to look it up, so a
 # placeholder here is a blocker, not a configuration choice. Override with --api
 # (or "api" in config.json) to point at a different deployment.
-DEFAULT_API = "https://2-24-102-182.sslip.io/api/"
+#
+# The named host, never the IP-literal one it also answers to: an address a person
+# is asked to trust with a credential has to LOOK like the product it belongs to.
+# Existing installs keep whatever they stored, and the old host stays served.
+DEFAULT_API = "https://app.agentvoicemode.ai/api/"
 
 
 def cfg():

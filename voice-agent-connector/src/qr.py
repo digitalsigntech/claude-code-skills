@@ -34,7 +34,7 @@ import urllib.request
 
 DIR = os.path.dirname(os.path.abspath(__file__))
 CONF_PATH = os.path.join(DIR, "connector.json")
-DEFAULT_API = "https://2-24-102-182.sslip.io/api/"
+DEFAULT_API = "https://app.agentvoicemode.ai/api/"
 
 
 def api_call(base, path, body, bearer=None):
