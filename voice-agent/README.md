@@ -74,7 +74,13 @@ served from cache in about a millisecond.
 
 To override any field — a nickname the files do not use, a different logo — set
 `agent_name`, `company_name`, `user_name`, `user_email` or `logo` in `config.json`.
-Config always wins.
+Config wins for everything the app *displays about your agent*.
+
+**The person's name is the exception: the derived value wins.** It is what the account
+is named and what a login QR carries, and it has to be able to change. An install that
+guessed wrong once would otherwise pin that guess forever — every later correction
+overwritten by the oldest value in the system. `--name` still overrides, and is stored
+under `user_name` where a deliberate choice belongs.
 
 ## The QR deletes itself
 
