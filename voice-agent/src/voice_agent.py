@@ -653,6 +653,26 @@ def _identity_worker():
               "to override.", flush=True)
 
 
+def _qr_sweeper():
+    """Take posted QR codes back out of the chat when they expire.
+
+    The adapter is the one thing on this machine that is definitely still running
+    a quarter of an hour after an install — the installing agent has moved on and
+    pair.py exited long ago. So the deletion belongs here, not in whatever posted
+    the image."""
+    sys.path.insert(0, str(HERE))
+    try:
+        import qr_send
+    except ImportError:
+        return
+    while True:
+        try:
+            qr_send.sweep()
+        except Exception as e:
+            print(f"[voice-agent] qr sweep failed: {e}", file=sys.stderr, flush=True)
+        time.sleep(30)
+
+
 def serve():
     cfg = config()
     srv = ThreadingHTTPServer((cfg["bind"], int(cfg["port"])), Handler)
@@ -662,6 +682,7 @@ def serve():
     if not h["ok"]:
         print(f"[voice-agent] WARNING: {h.get('detail')}", flush=True)
     threading.Thread(target=_identity_worker, daemon=True).start()
+    threading.Thread(target=_qr_sweeper, daemon=True).start()
     srv.serve_forever()
 
 

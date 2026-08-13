@@ -74,9 +74,13 @@ it for you the moment the tunnel URL exists, because until then there is no URL 
 sign up with. Then show the QR.
 
 Either way `config.json` ends up holding the token: `chmod 600`, never print it back
-into a chat, never commit it. The QR is a different, short-lived thing (~15 min,
-one scan) — that one is safe to show, but if you put it in a chat, delete the
-message at expiry.
+into a chat, never commit it.
+
+The QR is a different, short-lived thing (~15 min, one scan) and is safe to show. If
+you reach your user over Telegram, send it with `pair.py --qr --telegram <chat id>`
+rather than posting the PNG yourself: that records the message and the adapter deletes
+it at expiry. Do not schedule the deletion by hand and do not promise to come back for
+it — you will not be running by then, which is exactly why this is in the tool.
 
 ## 4. Check the identity it worked out — do not fill it in
 

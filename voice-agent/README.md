@@ -76,6 +76,29 @@ To override any field — a nickname the files do not use, a different logo — 
 `agent_name`, `company_name`, `user_name`, `user_email` or `logo` in `config.json`.
 Config always wins.
 
+## The QR deletes itself
+
+A login QR is a credential with a clock on it, and the fastest way to get one onto a
+phone is to post it into the chat you already share with your agent. The code dies
+server-side at expiry; the image does not, and an expired credential in a chat looks
+exactly like a live one.
+
+    python3 pair.py --qr --telegram <chat id>
+
+Sending it and taking it back are one operation: the send records the message, and
+the deletion is swept every 30 seconds by the adapter — the one process on the
+machine still running a quarter of an hour later, when the installing agent has
+finished and `pair.py` has long exited. `pair.py --qr` sweeps too, so a QR posted by
+a run that died is still collected. Both are idempotent; a message already gone
+counts as deleted.
+
+The bot token is found, not configured: `$TELEGRAM_BOT_TOKEN`, `$TG_BOT_TOKEN`, or a
+`telegram/bot_token` file in your workdir — where an agent that already talks over
+Telegram keeps it. Set `telegram_chat` in `config.json` to make it the default.
+
+Any other channel: show `pairing-qr.png` however you like — but then the expiry is
+yours to honour.
+
 ## Two ways the plane can reach you
 
 The plane calls *you*, so it needs an address. Pick by what your machine has:
@@ -137,6 +160,9 @@ address, use a Cloudflare *named* tunnel and pass its hostname to `pair.py --url
    terminal and to `pairing-qr.png`; without it the payload is printed raw so the
    install is never blocked on a rendering tool.
 
+   If your agent talks to you over Telegram, `--telegram <chat id>` posts it there and
+   **deletes it when it expires** — see below.
+
 6. **Verify** — from the plane's side, not yours:
 
        python3 pair.py --test
@@ -180,5 +206,6 @@ with a command-not-found for `claude` — invisible unless you read the logs.
 | `src/voice_agent.py` | The webhook server. Protocol, health, turns, identity panel. |
 | `src/pair.py` | Sign up or register with the plane; `--qr`, `--test`, `--status`. |
 | `src/tunnel.py` | Public URL for machines behind NAT; signs up on first run, re-pairs on URL change. |
+| `src/qr_send.py` | Posts the QR to Telegram and deletes it at expiry. |
 | `src/config.example.json` | Copy to `config.json`. |
 | `src/*.service.example` | systemd units for the adapter and the tunnel. |
