@@ -1,5 +1,13 @@
 # claude-code-skills
 
+> **Installing the Telegram gateway?** Paste this to your agent — that is the whole install:
+>
+> ```
+> Install the Telegram gateway from
+> https://github.com/vladeasytag/claude-code-skills — clone it, then read and
+> follow telegram-gateway/AGENT-INSTALL.md.
+> ```
+
 A collection of shareable Claude Code skills and reusable components — chat gateways,
 local-AI tooling, email/CRM automation, and infrastructure patterns. Each skill is
 self-contained with its own `README.md` (what it does + how to install it); secrets,

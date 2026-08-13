@@ -1,5 +1,25 @@
 # Telegram Gateway for Headless Claude Code
 
+### Installing it? Paste this to your agent
+
+```
+Install the Telegram gateway from
+https://github.com/vladeasytag/claude-code-skills — clone it, then read and
+follow telegram-gateway/AGENT-INSTALL.md.
+```
+
+That is the whole install. [`AGENT-INSTALL.md`](AGENT-INSTALL.md) tells the agent to
+read this README first, then walks it through the parts that decide whether the
+install actually works: finding the right directory, what to ask you for, the
+service-manager `PATH` trap, and verifying a real Telegram round trip before
+claiming success.
+
+Start your agent with permissions already granted — `claude --dangerously-skip-permissions`
+— or it will stop on every file write and command. It will still have to ask you for
+the bot token and your Telegram user ID; no permission setting can supply those.
+
+---
+
 Chat with a headless **Claude Code** agent over Telegram. Every message you send
 runs a **real Claude turn** with full tools (bash, file I/O, and whatever else is
 wired into the working directory), and each Telegram chat/group keeps its **own
@@ -160,19 +180,8 @@ document→markdown conversion is still running).
 
 ## Install
 
-> **Installing this with an agent?** Point it at
-> [`AGENT-INSTALL.md`](AGENT-INSTALL.md) instead of pasting instructions:
->
-> ```
-> Install the Telegram gateway from
-> https://github.com/vladeasytag/claude-code-skills — clone it, then read and
-> follow telegram-gateway/AGENT-INSTALL.md.
-> ```
->
-> That brief tells the agent to read this README first, then covers the judgement
-> calls a copy-paste of the steps below misses: where to put the gateway so it can
-> see your files, what to ask you for rather than guess, the service-manager `PATH`
-> trap, and what to verify before claiming success.
+> Installing with an agent? See [`AGENT-INSTALL.md`](AGENT-INSTALL.md) — the paste-in
+> line is at the top of this README. The steps below are the manual path.
 
 1. **Place the code.** Copy `src/*` into a working directory, e.g.
    `~/myproject/telegram/`. `tgconf.py` treats its **parent directory** as the
