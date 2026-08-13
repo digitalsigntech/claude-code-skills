@@ -11,7 +11,7 @@ in your project directory, so the answer comes out of your own files.
 Protocol (POST /, JSON, `Authorization: Bearer <secret>`):
 
     {"v":1, "account":"…", "account_name":"…", "type":"capabilities"}
-        -> {"capabilities": ["ask", "health", "branding", "file"]}
+        -> {"capabilities": ["ask", "health", "progress", "branding", "file"]}
     {"v":1, …, "type":"health"}
         -> {"ok": true}                       agent up and signed in
         -> {"ok": false, "signed_out": true, "detail": "…"}
@@ -22,6 +22,10 @@ Protocol (POST /, JSON, `Authorization: Bearer <secret>`):
 `branding` is the app's identity panel — the user's name, the company, the agent's
 own name and logo. It is configuration, not code: an agent that does not set it gets
 the app's generic assistant, which is why an install for a company must.
+
+`progress` says what this agent is working on right now, and the app polls it to
+decide whether an agent is there at all — refusing it draws the connect button
+crossed out on a machine that is answering fine.
 
 `health` must never cost a model turn — it is a file read, so a connection test
 stays instant. Unknown types get HTTP 400, which the plane reads as "this agent
@@ -124,6 +128,47 @@ def health():
 
 
 # ---------------------------------------------------------------- turns
+# Turns running right now, by id. The app polls `progress` to decide whether the
+# agent is reachable at all, so this is also what keeps the Connect button honest.
+INFLIGHT = {}
+_inflight_lock = threading.Lock()
+
+
+def progress():
+    """What this agent is working on, answered without a model.
+
+    The app probes this to decide whether an agent is there — a 400 here is read
+    as unreachable and the connect button is drawn crossed out, on a machine that
+    is answering questions perfectly well. So an adapter that cannot report work
+    must still report NO work rather than refuse the question.
+
+    `covers_all_origins` is false and stays false: this sees turns that arrived
+    through the app, and nothing about a cron job or a terminal session on the
+    same machine. Claiming otherwise would have the voice say "nothing is
+    running" while something is."""
+    with _inflight_lock:
+        tasks = [{"id": tid, "question": t["question"][:120], "state": "running",
+                  "started": t["started"], "elapsed": round(time.time() - t["started"], 1),
+                  "waiting": 0, "origin": "app"}
+                 for tid, t in INFLIGHT.items()]
+    return {"busy": bool(tasks),
+            "tool": None,
+            "elapsed": max([t["elapsed"] for t in tasks], default=0),
+            "serialized": False,
+            "covers_all_origins": False,
+            "coverage_note": "I can only see what was asked through the app on this "
+                             "machine — not anything else it may be running.",
+            "tasks": tasks}
+
+
+def _finish_turn(turn_id):
+    """Drop a turn from the in-flight list. Every exit from ask() goes through
+    here: a turn that fails and stays listed makes the app narrate work that
+    stopped minutes ago, and `busy` never falls back to false."""
+    with _inflight_lock:
+        INFLIGHT.pop(turn_id, None)
+
+
 def session_id(account):
     st = load(STATE, {})
     return st.get("sessions", {}).get(account)
@@ -162,6 +207,10 @@ def ask(account, question, account_name=""):
     if os.geteuid() == 0:
         env.setdefault("IS_SANDBOX", "1")
 
+    turn_id = secrets.token_hex(8)
+    with _inflight_lock:
+        INFLIGHT[turn_id] = {"started": time.time(), "question": question}
+
     sid = session_id(account)
     if sid:
         cmd += ["--resume", sid]
@@ -174,9 +223,11 @@ def ask(account, question, account_name=""):
         r = subprocess.run(cmd, cwd=workdir, capture_output=True, text=True,
                            timeout=cfg["turn_timeout"], env=env)
     except subprocess.TimeoutExpired:
+        _finish_turn(turn_id)
         return {"answer": "", "agent_error": "timeout",
                 "detail": f"the turn ran past {cfg['turn_timeout']}s"}
     except FileNotFoundError:
+        _finish_turn(turn_id)
         return {"answer": "", "agent_error": "signed_out",
                 "detail": f"could not execute {exe}"}
 
@@ -187,6 +238,7 @@ def ask(account, question, account_name=""):
                            timeout=cfg["turn_timeout"], env=env)
         out, err = (r.stdout or "").strip(), (r.stderr or "").strip()
     if r.returncode != 0:
+        _finish_turn(turn_id)
         blob = f"{err}\n{out}"
         if SIGNED_OUT.search(blob):
             return {"answer": "", "agent_error": "signed_out", "detail": err[:400]}
@@ -198,9 +250,11 @@ def ask(account, question, account_name=""):
             st = load(STATE, {})
             st.get("sessions", {}).pop(account, None)
             save(STATE, st)
+        _finish_turn(turn_id)
         return ask(account, question, account_name)
 
     remember_session(account, sid)
+    _finish_turn(turn_id)
     return {"answer": out[:8000]}
 
 
@@ -547,7 +601,9 @@ def capabilities():
     """Declared from what this install can actually answer. `branding` is claimed
     whenever a panel exists — including one derived a moment ago, which is why the
     derivation runs before pair.py registers rather than after."""
-    caps = ["ask", "health"]
+    # `progress` is unconditional: it costs nothing, and the app treats its absence
+    # as an agent that is not there.
+    caps = ["ask", "health", "progress"]
     b = branding()
     if b:
         caps.append("branding")
@@ -597,6 +653,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if kind == "capabilities":
             return self._send(200, {"capabilities": capabilities()})
+        if kind == "progress":
+            return self._send(200, progress())
         if kind == "health":
             return self._send(200, health())
         if kind == "branding":
