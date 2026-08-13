@@ -1,18 +1,28 @@
 #!/usr/bin/env python3
 """Pair this machine's agent with the voice plane.
 
+    python3 pair.py --signup --api https://…/api/ --url https://…/
+                                    # no account yet: create one from here
     python3 pair.py --api https://…/api/ --token <account token> --url https://…/
+                                    # account already exists (token from the app)
+    python3 pair.py --qr            # login QR for the phone (one scan = signed in)
     python3 pair.py --test          # ask the plane to test the connection
     python3 pair.py --status        # what the plane currently has registered
 
 `--url` is the address the PLANE will call. It must be reachable from the public
 internet and serve HTTPS. If this machine has no public address, run `tunnel.py`
-instead — it creates the URL and pairs with it for you.
+instead — it creates the URL, signs up or re-registers with it, and keeps it fresh.
 
-The account token comes from the app (Settings, or the pairing QR). It is written
-to config.json and reused for `--test` and `--status`.
+Two ways to get an account, and they are not equivalent:
+
+  --signup   this agent creates the account, then `--qr` signs the phone in. The
+             user needs nothing beforehand — no app account, no token to copy.
+             The plane PROBES the webhook before creating anything, so the agent
+             must already be serving and publicly reachable at `--url`.
+  --token    the user already signed up in the app and read the token out of
+             Settings. Use this when the account exists.
 """
-import argparse, json, pathlib, sys, urllib.error, urllib.request
+import argparse, json, os, pathlib, subprocess, sys, time, urllib.error, urllib.request
 
 HERE = pathlib.Path(__file__).resolve().parent
 CONFIG = HERE / "config.json"
@@ -33,14 +43,14 @@ def save(d):
         pass
 
 
-def call(api, path, token, payload=None, method=None):
+def call(api, path, token, payload=None, method=None, timeout=60):
     url = api.rstrip("/") + path
     data = json.dumps(payload).encode() if payload is not None else None
     req = urllib.request.Request(url, data=data, method=method or ("POST" if data else "GET"),
                                  headers={"Content-Type": "application/json",
-                                          "Authorization": f"Bearer {token}"})
+                                          **({"Authorization": f"Bearer {token}"} if token else {})})
     try:
-        with urllib.request.urlopen(req, timeout=60) as r:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.load(r)
     except urllib.error.HTTPError as e:
         body = e.read().decode(errors="replace")[:300]
@@ -49,13 +59,110 @@ def call(api, path, token, payload=None, method=None):
         raise SystemExit(f"could not reach the plane at {url}: {e.reason}")
 
 
+def _with_propagation_retry(attempt, label, tries=6, wait=10):
+    """Run a plane call that PROBES a just-created public hostname.
+
+    A brand-new quick-tunnel address is not resolvable from the plane's side for
+    the first ~10-30 s, so the first attempt legitimately fails with "does not
+    resolve". Treating that as final is how an agent ends up unreachable after
+    every tunnel restart — the URL is fine, we just asked too early."""
+    last = ""
+    for i in range(tries):
+        try:
+            return attempt()
+        except SystemExit as e:
+            last = str(e)
+            if "HTTP 429" in last or i == tries - 1:
+                break
+            print(f"[pair] {label}: not reachable from the plane yet — retrying in {wait}s "
+                  f"({last[:90]})", flush=True)
+            time.sleep(wait)
+    raise SystemExit(last)
+
+
 def register(api, token, url, secret):
     """Tell the plane where to find this agent. The plane probes the URL now,
     so a failure here means it genuinely could not reach you — not a stored
     setting that silently never worked."""
-    r = call(api, "/agent", token, {"url": url, "secret": secret})
+    r = _with_propagation_retry(
+        lambda: call(api, "/agent", token, {"url": url, "secret": secret}), "register")
     print(f"registered: {url}")
     return r
+
+
+def signup(api, url, secret, name=None, language=None):
+    """Create the account from this machine, with this agent already attached.
+
+    The plane probes the webhook before it creates anything, so this doubles as
+    the only reachability test that matters. A freshly minted quick-tunnel
+    hostname can take ~30 s to resolve from the plane's side, so a rejection on
+    the first attempt means "not yet", not "never" — retry rather than fail the
+    install on DNS propagation."""
+    body = {"webhook_url": url, "webhook_secret": secret,
+            "name": name or os.environ.get("USER", "") or "agent"}
+    if language:
+        body["language"] = language
+    try:
+        r = _with_propagation_retry(lambda: call(api, "/signup", None, body), "signup")
+    except SystemExit as e:
+        if "HTTP 429" in str(e):
+            raise SystemExit(
+                "the plane's daily signup cap is reached — try again tomorrow, "
+                "or sign up in the app and pair with --token instead.")
+        raise SystemExit(f"signup failed: {e}\n"
+                         f"The plane must be able to reach {url} from the public internet. "
+                         f"Check the agent is running and the tunnel or proxy is up.")
+    print(f"account created: {r['account']} "
+          f"(balance ${r.get('balance_cents', 0) / 100:.2f})")
+    return r
+
+
+def show_qr(api, token, name=None, payload_only=False):
+    """Print the login QR for the phone: one scan signs the app in AND the agent
+    is already attached, because the webhook was registered at signup.
+
+    The QR carries a SHORT-LIVED scan-token minted per run, never the stored
+    account bearer: unscanned it dies server-side in ~15 minutes, and the first
+    scan redeems it into a normal permanent sign-in. A plane too old to mint one
+    falls back to the permanent bearer — then the code must be deleted the moment
+    it is scanned, and never left sitting in a chat."""
+    qr_token, note = token, ""
+    try:
+        t = call(api, "/token/mint", token, {"ttl": 900})
+        qr_token = t["token"]
+        exp = t.get("expires")
+        mins = max(1, int(t.get("ttl", 900)) // 60)
+        note = (f"Expires in ~{mins} min"
+                + (time.strftime(" (at %H:%M)", time.localtime(exp)) if exp else "")
+                + " if not scanned — re-run `pair.py --qr` for a fresh one. If you send "
+                  "it into a chat, schedule that message's deletion at expiry.")
+    except SystemExit as e:
+        if "HTTP 404" not in str(e):
+            raise
+        note = ("This plane predates expiring scan-tokens: the code carries the "
+                "PERMANENT account credential. Show it only to the person pairing and "
+                "delete it immediately after scanning.")
+
+    blob = json.dumps({"v": 1, "type": "account", "token": qr_token,
+                       "name": name or "", "api": api}, separators=(",", ":"))
+    if payload_only:
+        print(blob)
+        print(f"[pair] {note}", file=sys.stderr)
+        return
+    png = HERE / "pairing-qr.png"
+    try:
+        subprocess.run(["qrencode", "-o", str(png), "-s", "8", blob], check=True)
+        subprocess.run(["qrencode", "-t", "ANSIUTF8", blob], check=True)
+        png_line = f"\nPNG copy: {png}"
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        # No qrencode: the payload is still the whole credential, so the install
+        # is not blocked on a rendering tool. Render it anywhere, or install
+        # qrencode (`apt install qrencode` / `brew install qrencode`).
+        print(blob)
+        png_line = ("\nNo `qrencode` on this machine, so the payload above is printed "
+                    "raw — install qrencode for an actual QR, or encode it yourself.")
+    print(f"\nApp → Scan QR. One scan signs the phone in AND connects this agent."
+          f"{png_line}\n{note}")
 
 
 def main():
@@ -63,6 +170,12 @@ def main():
     ap.add_argument("--api", help="plane API base, e.g. https://host/api/")
     ap.add_argument("--token", help="account token from the app")
     ap.add_argument("--url", help="public HTTPS URL of this agent's webhook")
+    ap.add_argument("--signup", action="store_true",
+                    help="create the account from here (no app token needed)")
+    ap.add_argument("--name", help="display name for the account (signup only)")
+    ap.add_argument("--language", help="ISO 639-1 code you and your user converse in")
+    ap.add_argument("--qr", action="store_true", help="print the phone login QR")
+    ap.add_argument("--payload", action="store_true", help="with --qr: print JSON, do not render")
     ap.add_argument("--test", action="store_true", help="plane-side connection test")
     ap.add_argument("--status", action="store_true", help="what the plane has registered")
     a = ap.parse_args()
@@ -70,20 +183,41 @@ def main():
     c = cfg()
     api = a.api or c.get("api")
     token = a.token or c.get("token")
-    if not api or not token:
-        raise SystemExit("need --api and --token at least once (they are then saved)")
+    if not api:
+        raise SystemExit("need --api at least once (it is then saved)")
 
     secret = c.get("secret")
     if not secret:
         raise SystemExit("no webhook secret yet — start voice_agent.py once to generate one")
 
-    c.update({"api": api, "token": token})
+    url = a.url or c.get("public_url")
+    c["api"] = api
     if a.url:
         c["public_url"] = a.url
+    if a.name:
+        c["name"] = a.name
+    if a.language:
+        c["language"] = a.language
+
+    if a.signup and not token:
+        if not url:
+            raise SystemExit("--signup needs --url (or run tunnel.py, which supplies one)")
+        r = signup(api, url, secret, c.get("name"), c.get("language"))
+        token = r["token"]
+        c.update({"token": token, "account": r["account"]})
+        save(c)
+        print("now run:  python3 pair.py --qr")
+        return
     save(c)
+
+    if not token:
+        raise SystemExit("no account token: pass --token (from the app) or use --signup")
 
     if a.status:
         print(json.dumps(call(api, "/agent", token), indent=2))
+        return
+    if a.qr:
+        show_qr(api, token, c.get("name") or c.get("account"), a.payload)
         return
     if a.test:
         r = call(api, "/agent/test", token, {})
@@ -104,7 +238,6 @@ def main():
         print("\nConnected.")
         return
 
-    url = a.url or c.get("public_url")
     if not url:
         raise SystemExit("need --url (or run tunnel.py if this machine has no public address)")
     register(api, token, url, secret)

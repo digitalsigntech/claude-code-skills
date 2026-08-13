@@ -1,3 +1,5 @@
+> **Superseded by [`voice-agent`](../voice-agent/).** That skill does the same job with a supervised tunnel that re-registers when its URL moves, a `health` check that costs no model turn, a configurable `workdir`, and systemd units. Install `voice-agent` instead; this stays only for machines already running it.
+
 # voice-agent-connector
 
 Connect **your own AI agent** to the [Agent Voice Mode] iOS app — talk to it
