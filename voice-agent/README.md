@@ -27,6 +27,13 @@ The voice plane holds one webhook per account. This adapter is that webhook:
   agent is called, and a logo. **Derived, not configured** — see below.
 - **`file`** — serves the logo's bytes back when the plane asks for the token branding
   handed it. Only paths this process minted a token for; nothing else is readable.
+- **`progress`** — what the agent is working on right now, without a model. The app
+  probes this to decide whether an agent is *there*: refuse it and the connect button
+  is drawn crossed out on a machine that is answering fine.
+- **`history`** — the conversation, so the app's chat is populated on launch rather
+  than blank. Read from this machine's own Claude Code session transcripts, which is
+  where the conversation already is — voice turns included, since they are resumed
+  sessions in the same project. Nothing is kept in parallel and nothing to sync.
 - **`capabilities`** — tells the plane what this agent supports, from what is actually
   configured. Claiming `branding` and then 404-ing it makes the plane ask a question it
   already knows the answer to.
@@ -51,8 +58,8 @@ was created cannot quietly stay wrong afterwards. (Nobody ends up with an accoun
 called `root`, or one named after their company where their own name belongs.)
 
 **Your agent's own name comes from how you address it.** It is the one identity fact
-nobody writes down — "you are Max" appears in no file on Max's machine, because a name
-is established by being used. So the adapter counts the names its user has used in an
+nobody writes down — "you are Max" appears in no file on the machine of an agent
+everyone calls Max, because a name is established by being used. So the adapter counts the names its user has used in an
 address position in this project's own session logs, ranks them by how many separate
 sessions they recur across, and offers those to the agent as evidence with the sample
 lines attached. A name that spikes once inside a pasted email loses to one the user

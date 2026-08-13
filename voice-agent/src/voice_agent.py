@@ -34,8 +34,8 @@ speaks ask only" rather than as a failure.
 Sessions are per account: the first turn opens one, later turns resume it, so a
 conversation over voice keeps its thread.
 """
-import argparse, base64, hashlib, json, mimetypes, os, pathlib, re, secrets, shutil, \
-    subprocess, sys, threading, time
+import argparse, base64, calendar, hashlib, json, mimetypes, os, pathlib, re, secrets, \
+    shutil, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -169,6 +169,111 @@ def _finish_turn(turn_id):
         INFLIGHT.pop(turn_id, None)
 
 
+# ---------------------------------------------------------------- history
+HISTORY_TAIL_BYTES = 512 * 1024         # per session file, newest first
+HISTORY_MAX_FILES = 6
+
+
+def _tail_lines(path, max_bytes=HISTORY_TAIL_BYTES):
+    """Last lines of a JSONL file without reading the whole thing.
+
+    A working session log runs to megabytes and the app polls history every few
+    seconds; reading from the front would spend the poll budget on the parts of
+    the conversation nobody is asking for."""
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as f:
+            if size > max_bytes:
+                f.seek(size - max_bytes)
+                f.readline()            # discard the partial line we landed in
+            return f.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return []
+
+
+def _entry_text(entry):
+    """The human-visible words of a transcript entry, or "" if it has none.
+
+    Tool calls, tool results and thinking are the agent working, not the agent
+    talking. Replaying them into a phone's chat would bury the conversation in
+    machinery the user never saw the first time."""
+    content = (entry.get("message") or {}).get("content")
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        return "\n".join(b.get("text", "") for b in content
+                          if isinstance(b, dict) and b.get("type") == "text").strip()
+    return ""
+
+
+def _strip_injected_prefix(text):
+    """Drop a leading bracketed context line from a user message.
+
+    Gateways prepend one — who is speaking, which chat, which channel — and this
+    adapter adds its own "[Voice turn from …]". None of it is anything the user
+    typed, and replaying it into their phone shows them machinery they never saw,
+    chat ids included. The convention is a single bracketed line followed by the
+    real message, so that is exactly what comes off: no bracket, no newline after
+    it, nothing removed."""
+    first, sep, rest = text.partition("\n")
+    first = first.strip()
+    if sep and first.startswith("[") and first.endswith("]") and rest.strip():
+        return rest.strip()
+    return text
+
+
+def history(limit=50, since=0.0):
+    """The conversation with this agent, from its own session transcripts.
+
+    The box this was extracted from served its Telegram chat log. A machine that
+    has no Telegram still has this: Claude Code writes every session to
+    ~/.claude/projects/<project>/, and voice turns are resumed sessions in that
+    same project — so the app's own conversation is in there too, and restoring
+    it is restoring the real thread rather than a copy kept in parallel."""
+    cfg = config()
+    root = pathlib.Path.home() / ".claude" / "projects" / _project_slug(
+        os.path.expanduser(cfg["workdir"]))
+    if not root.is_dir():
+        return []
+    name = (branding().get("bot_name") or "agent")
+    msgs = []
+    files = sorted(root.glob("*.jsonl"), key=lambda p: p.stat().st_mtime,
+                   reverse=True)[:HISTORY_MAX_FILES]
+    for f in files:
+        for line in _tail_lines(f):
+            try:
+                e = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if e.get("type") not in ("user", "assistant") or e.get("isSidechain"):
+                continue                # sidechains are subagents talking to themselves
+            if e.get("isMeta") or e.get("isCompactSummary"):
+                continue
+            text = _entry_text(e)
+            if not text or "identity panel of a voice app" in text:
+                continue                # our own derivation turn is not conversation
+            try:
+                # Transcript stamps are UTC. timegm, not mktime-minus-timezone:
+                # that hack is wrong by an hour under summer time, which is
+                # enough to make `since` skip the messages it was asked for.
+                ts = float(calendar.timegm(
+                    time.strptime(e["timestamp"][:19], "%Y-%m-%dT%H:%M:%S")))
+            except (KeyError, ValueError, TypeError):
+                continue                # no usable clock: sorting it to 1970 is worse
+            if ts <= since:
+                continue
+            role = "user" if e["type"] == "user" else "agent"
+            if role == "user":
+                text = _strip_injected_prefix(text)
+            msgs.append({"role": role, "sender": "you" if role == "user" else name,
+                         "text": text[:2000], "ts": ts})
+        if len(msgs) >= limit * 3:
+            break
+    msgs.sort(key=lambda m: m["ts"])
+    return msgs[-limit:]
+
+
+# ---------------------------------------------------------------- turns
 def session_id(account):
     st = load(STATE, {})
     return st.get("sessions", {}).get(account)
@@ -603,7 +708,7 @@ def capabilities():
     derivation runs before pair.py registers rather than after."""
     # `progress` is unconditional: it costs nothing, and the app treats its absence
     # as an agent that is not there.
-    caps = ["ask", "health", "progress"]
+    caps = ["ask", "health", "progress", "history"]
     b = branding()
     if b:
         caps.append("branding")
@@ -655,6 +760,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"capabilities": capabilities()})
         if kind == "progress":
             return self._send(200, progress())
+        if kind == "history":
+            try:
+                limit = min(int(d.get("limit") or 50), 100)
+            except (TypeError, ValueError):
+                limit = 50
+            try:
+                since = float(d.get("since") or 0)
+            except (TypeError, ValueError):
+                since = 0.0
+            return self._send(200, {"messages": history(limit, since)})
         if kind == "health":
             return self._send(200, health())
         if kind == "branding":
