@@ -1177,6 +1177,18 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"capabilities": capabilities()})
         if kind == "progress":
             return self._send(200, progress())
+        if kind == "qr_spent":
+            # The plane says a login QR was just redeemed. The picture in the
+            # chat is now a code that already worked, so it goes immediately
+            # rather than at the expiry it no longer needs.
+            sys.path.insert(0, str(HERE))
+            try:
+                import qr_send
+                gone = qr_send.spend(str(d.get("sha256") or "")[:64])
+            except Exception as e:
+                return self._send(200, {"ok": True, "deleted": False,
+                                        "reason": str(e)[:120]})
+            return self._send(200, {"ok": True, "deleted": bool(gone)})
         if kind == "history":
             try:
                 limit = min(int(d.get("limit") or 50), 100)
