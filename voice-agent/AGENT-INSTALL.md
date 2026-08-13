@@ -134,7 +134,22 @@ Second trap, if the service runs as root: the CLI refuses
 `--dangerously-skip-permissions` for root. The adapter handles this (`IS_SANDBOX=1`,
 then a prompt-limited retry), but a non-root user is better where the machine allows it.
 
-## 7. Verify from the plane's side, not yours
+## 7. Run the conformance check — before your user finds the gaps
+
+    python3 conformance.py
+
+One request per message type the plane can send, with what breaks in the app when
+each is missing. It exits non-zero if anything REQUIRED is unanswered.
+
+Do this before you tell the operator you are done. Every problem this skill has had
+in the field was a message type nobody had checked: a blank identity panel, a
+crossed-out connect button, an empty chat — each one five minutes to fix and a day to
+notice, because the only detector was a person looking at a phone.
+
+Optional gaps are fine to report and leave: a machine with no chat channel has no
+business pretending it can mirror to one.
+
+## 8. Verify from the plane's side, not yours
 
 A local `curl` proving your own server answers proves nothing about whether the plane
 can reach it. Run:
@@ -154,13 +169,14 @@ Do not report success on a running process. Then ask the operator to speak to th
 and confirm the answer came from this machine's files — something only these files
 would know is the honest test.
 
-## 8. Report back with
+## 9. Report back with
 
 - The `workdir`, and why you chose it
 - The transport, and the public URL the plane will call
 - Service names, and how to check status, logs and restart
 - Where `config.json` lives and that it is `chmod 600`
 - The result of `pair.py --test`, verbatim
+- The `conformance.py` output, verbatim
 - The identity it derived, verbatim — and anything it could not, with where you
   would write that fact so it can
 
@@ -175,5 +191,6 @@ would know is the honest test.
 - [ ] Absolute `PATH` in the unit so `claude` resolves
 - [ ] On NAT: tunnel runs as a service so a new URL re-pairs by itself
 - [ ] Identity derived and checked; blanks understood, not papered over
+- [ ] `conformance.py` exits 0 — no required type unanswered
 - [ ] `pair.py --test` returns ok
 - [ ] A real spoken question answered from this machine's files

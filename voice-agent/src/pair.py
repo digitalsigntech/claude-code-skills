@@ -25,7 +25,7 @@ Two ways to get an account, and they are not equivalent:
   --token    the user already signed up in the app and read the token out of
              Settings. Use this when the account exists.
 """
-import argparse, json, os, pathlib, subprocess, sys, time, urllib.error, urllib.request
+import argparse, hashlib, json, os, pathlib, subprocess, sys, time, urllib.error, urllib.request
 
 HERE = pathlib.Path(__file__).resolve().parent
 CONFIG = HERE / "config.json"
@@ -220,10 +220,11 @@ def show_qr(api, token, name=None, payload_only=False):
 
     blob = json.dumps({"v": 1, "type": "account", "token": qr_token,
                        "name": name or "", "api": api}, separators=(",", ":"))
+    digest = hashlib.sha256(qr_token.encode()).hexdigest()
     if payload_only:
         print(blob)
         print(f"[pair] {note}", file=sys.stderr)
-        return None, exp
+        return None, exp, digest
     png = HERE / "pairing-qr.png"
     try:
         subprocess.run(["qrencode", "-o", str(png), "-s", "8", blob], check=True)
@@ -238,7 +239,7 @@ def show_qr(api, token, name=None, payload_only=False):
                     "raw — install qrencode for an actual QR, or encode it yourself.")
     print(f"\nApp → Scan QR. One scan signs the phone in AND connects this agent."
           f"{png_line}\n{note}")
-    return (png if png.exists() else None), exp
+    return (png if png.exists() else None), exp, digest
 
 
 def main():
@@ -308,7 +309,7 @@ def main():
         # Sweep first: a QR posted by an earlier run may be past its expiry, and
         # the run that posted it is long gone.
         qr_sweep()
-        png, exp = show_qr(api, token,
+        png, exp, digest = show_qr(api, token,
                            identity().get("user_name") or c.get("user_name")
                            or c.get("account"),
                            a.payload)
@@ -320,9 +321,10 @@ def main():
         if chat and png and exp:
             # Sending it and forgetting it are the same operation: whatever posts
             # the credential is what records that it has to come back out.
-            qr_send.send(chat, png, exp,
+            qr_send.send(chat, png, exp, sha256=digest,
                          caption="Agent Voice Mode — scan to sign in. "
-                                 "This code expires and deletes itself.")
+                                 "This code deletes itself once scanned, or at "
+                                 "expiry if it is not.")
         elif chat:
             print("[pair] no rendered PNG or expiry to send; showed it here instead.",
                   file=sys.stderr)

@@ -71,8 +71,20 @@ gateway's own owner id, then a single-entry allowlist. More than one candidate a
 unset rather than guessing: guessing here posts one person's conversation into another
 person's window.
 
-Anything else returns HTTP 400, which the plane reads as "ask-only agent" rather than
-as a failure. That is how an adapter stays compatible with a plane that grows.
+Plus `qr_spent` (a scanned login QR is deleted the moment it is redeemed), and
+`reset`, `log`, `attachments`, `photos` for the chat-side features. Anything else
+returns HTTP 400, which the plane reads as "this agent does not do that" rather than
+as a failure — that is how an adapter stays compatible with a plane that grows.
+
+**Check yourself against the protocol rather than waiting to be told:**
+
+    python3 conformance.py
+
+One request per message type, with what breaks in the app when each is missing, and
+a non-zero exit if anything required is unanswered. This exists because the first
+version of this adapter was extracted by copying a working box's SHAPE and not its
+SURFACE — and every gap that left was then found from the outside, by someone looking
+at a phone.
 
 Stdlib only. No dependencies to install.
 
@@ -271,6 +283,7 @@ with a command-not-found for `claude` — invisible unless you read the logs.
 | `src/voice_agent.py` | The webhook server. Protocol, health, turns, identity panel. |
 | `src/pair.py` | Sign up or register with the plane; `--qr`, `--test`, `--status`. |
 | `src/tunnel.py` | Public URL for machines behind NAT; signs up on first run, re-pairs on URL change. |
-| `src/qr_send.py` | Posts the QR to Telegram and deletes it at expiry. |
+| `src/qr_send.py` | Posts the QR to Telegram; deletes it when scanned, or at expiry. |
+| `src/conformance.py` | Checks this install against every message the plane can send. |
 | `src/config.example.json` | Copy to `config.json`. |
 | `src/*.service.example` | systemd units for the adapter and the tunnel. |

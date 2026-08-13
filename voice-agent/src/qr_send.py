@@ -141,7 +141,41 @@ def _save_pending(rows):
         pass
 
 
-def send(chat, png, expires, caption=""):
+def spend(digest):
+    """A scanned QR is a spent credential: take the picture down NOW.
+
+    The plane fires this the instant a scan token is redeemed. Waiting for the
+    expiry instead leaves a code in the chat that already worked — and the one
+    person who can tell it is spent by looking at it is nobody.
+
+    Keyed by the token's sha256, which is what the plane sends: the token itself
+    never travels back."""
+    rows, hit = _pending(), False
+    if not digest:
+        return False
+    token = bot_token()
+    keep = []
+    for row in rows:
+        if row.get("sha256") == digest and token:
+            try:
+                _call(token, "deleteMessage", {"chat_id": str(row["chat_id"]),
+                                               "message_id": row["message_id"]})
+            except urllib.error.HTTPError:
+                pass                    # already gone, or too old: still spent
+            except (urllib.error.URLError, OSError):
+                keep.append(row)        # transient — let the sweeper try again
+                continue
+            _drop_png(row.get("png"))
+            hit = True
+            continue
+        keep.append(row)
+    if hit:
+        _save_pending(keep)
+        print("[qr] scanned — picture removed", flush=True)
+    return hit
+
+
+def send(chat, png, expires, caption="", sha256=""):
     """Post the QR and write down what has to be taken back."""
     token = bot_token()
     if not token:
@@ -155,7 +189,7 @@ def send(chat, png, expires, caption=""):
     mid = r["result"]["message_id"]
     rows = _pending()
     rows.append({"chat_id": chat, "message_id": mid, "expires": float(expires),
-                 "png": str(png)})
+                 "png": str(png), "sha256": sha256 or ""})
     _save_pending(rows)
     print(f"[qr] sent to chat {chat} (message {mid}); deletes at "
           + time.strftime("%H:%M", time.localtime(expires)))
