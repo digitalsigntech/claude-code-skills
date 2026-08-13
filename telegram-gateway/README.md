@@ -8,7 +8,17 @@ https://github.com/vladeasytag/claude-code-skills — clone it, then read and
 follow telegram-gateway/AGENT-INSTALL.md.
 ```
 
-That is the whole install. [`AGENT-INSTALL.md`](AGENT-INSTALL.md) tells the agent to
+That is the whole install.
+
+### Already installed? Paste this instead
+
+```
+Update the Telegram gateway: pull the latest
+https://github.com/vladeasytag/claude-code-skills and follow
+telegram-gateway/AGENT-UPDATE.md.
+```
+
+[`AGENT-UPDATE.md`](AGENT-UPDATE.md) covers which files are safe to overwrite, which hold your token/allowlist/state and must survive, and how to roll back. [`AGENT-INSTALL.md`](AGENT-INSTALL.md) tells the agent to
 read this README first, then walks it through the parts that decide whether the
 install actually works: finding the right directory, what to ask you for, the
 service-manager `PATH` trap, and verifying a real Telegram round trip before
