@@ -43,9 +43,19 @@ DEFAULT_API = "https://app.agentvoicemode.ai/api/"
 
 def cfg():
     try:
-        return json.loads(CONFIG.read_text())
+        c = json.loads(CONFIG.read_text())
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
+    if "name" in c:
+        # Older installs stored the signup name here — a cache of what was sent,
+        # sitting in the slot meant for a deliberate override, where it outranked
+        # everything derived afterwards. Move it aside; identity decides now.
+        c.setdefault("_signup_name", c.pop("name"))
+        try:
+            save(c)
+        except OSError:
+            pass
+    return c
 
 
 def qr_sweep():
@@ -238,7 +248,7 @@ def main():
     ap.add_argument("--url", help="public HTTPS URL of this agent's webhook")
     ap.add_argument("--signup", action="store_true",
                     help="create the account from here (no app token needed)")
-    ap.add_argument("--name", help="display name for the account (signup only)")
+    ap.add_argument("--name", help="override the derived user name (saved as user_name)")
     ap.add_argument("--identity", action="store_true",
                     help="re-derive the identity panel now (names or logo changed)")
     ap.add_argument("--language", help="ISO 639-1 code you and your user converse in")
@@ -254,7 +264,8 @@ def main():
         print(json.dumps(ident, indent=2))
         c, api = cfg(), (a.api or cfg().get("api") or DEFAULT_API)
         if c.get("token"):
-            sync_account_name(api, c["token"], c.get("name") or ident.get("user_name"))
+            sync_account_name(api, c["token"],
+                              ident.get("user_name") or c.get("user_name"))
         return
 
     c = cfg()
@@ -270,7 +281,7 @@ def main():
     if a.url:
         c["public_url"] = a.url
     if a.name:
-        c["name"] = a.name
+        c["user_name"] = a.name
     if a.language:
         c["language"] = a.language
 
@@ -278,7 +289,7 @@ def main():
         if not url:
             raise SystemExit("--signup needs --url (or run tunnel.py, which supplies one)")
         identity()
-        r = signup(api, url, secret, c.get("name"), c.get("language"))
+        r = signup(api, url, secret, c.get("user_name"), c.get("language"))
         token = r["token"]
         c.update({"token": token, "account": r["account"]})
         save(c)
@@ -297,7 +308,8 @@ def main():
         # the run that posted it is long gone.
         qr_sweep()
         png, exp = show_qr(api, token,
-                           c.get("name") or identity().get("user_name") or c.get("account"),
+                           identity().get("user_name") or c.get("user_name")
+                           or c.get("account"),
                            a.payload)
         chat = a.telegram or c.get("telegram_chat")
         if chat and png and exp:
@@ -335,7 +347,11 @@ def main():
     # Before registering, not after: registering is what makes the plane ask what
     # this agent can do, and the answer includes whether it has an identity panel.
     ident = identity()
-    sync_account_name(api, token, c.get("name") or ident.get("user_name"))
+    # Derived first, config only as a deliberate override. The other order looks
+    # identical and is a trap: signup wrote what it knew then into the same slot,
+    # so the stalest value in the system outranked every later correction — and
+    # a sync that re-asserts it is not self-healing, it is self-inflicting.
+    sync_account_name(api, token, ident.get("user_name") or c.get("user_name"))
     register(api, token, url, secret)
     print("now run:  python3 pair.py --test")
 
