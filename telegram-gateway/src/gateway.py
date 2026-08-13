@@ -892,7 +892,7 @@ def _reminder_owner(msg):
 
 def handle_text(msg, chat_id, text):
     # Match just the first token, lowercased, with the @botname suffix (added in
-    # groups, e.g. "/clear@Claude_DST_bot") stripped — so commands work everywhere.
+    # groups, e.g. "/clear@your_bot") stripped — so commands work everywhere.
     word = text.strip().split(maxsplit=1)[0].lower() if text.strip() else ""
     command = word.split("@")[0]
     _arc_in(msg, chat_id, text, kind="command" if command.startswith("/") else "text")
