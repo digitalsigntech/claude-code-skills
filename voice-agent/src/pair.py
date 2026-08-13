@@ -110,6 +110,25 @@ def _with_propagation_retry(attempt, label, tries=6, wait=10):
     raise SystemExit(last)
 
 
+def sync_account_name(api, token, name):
+    """Keep the plane's account name equal to the person's name.
+
+    It is written once at signup from whatever was known then — on the demo box
+    that was the company, and the app's Account screen showed a company where the
+    owner's name belongs. Anything derived once and never revisited is a typo with
+    a long life, so every pairing re-asserts it. Older planes have no route for
+    this and answer 404; that is not a failure worth stopping an install for."""
+    if not name:
+        return
+    try:
+        r = call(api, "/account", token, {"name": name})
+        if r.get("name"):
+            print(f"[pair] account name: {r['name']}")
+    except SystemExit as e:
+        if "HTTP 404" not in str(e):
+            print(f"[pair] could not set the account name: {e}", file=sys.stderr)
+
+
 def register(api, token, url, secret):
     """Tell the plane where to find this agent. The plane probes the URL now,
     so a failure here means it genuinely could not reach you — not a stored
@@ -217,7 +236,11 @@ def main():
     a = ap.parse_args()
 
     if a.identity:
-        print(json.dumps(identity(force=True), indent=2))
+        ident = identity(force=True)
+        print(json.dumps(ident, indent=2))
+        c, api = cfg(), (a.api or cfg().get("api") or DEFAULT_API)
+        if c.get("token"):
+            sync_account_name(api, c["token"], c.get("name") or ident.get("user_name"))
         return
 
     c = cfg()
@@ -283,7 +306,8 @@ def main():
         raise SystemExit("need --url (or run tunnel.py if this machine has no public address)")
     # Before registering, not after: registering is what makes the plane ask what
     # this agent can do, and the answer includes whether it has an identity panel.
-    identity()
+    ident = identity()
+    sync_account_name(api, token, c.get("name") or ident.get("user_name"))
     register(api, token, url, secret)
     print("now run:  python3 pair.py --test")
 
