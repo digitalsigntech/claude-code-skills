@@ -46,8 +46,10 @@ app phoning home.
 A quick tunnel's URL changes whenever it restarts, so `tunnel.py` is a supervisor: it
 watches the tunnel and **re-registers the new URL with the plane automatically**. That
 is the difference between this and a one-line `cloudflared` command that works until
-the first restart. For a permanent address, use a Cloudflare *named* tunnel and pass
-its hostname to `pair.py --url` instead.
+the first restart. A fresh hostname also takes ~10–30 s to resolve from the plane's
+side, so registering it retries instead of accepting the first "does not resolve" —
+otherwise every tunnel restart leaves the agent silently unreachable. For a permanent
+address, use a Cloudflare *named* tunnel and pass its hostname to `pair.py --url`.
 
 ## Install
 
@@ -60,15 +62,28 @@ its hostname to `pair.py --url` instead.
        python3 voice_agent.py
 
    A `secret` is generated on first run — that is the bearer the plane must present.
-4. **Get your account token** from the app (Settings, or the pairing QR).
-5. **Pair**:
+4. **Pair.** If you already have an account, its token is in the app (Settings, or the
+   pairing QR). If you do not, the agent creates one — you need nothing beforehand:
 
-       # public machine
+       # public machine, existing account
        python3 pair.py --api https://<plane>/api/ --token <token> --url https://you/voice
 
-       # no public IP
-       python3 pair.py --api https://<plane>/api/ --token <token>   # saves them
-       python3 tunnel.py                                            # URL + pairing
+       # public machine, no account yet
+       python3 pair.py --signup --api https://<plane>/api/ --url https://you/voice
+
+       # no public IP — the tunnel does both, in the only order that works
+       python3 pair.py --api https://<plane>/api/     # save the plane address
+       python3 tunnel.py                              # URL, then signup or re-pair
+
+   The plane **probes the webhook before it creates an account**, so the account
+   cannot exist before the URL does. That is why a NAT machine signs up from inside
+   `tunnel.py` and not before it.
+
+5. **Sign the phone in** — `python3 pair.py --qr`. One scan signs the app in *and*
+   the agent is already attached. The code carries a short-lived scan-token (~15 min,
+   dies unscanned), never the stored account credential. `qrencode` renders it in the
+   terminal and to `pairing-qr.png`; without it the payload is printed raw so the
+   install is never blocked on a rendering tool.
 
 6. **Verify** — from the plane's side, not yours:
 
@@ -111,7 +126,7 @@ with a command-not-found for `claude` — invisible unless you read the logs.
 | File | What it is |
 |---|---|
 | `src/voice_agent.py` | The webhook server. Protocol, health, turns. |
-| `src/pair.py` | Register with the plane; `--test`, `--status`. |
-| `src/tunnel.py` | Public URL for machines behind NAT; re-pairs on URL change. |
+| `src/pair.py` | Sign up or register with the plane; `--qr`, `--test`, `--status`. |
+| `src/tunnel.py` | Public URL for machines behind NAT; signs up on first run, re-pairs on URL change. |
 | `src/config.example.json` | Copy to `config.json`. |
 | `src/*.service.example` | systemd units for the adapter and the tunnel. |

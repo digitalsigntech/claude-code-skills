@@ -43,19 +43,36 @@ ip -4 addr show scope global | grep -oP 'inet \K[\d.]+'   # our local addresses
   Traefik): use the direct transport. Add a route that proxies to `127.0.0.1:8787`,
   then pair with that URL. Do not open the adapter's port to the world directly —
   keep the bind on localhost and let the proxy do TLS.
-- **They differ, or nothing serves HTTPS**: this machine is behind NAT. Use
-  `tunnel.py`. Install `cloudflared` (a single binary) if it is missing.
+- **They differ, or nothing serves HTTPS**: this machine is behind NAT — the common
+  case, and fully supported. Use `tunnel.py`: it gets a public HTTPS URL over an
+  outbound connection, signs up or re-pairs with it, and keeps doing so every time
+  the URL moves. Install `cloudflared` (a single binary) if it is missing — on PATH,
+  in `$CLOUDFLARED`, or dropped beside the scripts.
 
 If you are unsure, prefer the tunnel: it works in both cases.
 
-## 3. Ask the operator for this — do not guess
+## 3. Get the account — two routes, and the NAT one has an order
 
-**The account token**, from the app's Settings or its pairing QR. It authenticates
-the pairing call. Store it in `config.json` (`chmod 600`), never print it back into
-the chat, never commit it.
+**If the operator already has the app and an account**, ask them for the account
+token (app Settings, or its pairing QR) and pair with `--token`. You cannot derive
+it: it is the credential that says which account this agent belongs to.
 
-You cannot obtain it yourself, and there is no way around that: it is the credential
-that says which account this agent belongs to.
+**If they have no account yet**, create it from here — that is the normal case, and
+it means the operator needs nothing beforehand:
+
+    python3 pair.py --signup --api https://<plane>/api/ --url <your public URL>
+    python3 pair.py --qr        # show them this; one scan signs their phone in
+
+Order matters and cannot be swapped: the plane **probes the webhook before it
+creates anything**, so the adapter must already be serving at a publicly reachable
+URL. On a NAT machine you do not run `--signup` by hand at all — `tunnel.py` does
+it for you the moment the tunnel URL exists, because until then there is no URL to
+sign up with. Then show the QR.
+
+Either way `config.json` ends up holding the token: `chmod 600`, never print it back
+into a chat, never commit it. The QR is a different, short-lived thing (~15 min,
+one scan) — that one is safe to show, but if you put it in a chat, delete the
+message at expiry.
 
 ## 4. Run both pieces as services
 

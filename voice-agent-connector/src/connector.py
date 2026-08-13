@@ -28,9 +28,11 @@ import hmac
 import json
 import os
 import secrets
+import shutil
 import subprocess
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 DIR = os.path.dirname(os.path.abspath(__file__))
@@ -44,7 +46,11 @@ def load_config():
         conf = {"secret": secrets.token_hex(32),
                 "path": secrets.token_hex(16),
                 "agent_cmd": ["claude", "--continue", "-p", "{question}"],
-                "agent_cmd_fresh": ["claude", "-p", "{question}"]}
+                "agent_cmd_fresh": ["claude", "-p", "{question}"],
+                # Where turns run. Point this at the project you want to talk
+                # to; the default answers from this directory, which contains
+                # only the connector itself.
+                "workdir": DIR}
         with open(CONF_PATH, "w") as f:
             json.dump(conf, f, indent=1)
         os.chmod(CONF_PATH, 0o600)
@@ -56,11 +62,25 @@ def load_config():
 CONF = load_config()
 
 
+def agent_env():
+    """The CLI refuses --dangerously-skip-permissions when the process is root,
+    which is exactly how a single-purpose box runs a service: every turn fails
+    instantly with a message about sudo that says nothing about voice.
+    IS_SANDBOX=1 is the CLI's own acknowledgement that the risk was accepted."""
+    env = dict(os.environ)
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        env.setdefault("IS_SANDBOX", "1")
+    return env
+
+
 def run_agent(question):
+    workdir = os.path.expanduser(CONF.get("workdir") or DIR)
+
     def attempt(argv):
         argv = [a.replace("{question}", question) for a in argv]
         return subprocess.run(argv, capture_output=True, text=True,
-                              timeout=AGENT_TIMEOUT_S, cwd=DIR)
+                              timeout=AGENT_TIMEOUT_S, cwd=workdir,
+                              env=agent_env())
     p = attempt(CONF["agent_cmd"])
     if p.returncode != 0 and CONF.get("agent_cmd_fresh"):
         p = attempt(CONF["agent_cmd_fresh"])
@@ -68,6 +88,36 @@ def run_agent(question):
         raise RuntimeError(f"agent exited {p.returncode}: "
                            f"{(p.stderr or '')[:200]}")
     return p.stdout.strip()[:8000]
+
+
+SIGNED_OUT_HINT = ("no agent credentials on this machine — run the agent CLI "
+                   "in a terminal HERE and log in. Re-pairing will not fix it.")
+
+
+def health():
+    """File reads only. A test that runs a model turn times out behind the very
+    turn it started, and reports a healthy agent as unreachable."""
+    exe = shutil.which((CONF.get("agent_cmd") or ["claude"])[0])
+    if not exe:
+        return {"ok": False, "signed_out": True,
+                "detail": "the agent CLI was not found on this machine"}
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return {"ok": True}
+    cred = os.path.expanduser("~/.claude/.credentials.json")
+    if not os.path.exists(cred):
+        return {"ok": False, "signed_out": True, "detail": SIGNED_OUT_HINT}
+    try:
+        oauth = json.load(open(cred)).get("claudeAiOauth", {})
+    except (ValueError, OSError) as e:
+        return {"ok": False, "signed_out": True,
+                "detail": f"credentials unreadable: {e}"}
+    # The access token refreshes itself; only the refresh token expiring is fatal.
+    exp = int(oauth.get("refreshTokenExpiresAt") or 0) / 1000
+    if exp and exp < time.time():
+        return {"ok": False, "signed_out": True,
+                "detail": "the agent's login on this machine has expired — " +
+                          SIGNED_OUT_HINT}
+    return {"ok": True}
 
 
 class H(BaseHTTPRequestHandler):
@@ -97,7 +147,9 @@ class H(BaseHTTPRequestHandler):
             # and the app shows only those features. A CLI agent is ask-only;
             # richer connectors may add groups/attachments/photo/file — see
             # the protocol notes in README.md.
-            return self._send(200, {"capabilities": ["ask"]})
+            return self._send(200, {"capabilities": ["ask", "health"]})
+        if t == "health":
+            return self._send(200, health())
         if t != "ask":
             return self._send(400, {"error": f"unsupported type {t!r}"})
         q = str(d.get("question", ""))[:4000]
