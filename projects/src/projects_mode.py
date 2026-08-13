@@ -3,7 +3,8 @@
 A "project chat" is a Telegram group bound to a project directory under
 DST/projects/<slug>/ (e.g. "PHD R&D with Claude" → projects/phd-rd/). Everything
 the owner posts there — text, voice notes, photos, documents — is filed
-deterministically into the project, organized for quick retrieval:
+deterministically into the project (the owner, 2026-07-19), organized for quick
+retrieval:
 
     projects/<slug>/
       PROJECT.md          wiki-style overview: goals, decisions, links (LLM-editable)
@@ -12,8 +13,8 @@ deterministically into the project, organized for quick retrieval:
       notes/YYYY-MM.md    chronological lab-notebook of text posts + voice transcripts
 
 Processing policy: image/document analysis is done by the LOCAL-policy LLM only
-(Nemotron — on OpenRouter until local hardware lands, same interim the owner accepted
-for email extraction; never cloud Claude). Voice transcription is whisper.cpp on-box.
+(Nemotron — on OpenRouter until the DGX Spark lands, same interim the owner accepted for
+email extraction; never cloud Claude). Voice transcription is whisper.cpp on-box.
 
 Privacy switch per chat: "wisdom" = the conversational turn runs on cloud Claude;
 "privacy" = it runs on the Nemotron private path. The current mode is shown as a
@@ -208,14 +209,14 @@ def file_file(slug, src_path, sender, annotation, kind):
 
 
 # ---- local-policy analysis (Nemotron; NEVER cloud Claude) -------------------
-def _or_chat(messages, model, max_tokens=400):
+def _or_chat(messages, model, max_tokens=400, read_timeout=120):
     key = _or_key()
     if not key:
         raise RuntimeError("no OpenRouter key")
     r = requests.post(OR_URL, json={
         "model": model, "temperature": 0.2, "max_tokens": max_tokens,
         "reasoning": {"enabled": False}, "messages": messages},
-        headers={"Authorization": f"Bearer {key}"}, timeout=(10, 120))
+        headers={"Authorization": f"Bearer {key}"}, timeout=(10, read_timeout))
     r.raise_for_status()
     out = (r.json().get("choices") or [{}])[0].get("message", {}).get("content", "")
     if not out.strip():
@@ -240,7 +241,14 @@ def annotate_image(path):
                 {"type": "text", "text": "Annotate this project photo."},
                 {"type": "image_url",
                  "image_url": {"url": f"data:image/{ext};base64,{b64}"}}]}],
-            OR_VISION_MODEL, max_tokens=300)
+            # 45s, not the default 120 (2026-08-11, measured over six calls
+            # on the same image): the free vision tier either answers in about
+            # five seconds or hangs for TWO MINUTES and returns nothing. With
+            # the long timeout the caller's three retries could burn six
+            # minutes and still come back empty, so the retry was decorative.
+            # A short ceiling turns a hung call into a fast failure that the
+            # retry can actually do something about.
+            OR_VISION_MODEL, max_tokens=300, read_timeout=45)
     except Exception as e:
         print(f"[projects] image annotation failed for {path}: {e}", flush=True)
         return None

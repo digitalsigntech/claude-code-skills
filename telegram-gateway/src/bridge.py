@@ -142,10 +142,30 @@ def _take_notes(chat_id):
         return ""
 
 
+def _account_line(sender):
+    """User-accounts privilege briefing (operations/accounts, 2026-07-29):
+    resolve the sender's Telegram id to an account and return the enforcement
+    line for the turn. Owner's own line is skipped as noise — full privileges
+    are the baseline. Best-effort: accounts must never break a turn."""
+    try:
+        import re as _re
+        m = _re.search(r"\bid (\d+)\b", sender or "")
+        if not m or m.group(1) == "C.OWNER_ID":     # the owner: owner baseline
+            return None
+        import sys as _sys
+        _sys.path.insert(0, os.path.expanduser("~/DST/operations/accounts"))
+        import accounts
+        return accounts.context_line(int(m.group(1)))
+    except Exception:
+        return None
+
+
 def _chat_context(chat_id, sender=None):
     ent = _load().get(str(chat_id)) or {}
     title, ctype = ent.get("title"), ent.get("ctype")
     frm = f" This message is from: {sender}." if sender else ""
+    acct = _account_line(sender)
+    frm += f"\n{acct}" if acct else ""
     if title:
         return f'[You are in the Telegram {ctype or "group"} "{title}" (chat_id {chat_id}).{frm}]'
     if sender:
@@ -202,6 +222,34 @@ def _run(cmd):
     return (d.get("result") or "").strip(), None
 
 
+# #136 (the app developer's agent, after the app painted an auth failure green): the difference
+# between "the agent answered" and "the agent is signed out of its own account"
+# cannot be read out of prose — his harness turned a real answer red because it
+# contained the sentence "Earlier there was an error: the build failed".
+#
+# It does not have to be read out of prose. WE generate the failure string, and
+# the CLI exits non-zero, so the classification is ours to state rather than to
+# guess. These markers are the same ones operations/health/auth_check.py has
+# used against the real thing since it was written; they are matched ONLY
+# against the CLI's own stderr, never against anything a model wrote.
+AUTH_MARKERS = ("oauth", "401", "unauthorized", "authentication", "invalid_grant",
+                "invalid api key", "please run /login", "credentials")
+ERROR_SENTINEL = "⚠️ Claude error: "
+
+
+def classify_error(text):
+    """'signed_out', 'agent_error', or None for an ordinary answer.
+
+    Keyed on OUR sentinel, not on the words in the reply: a real answer that
+    happens to discuss an error never starts with it.
+    """
+    t = (text or "")
+    if not t.startswith(ERROR_SENTINEL):
+        return None
+    err = t[len(ERROR_SENTINEL):].lower()
+    return "signed_out" if any(m in err for m in AUTH_MARKERS) else "agent_error"
+
+
 def ask(chat_id, prompt, sender=None):
     prompt = _augment(chat_id, prompt, sender)
     with _chat_lock(chat_id):
@@ -215,7 +263,7 @@ def ask(chat_id, prompt, sender=None):
             sid = str(uuid.uuid4())
             text, err = _run(_base_cmd(prompt) + ["--output-format", "json", "--session-id", sid])
         if err is not None:
-            return f"⚠️ Claude error: {err}"
+            return f"{ERROR_SENTINEL}{err}"
         _mark_inited(chat_id, sid)
         return text or "(Claude returned an empty reply.)"
 

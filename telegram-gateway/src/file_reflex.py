@@ -14,9 +14,9 @@ random." One verb surface, three sources, strict matching, no LLM turn:
  3. workspace files — a cached walk of the DST tree (~4k files, refreshed every
     2 min); a file qualifies only when every distinctive query token appears in its
     name or parent folders. Best precision wins; ties go to the newest file.
-    DM chats + Always-Nemotron private groups ONLY (those are private channels
-    whose agent may send workspace files anyway, so the reflex may too) — other
-    group chats never get arbitrary workspace files, just registry
+    DM chats + the Always-Nemotron private group ONLY (the owner 2026-07-27: that group
+    is a private channel whose agent may send workspace files anyway, so the reflex
+    may too) — other group chats never get arbitrary workspace files, just registry
     docs + KB images. Secrets (token/credential/key/.env), databases and the
     mail/telegram/chatlog trees are never indexed.
 
@@ -41,7 +41,7 @@ LEAD = r"(?:please\s+|pls\s+)?(?:can\s+you\s+|could\s+you\s+|would\s+you\s+)?"
 ASK = re.compile(
     rf"^{LEAD}{VERB}\s+(?:me\s+|us\s+)?(?:my\s+|the\s+|a\s+|an\s+|some\s+|our\s+"
     rf"|that\s+|this\s+)?(?P<q>.+?)(?:\s+(?:please|pls))?\s*[.!?]*$", re.I)
-# The object must be a noun phrase, not a question ("get me whatever Alex said" and
+# The object must be a noun phrase, not a question ("get me whatever the friend account said" and
 # "show me how the pass looks" belong to Claude).
 QUESTION_WORD = re.compile(r"\b(how|why|when|who|whom|which|what|where|should|could|"
                            r"would|do|does|did|is|are|was|were)\b", re.I)
