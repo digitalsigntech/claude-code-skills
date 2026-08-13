@@ -69,11 +69,10 @@ def cloudflared_bin():
 def run():
     c = cfg()
     port = int(c.get("port", 8787))
-    api, token, secret = c.get("api"), c.get("token"), c.get("secret")
+    api = c.get("api") or pair.DEFAULT_API
+    token, secret = c.get("token"), c.get("secret")
     if not secret:
         raise SystemExit("no webhook secret yet — start voice_agent.py once to generate one")
-    if not api:
-        raise SystemExit("no plane API yet — run `pair.py --api https://<plane>/api/` once")
     cf = cloudflared_bin()
     if not cf:
         raise SystemExit(

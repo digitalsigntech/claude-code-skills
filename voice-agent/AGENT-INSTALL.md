@@ -60,8 +60,12 @@ it: it is the credential that says which account this agent belongs to.
 **If they have no account yet**, create it from here — that is the normal case, and
 it means the operator needs nothing beforehand:
 
-    python3 pair.py --signup --api https://<plane>/api/ --url <your public URL>
+    python3 pair.py --signup --url <your public URL>
     python3 pair.py --qr        # show them this; one scan signs their phone in
+
+You do not need to ask which plane to pair with, and the operator will not know:
+`pair.py` defaults to the service behind the app. `--api` overrides it, and the only
+reason to pass it is a different deployment.
 
 Order matters and cannot be swapped: the plane **probes the webhook before it
 creates anything**, so the adapter must already be serving at a publicly reachable

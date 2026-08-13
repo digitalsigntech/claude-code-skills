@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Pair this machine's agent with the voice plane.
 
-    python3 pair.py --signup --api https://…/api/ --url https://…/
+    python3 pair.py --signup --url https://…/
                                     # no account yet: create one from here
-    python3 pair.py --api https://…/api/ --token <account token> --url https://…/
+    python3 pair.py --token <account token> --url https://…/
                                     # account already exists (token from the app)
     python3 pair.py --qr            # login QR for the phone (one scan = signed in)
     python3 pair.py --test          # ask the plane to test the connection
     python3 pair.py --status        # what the plane currently has registered
 
-`--url` is the address the PLANE will call. It must be reachable from the public
+`--api` defaults to the plane behind the Agent Voice Mode app; pass it only to point
+at a different deployment. `--url` is the address the PLANE will call. It must be reachable from the public
 internet and serve HTTPS. If this machine has no public address, run `tunnel.py`
 instead — it creates the URL, signs up or re-registers with it, and keeps it fresh.
 
@@ -26,6 +27,12 @@ import argparse, json, os, pathlib, subprocess, sys, time, urllib.error, urllib.
 
 HERE = pathlib.Path(__file__).resolve().parent
 CONFIG = HERE / "config.json"
+
+# The plane this adapter talks to by default — the service behind the Agent Voice
+# Mode app. An installer cannot derive this and has nowhere to look it up, so a
+# placeholder here is a blocker, not a configuration choice. Override with --api
+# (or "api" in config.json) to point at a different deployment.
+DEFAULT_API = "https://2-24-102-182.sslip.io/api/"
 
 
 def cfg():
@@ -167,7 +174,7 @@ def show_qr(api, token, name=None, payload_only=False):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--api", help="plane API base, e.g. https://host/api/")
+    ap.add_argument("--api", help=f"plane API base (default {DEFAULT_API})")
     ap.add_argument("--token", help="account token from the app")
     ap.add_argument("--url", help="public HTTPS URL of this agent's webhook")
     ap.add_argument("--signup", action="store_true",
@@ -181,10 +188,8 @@ def main():
     a = ap.parse_args()
 
     c = cfg()
-    api = a.api or c.get("api")
+    api = a.api or c.get("api") or DEFAULT_API
     token = a.token or c.get("token")
-    if not api:
-        raise SystemExit("need --api at least once (it is then saved)")
 
     secret = c.get("secret")
     if not secret:
