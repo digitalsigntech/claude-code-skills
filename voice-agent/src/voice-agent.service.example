@@ -1,0 +1,19 @@
+# /etc/systemd/system/voice-agent.service
+# systemctl daemon-reload && systemctl enable --now voice-agent
+[Unit]
+Description=Voice agent adapter
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/voice-agent
+ExecStart=/usr/bin/python3 /opt/voice-agent/voice_agent.py
+Restart=always
+RestartSec=5
+# The adapter shells out to `claude`. systemd does NOT inherit a login PATH, so
+# without this the service starts and then fails on every turn.
+Environment=PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HOME=/root
+
+[Install]
+WantedBy=multi-user.target

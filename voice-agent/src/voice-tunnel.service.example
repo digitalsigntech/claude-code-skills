@@ -1,0 +1,18 @@
+# /etc/systemd/system/voice-tunnel.service
+# Only for machines with no public address. Pairs on every URL change.
+[Unit]
+Description=Voice agent public tunnel
+After=voice-agent.service
+Requires=voice-agent.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/voice-agent
+ExecStart=/usr/bin/python3 /opt/voice-agent/tunnel.py
+Restart=always
+RestartSec=10
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=HOME=/root
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,9 @@
+{
+  "workdir": "/path/to/the/project/the/agent/should/work/in",
+  "port": 8787,
+  "bind": "127.0.0.1",
+  "model": "",
+  "turn_timeout": 870,
+  "api": "https://<plane-host>/api/",
+  "token": "<account token from the app>"
+}
