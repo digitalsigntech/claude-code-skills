@@ -15,16 +15,16 @@ CHANGED chunks and drops chunks whose text disappeared (edits/deletes handled). 
 import os, re, sys, json, glob, hashlib, argparse, urllib.request
 import numpy as np
 
-# Default: the company knowledge base. Point APP_KB_ROOT (+ optional APP_KB_DIRS,
+# Default: a knowledge base under your home. Point KB_ROOT (+ optional KB_DIRS,
 # comma-separated, "." = whole tree) at any other directory to index it — the store
 # lives in <root>/.kb_index, so every root gets its own independent index
 # (used by projects/pk for per-project R&D indexes).
-KB_ROOT = os.path.expanduser(os.environ.get("APP_KB_ROOT", "~/the company/knowledge-base"))
+KB_ROOT = os.path.expanduser(os.environ.get("KB_ROOT", "~/workspace/knowledge-base"))
 INDEX_DIRS = [d.strip() for d in os.environ.get(
-    "APP_KB_DIRS", "products,company,faq,technical,from-emails").split(",") if d.strip()]
+    "KB_DIRS", "products,company,faq,technical,from-emails").split(",") if d.strip()]
 STORE = os.path.join(KB_ROOT, ".kb_index")
 VECS_F, META_F = os.path.join(STORE, "vectors.npy"), os.path.join(STORE, "meta.json")
-EMB_URL = os.environ.get("APP_EMBED_URL", "http://127.0.0.1:18183/v1/embeddings")
+EMB_URL = os.environ.get("KB_EMBED_URL", "http://127.0.0.1:18183/v1/embeddings")
 DIM, BATCH, MAX_CHARS = 768, 64, 900
 
 
@@ -163,7 +163,7 @@ def cmd_search(a):
         print(f"\n[{h['score']}] {h['source']}\n  {snippet[:300]}{'…' if len(snippet)>300 else ''}")
 
 
-ANSWER_THRESH = float(os.environ.get("APP_KB_ANSWER_THRESH", "0.74"))
+ANSWER_THRESH = float(os.environ.get("KB_ANSWER_THRESH", "0.74"))
 
 
 def cmd_ask(a):
