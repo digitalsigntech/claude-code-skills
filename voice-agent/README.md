@@ -66,14 +66,17 @@ address, use a Cloudflare *named* tunnel and pass its hostname to `pair.py --url
    pairing QR). If you do not, the agent creates one — you need nothing beforehand:
 
        # public machine, existing account
-       python3 pair.py --api https://<plane>/api/ --token <token> --url https://you/voice
+       python3 pair.py --token <token> --url https://you/voice
 
        # public machine, no account yet
-       python3 pair.py --signup --api https://<plane>/api/ --url https://you/voice
+       python3 pair.py --signup --url https://you/voice
 
        # no public IP — the tunnel does both, in the only order that works
-       python3 pair.py --api https://<plane>/api/     # save the plane address
-       python3 tunnel.py                              # URL, then signup or re-pair
+       python3 tunnel.py                  # URL, then signup or re-pair
+
+   The plane address is already set: these scripts default to the service behind the
+   Agent Voice Mode app. Pass `--api https://<host>/api/` only to use a different
+   deployment.
 
    The plane **probes the webhook before it creates an account**, so the account
    cannot exist before the URL does. That is why a NAT machine signs up from inside
