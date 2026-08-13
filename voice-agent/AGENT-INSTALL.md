@@ -87,12 +87,15 @@ for this to happen. Look at the result:
 
     python3 voice_agent.py --identity
 
-**A field that came back empty is usually correct.** Every value has to appear in the
-project's own files or it is dropped, because an agent asked who its user is will
-otherwise answer from the account the CLI is signed in as — a real person with nothing
-to do with this install. If a name is missing and the operator wants it shown, the fix
-is to write it where it belongs (`CLAUDE.md`, a company file) and re-derive — not to
-hand-set it here. That way the next agent to read this project knows it too.
+**A field that came back empty is usually correct.** Values have to be attested — the
+company, user and email in the project's own files, your own name in how the user
+actually addresses you in this project's session logs. An agent asked who its user is
+with nothing to read will otherwise answer from the account the CLI is signed in as: a
+real person with nothing to do with this install.
+
+If something is missing and the operator wants it shown, the fix is usually to write it
+where it belongs (`CLAUDE.md`, a company file) and re-derive — then the next agent to
+read this project knows it too.
 
 Override in `config.json` (`agent_name`, `company_name`, `user_name`, `user_email`,
 `logo`) only for something the files genuinely should not say.

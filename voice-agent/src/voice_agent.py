@@ -223,8 +223,15 @@ global configuration, not from any conversation you remember, not from general
 knowledge. If this project does not state a fact, it is null, even if you believe
 you know it: the wrong person's name on a stranger's phone is the failure here.
 
-{"agent_name": "the name your user calls YOU in this project, e.g. from CLAUDE.md;
-                null if this project gives you no name of your own",
+ONE EXCEPTION, and only for agent_name: your own name is something users say rather
+than write down, so the addresses listed at the end of this prompt (taken from this
+project's own conversation logs) count as evidence for it. Nothing else may come
+from them.
+
+{"agent_name": "the name your user calls YOU. If the candidates listed below are
+                present, choose the one that is actually your name and not a person
+                you work with; otherwise take it from this project's files. null if
+                you have no name of your own here",
  "company_name": "the company or organisation whose work lives here; null if none",
  "user_name": "the full name of the person you work for here; null if unknown",
  "user_email": "their email address; null if unknown",
@@ -258,6 +265,100 @@ def scan_logo(workdir):
 
 SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".cache",
              "dist", "build", ".next", "target"}
+
+# Words that open a sentence and look exactly like a name in vocative position.
+NOT_A_NAME = {
+    "yes", "no", "ok", "okay", "also", "and", "but", "so", "then", "now", "well",
+    "please", "thanks", "thank", "good", "great", "sorry", "actually", "just",
+    "still", "next", "first", "second", "last", "times", "note", "todo", "done",
+    "fix", "add", "make", "run", "check", "read", "write", "send", "use", "let",
+    "can", "could", "would", "should", "did", "does", "is", "are", "was", "the",
+    "this", "that", "there", "here", "what", "why", "how", "when", "where", "who",
+    "placeholder", "example", "test", "hi", "hey", "hello", "morning", "evening",
+    # Header-ish words: pasted mail and logs are full of "Subject:", "From:",
+    # "For, ..." and they sit in exactly the position a name sits in.
+    "subject", "from", "to", "date", "re", "fwd", "cc", "bcc", "summary", "for",
+    "mobile", "phone", "email", "sent", "sincerely", "regards", "best", "dear",
+}
+VOCATIVE = (
+    re.compile(r"^\s*(?:hi|hey|hello|thanks|thank you|ok|okay)[,! ]+([A-Z][a-z]{1,15})\b", re.M),
+    # Comma only, never a colon: "Subject: …" and "Note: …" sit in exactly the
+    # position a name sits in, and a pasted email would out-vote the real answer.
+    re.compile(r"^\s*([A-Z][a-z]{1,15}),\s", re.M),
+    re.compile(r"\b(?:thanks|thank you|cheers)[,! ]+([A-Z][a-z]{1,15})\b", re.I),
+)
+# Being told outright beats being addressed: rare, but decisive when present.
+NAMED = (
+    re.compile(r"\byou(?:'re| are)\s+(?:called\s+)?([A-Z][a-z]{1,15})\b"),
+    re.compile(r"\byour name is\s+([A-Z][a-z]{1,15})\b", re.I),
+    re.compile(r"\bwe(?:'ll| will)? call you\s+([A-Z][a-z]{1,15})\b", re.I),
+)
+
+
+def _project_slug(workdir):
+    """Claude Code stores a project's sessions under a path-derived directory."""
+    return "-" + re.sub(r"[^A-Za-z0-9]+", "-", os.path.abspath(workdir)).strip("-")
+
+
+def address_candidates(workdir, max_messages=600):
+    """Names the USER uses to address this agent, counted from its own sessions.
+
+    An agent's name is the one identity fact that is never written down: it is
+    established by being used. "You are Max" appears in no file on Max's machine,
+    and asking the operator to add it is asking them to configure the thing we
+    said would configure itself. The transcripts are where it does exist.
+
+    Counted here rather than judged by a model: a count is evidence, and it is
+    the difference between reading a name and inventing one."""
+    root = pathlib.Path.home() / ".claude" / "projects" / _project_slug(workdir)
+    if not root.is_dir():
+        return {}
+    hits, seen = {}, 0
+    for f in sorted(root.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            for line in f.open(errors="ignore"):
+                if seen >= max_messages:
+                    break
+                try:
+                    d = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if d.get("type") != "user":
+                    continue
+                content = (d.get("message") or {}).get("content")
+                if isinstance(content, list):
+                    content = " ".join(c.get("text", "") for c in content
+                                       if isinstance(c, dict))
+                if not isinstance(content, str) or not content.strip():
+                    continue
+                if "identity panel of a voice app" in content:
+                    # Our own derivation turn, logged like any other user message.
+                    # Left in, the names it lists become evidence for the next run
+                    # citing itself — a fact that gets truer every week without
+                    # anyone ever saying it again.
+                    continue
+                seen += 1
+                for rx, weight in [(r, 1) for r in VOCATIVE] + [(r, 10) for r in NAMED]:
+                    for name in rx.findall(content):
+                        name = name.strip().title()
+                        if name.lower() in NOT_A_NAME:
+                            continue
+                        h = hits.setdefault(name, {"count": 0, "sessions": set(),
+                                                   "samples": []})
+                        h["count"] += weight
+                        h["sessions"].add(f.name)
+                        if len(h["samples"]) < 2:
+                            h["samples"].append(" ".join(content.split())[:120])
+        except OSError:
+            continue
+        if seen >= max_messages:
+            break
+    for h in hits.values():
+        h["sessions"] = len(h["sessions"])
+    # Spread across sessions before raw count: a name the user comes back to is
+    # the agent's; a name that spikes inside one pasted email is a colleague's.
+    return dict(sorted(hits.items(),
+                       key=lambda kv: (-kv[1]["sessions"], -kv[1]["count"])))
 
 
 def attested(value, workdir, max_files=2000, max_bytes=2_000_000):
@@ -307,7 +408,29 @@ def derive_identity(timeout=180):
     if os.geteuid() == 0:
         env.setdefault("IS_SANDBOX", "1")
 
-    cmd = [exe, "-p", IDENTITY_PROMPT, "--dangerously-skip-permissions"]
+    # Names the user has actually used to address this agent, counted from its own
+    # sessions. Offered as candidates, never as the answer: the model picks which
+    # one is its name, and can only pick one that was really said.
+    cands = address_candidates(workdir)
+    prompt = IDENTITY_PROMPT
+    if cands:
+        listed = "\n".join(
+            f"- {n}: addressed {h['count']}x across {h['sessions']} session(s), "
+            f"e.g. {' | '.join(repr(x) for x in h['samples'])}"
+            for n, h in list(cands.items())[:5])
+        prompt += (
+            "\n\nEvidence for agent_name — names used in an address position in this "
+            f"project's own conversation logs:\n{listed}\n\n"
+            "Every message in those logs was written TO you, so a name in the "
+            "greeting position is usually yours. It is NOT yours when the line is "
+            "quoted or forwarded text, an email pasted in, or a message about a "
+            "colleague rather than to you — read the samples and judge. Recurring "
+            "across several sessions is the strongest sign; a single mention inside "
+            "pasted content is the weakest. Put your choice in agent_name; this "
+            "evidence outranks the files-only rule above. If none of them is you, "
+            "agent_name is null.")
+
+    cmd = [exe, "-p", prompt, "--dangerously-skip-permissions"]
     if cfg.get("model"):
         cmd += ["--model", cfg["model"]]
     try:
@@ -339,7 +462,14 @@ def derive_identity(timeout=180):
             # in as — which on a shared build is a real person with no connection
             # to this install. A fact the project cannot show in writing is not a
             # fact about this project.
-            if attested(v, workdir):
+            #
+            # Its own name is the exception, and it has to be: nobody writes down
+            # what they call their agent, they just call it that. The transcripts
+            # are the record, so a name the user has actually used counts as
+            # written down.
+            if k == "agent_name" and v in cands:
+                ident[k] = v
+            elif attested(v, workdir):
                 ident[k] = v
             else:
                 print(f"[voice-agent] identity: dropping {k}={v!r} — not found in "

@@ -48,7 +48,16 @@ is usually in `CLAUDE.md`, the company in its documents, the user in the work th
 together; the logo is found on disk. The account created by `--signup` is named from
 the same answer, so nobody ends up with an account called `root`.
 
-**Every derived value must appear in the project's own files or it is dropped.** Asked
+**Your agent's own name comes from how you address it.** It is the one identity fact
+nobody writes down — "you are Max" appears in no file on Max's machine, because a name
+is established by being used. So the adapter counts the names its user has used in an
+address position in this project's own session logs, ranks them by how many separate
+sessions they recur across, and offers those to the agent as evidence with the sample
+lines attached. A name that spikes once inside a pasted email loses to one the user
+keeps coming back to; a log full of colleagues and no agent name yields nothing rather
+than a colleague's name. The agent can only pick a name that was really said.
+
+**Every other derived value must appear in the project's own files or it is dropped.** Asked
 who its user is, an agent with nothing to read will happily answer from the account the
 CLI is signed in as — which is a real person with no connection to the install. A name
 the project never writes down does not go on the panel; the app falls back to its
