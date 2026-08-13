@@ -45,8 +45,10 @@ On startup — and again before pairing, so the very first scan is already right
 adapter spends one turn asking the agent to describe itself **from this project's
 files**, and caches the answer (`state.json`, re-derived weekly). The agent's own name
 is usually in `CLAUDE.md`, the company in its documents, the user in the work they do
-together; the logo is found on disk. The account created by `--signup` is named from
-the same answer, so nobody ends up with an account called `root`.
+together; the logo is found on disk. The account is named from the same answer — at
+signup, and re-asserted on every pairing, so a name that was right when the account
+was created cannot quietly stay wrong afterwards. (Nobody ends up with an account
+called `root`, or one named after their company where their own name belongs.)
 
 **Your agent's own name comes from how you address it.** It is the one identity fact
 nobody writes down — "you are Max" appears in no file on Max's machine, because a name

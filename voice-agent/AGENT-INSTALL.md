@@ -102,7 +102,8 @@ Override in `config.json` (`agent_name`, `company_name`, `user_name`, `user_emai
 
 If you change any of it later: restart the adapter, then re-run `pair.py --url <your
 URL>` so the plane re-probes capabilities, and give it a minute — it caches both for
-about five.
+about five. That re-run also re-asserts the account's display name from the derived
+identity, which is what the app's Account screen shows.
 
 ## 5. Run both pieces as services
 
