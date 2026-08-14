@@ -732,6 +732,29 @@ def _states_in(text):
     return found
 
 
+
+def _first_sentence_split(t):
+    """(first sentence, separator, the rest)."""
+    m = re.split(r"(?<=[.!?])\s", t, 1)
+    return (m[0], " ", m[1] if len(m) > 1 else "")
+
+
+# What the APP appends to a user's words: a restatement of the row for context
+# and instructions about how to reply. Nothing a person types looks like this.
+_SCAFFOLD = re.compile(
+    r"^\s*(\(that is[:,]|\(when:|confirm in|reply (with|in) |do not mention|"
+    r"name the reminder|answer (in|with) |respond (in|with) |"
+    r"keep (it|your reply)|be brief|one short sentence)", re.I)
+
+
+def _is_scaffolding(tail):
+    """True when what follows the first sentence is instruction to the model
+    rather than more of the user's message."""
+    t = " ".join((tail or "").split())
+    if not t:
+        return True
+    return bool(_SCAFFOLD.search(t))
+
 def interpret(text, now=None):
     """What was actually asked for, or None if this is not that question.
 
@@ -753,9 +776,19 @@ def interpret(text, now=None):
     # added. Read that, exactly as amend() does, rather than raising a cap that
     # exists to keep paragraphs of unrelated text from looking like a query.
     if len(t) > 140:
-        t = re.split(r"(?<=[.!?])\s", t, 1)[0]
-        if not t or len(t) > 140:
+        head, _, tail = _first_sentence_split(t)
+        # THE FIRST SENTENCE IS ONLY THE QUESTION WHEN THE REST IS MACHINERY.
+        # the owner, 2026-08-14: "Max should not react to the word 'reminders'
+        # without reading the whole message. It's a wrong trigger." This rule
+        # existed for the app's own scaffolding — a request followed by
+        # instructions to the model — and it read the opening of ANY long
+        # message the same way, so a paragraph that began by mentioning
+        # reminders and went on to say something else was answered with a
+        # table. Machine scaffolding is recognisable; a person writing three
+        # sentences is not scaffolding, and their whole message is the ask.
+        if not head or len(head) > 140 or not _is_scaffolding(tail):
             return None
+        t = head
     if CREATE.search(t) or OTHER_TOPIC.search(t):
         return None
     # Is this a request, or is he talking about an answer he already got?
