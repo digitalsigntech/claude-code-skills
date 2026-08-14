@@ -1,0 +1,22 @@
+# Identifiers that must never appear in this repository. One extended regex per
+# line; lines starting with # are ignored. Keep your real copy OUTSIDE the repo:
+#   ~/.config/skills-scrub/patterns.txt   (or $SKILLS_SCRUB_PATTERNS)
+#
+# Three classes, each of which has shipped by accident at least once somewhere:
+#
+# people and companies — a greeting introduced a stranger's fresh install as its
+# author's appliance, because the author's company name was a literal in a prompt
+[Ss]omeperson
+[Ss]omecompany
+someone@example\.com
+#
+# machines and workspaces — a hand-copied file spent two days reading another
+# box's database path, which existed on the machine it was copied from
+/home/youruser
+yourhostname
+your-other-server
+#
+# ids and addresses — chat ids, account ids and IPs route to YOU from somebody
+# else's deployment
+123456789
+203\.0\.113\.7

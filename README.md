@@ -27,11 +27,17 @@ no chat ids, no mailboxes, no absolute home directories — not in code, not in 
 not in a comment. Every one of those is a variable, set for the target machine at
 install time.
 
-That is enforced rather than remembered. `tools/pre-push-hook.sh` (installed as this
-repo's `pre-push`) refuses any push whose tree contains an identifier belonging to a
-person, a machine or an account in the estate this was extracted from. It is not a
-style rule: a greeting once introduced somebody's fresh install as its author's
-appliance, and a hand-copied file spent two days reading another box's database path.
+That is enforced rather than remembered. `tools/scrub-check.sh`, installed as this
+repo's `pre-push` hook, refuses any push whose tree names a person, a machine or an
+account. It is not a style rule: a greeting once introduced somebody's fresh install
+as its author's appliance, and a hand-copied file spent two days reading another box's
+database path.
+
+**The pattern list lives outside the repository** (`~/.config/skills-scrub/patterns.txt`,
+or `$SKILLS_SCRUB_PATTERNS`) — see `tools/patterns.example.txt`. The first version of
+the hook carried its patterns inline and blocked its own publication, which was the
+right answer: a denylist of your own identifiers is itself a list of your own
+identifiers.
 
 The mirror of it lives in the gateway skill as `install_check.py`, which asks the same
 question of an installed machine: does anything here name a deployment that is not
