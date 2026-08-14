@@ -65,16 +65,31 @@ def unanswered(db_path, quiet_seconds):
     return str(text or "")[:120]
 
 
-def tracebacks(log_path, since):
-    """Handler tracebacks written since the last check. The line that matters is
-    the exception, not the frames above it."""
+def tracebacks(log_path, offset):
+    """Exceptions in the bytes APPENDED since the last run, and the new offset.
+
+    The first version gated on the file's mtime and then scanned the whole tail,
+    so any write at all — a restart banner is enough — re-reported the oldest
+    exceptions still in the window. It paged the owner about three errors that had
+    been fixed hours earlier, which is how a watchdog teaches people to ignore it.
+
+    A log is append-only: the honest question is "what is after where I stopped
+    reading", and that is a byte offset, not a timestamp."""
     try:
-        if not os.path.exists(log_path) or os.path.getmtime(log_path) <= since:
-            return []
-        text = pathlib.Path(log_path).read_text(errors="replace")[-200_000:]
+        size = os.path.getsize(log_path)
     except OSError:
-        return []
-    return re.findall(r"^(?:\w+Error|Exception|OSError)[^\n]*", text, re.M)[-3:]
+        return [], offset
+    if size < offset:                   # rotated or truncated: start over
+        offset = 0
+    if size == offset:
+        return [], offset
+    try:
+        with open(log_path, "r", errors="replace") as f:
+            f.seek(offset)
+            fresh = f.read()
+    except OSError:
+        return [], offset
+    return re.findall(r"^(?:\w+Error|Exception|OSError)[^\n]*", fresh, re.M)[-3:], size
 
 
 def notify(token, chat, text, dry=False):
@@ -118,6 +133,10 @@ def main():
         # A fresh install has a log full of history, and an alert about errors
         # from last week is the fastest way to teach someone to ignore this.
         st["last_check"] = time.time()
+        try:
+            st["log_offset"] = os.path.getsize(log)
+        except OSError:
+            st["log_offset"] = 0
         _save(st)
         print("[watchdog] first run — baseline set, watching from now")
         return 0
@@ -127,7 +146,8 @@ def main():
     if quiet:
         problems.append(f"a message has gone unanswered for over {QUIET_MINUTES} "
                         f"minutes: _{quiet}_")
-    for err in tracebacks(str(log), st.get("last_check", 0)):
+    errs, st["log_offset"] = tracebacks(str(log), int(st.get("log_offset", 0)))
+    for err in errs:
         problems.append(f"`{err[:160]}`")
 
     st["last_check"] = time.time()
