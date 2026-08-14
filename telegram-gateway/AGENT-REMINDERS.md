@@ -39,9 +39,10 @@ background sleep. Those fire somewhere the owner is not looking, cannot be liste
 back, and cannot be amended. If the queue is broken, say so; do not substitute
 another mechanism silently.
 
-Times are absolute local time in `YYYY-MM-DD HH:MM`, so resolve "tomorrow",
-"Monday", "in two hours" yourself — run `date` first, in this machine's timezone,
-and never assume the box clock is in the owner's timezone.
+Times are absolute times in `YYYY-MM-DD HH:MM`, **in the owner's timezone**, so
+resolve "tomorrow", "Monday", "in two hours" yourself and hand over the hour the
+owner would say. Run `date` first and check what timezone the box is in before
+doing that arithmetic: a rented server is usually UTC while the owner is not.
 
     cd <workspace>
 
@@ -86,11 +87,16 @@ while asking something else is not a request for the list.
   queues a reminder that would fire nowhere.
 - `TG_PRIMARY_OWNER_KEY` — the `<owner-key>` in the block. One per person on the
   install; owner keys live in the database, so pick them before rows exist.
-- The firing cron, with an explicit timezone, since a reminder written in the
-  owner's local time has to fire in it:
+- `REMINDERS_TZ` — the OWNER's timezone (e.g. `America/Chicago`), not the box's.
+  Every conversion between the written time and the fired time goes through it, so
+  set it on the install and not just on the cron line; a box left on UTC otherwise
+  stores the owner's Monday morning five hours early and fires "in 20 minutes"
+  immediately. Set it anywhere the queue runs from — the service unit, the cron,
+  and the agent's own environment.
+- The firing cron, carrying the same timezone:
 
-      TZ=<owner's timezone>
-      * * * * * cd <workspace> && python3 operations/reminders/reminders.py fire >> operations/reminders/fire.log 2>&1
+      REMINDERS_TZ=<owner's timezone>
+      * * * * * cd <workspace> && REMINDERS_TZ=<owner's timezone> python3 operations/reminders/reminders.py fire >> operations/reminders/fire.log 2>&1
 
 Verify the install the way the failure happens, not the way the code reads: from a
 fresh session, **ask the agent in words** for a reminder a few minutes out, then

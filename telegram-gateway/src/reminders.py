@@ -93,6 +93,16 @@ EMAIL_PY = os.path.join(WORKSPACE_ROOT, "email", "venv", "bin", "python")
 PRIVACY_ROUTE = os.path.join(WORKSPACE_ROOT, "email", "kb", "privacy_route.py")
 MAX_ATTEMPTS = 3
 TIME_FMT = "%Y-%m-%d %H:%M"
+# The times in this queue are the OWNER'S local times — "7:40 Monday" is 7:40 in
+# the shop, not on the server. A rented box is usually UTC, so an agent that
+# correctly resolves the owner's Monday morning hands over "07:40" and mktime,
+# reading the process timezone, buries it five hours early; "in 20 minutes" comes
+# out in the past and fires the instant it is queued. Pin the conversion instead
+# of inheriting it, and every path — add, edit, list, fire — agrees on the hour.
+REMINDERS_TZ = os.environ.get("REMINDERS_TZ") or os.environ.get("TG_TZ")
+if REMINDERS_TZ:
+    os.environ["TZ"] = REMINDERS_TZ
+    time.tzset()
 # Where a reminder fires when the caller does not name a chat. An agent asked to
 # "remind me tomorrow at nine" knows the time and the words; it does not know the
 # numeric id of the chat it is being spoken to through, and an install where that
