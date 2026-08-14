@@ -932,6 +932,8 @@ if __name__ == "__main__":
     ap.add_argument("--done", action="store_true", help="completed rows only")
     ap.add_argument("--overdue", action="store_true", help="overdue rows only")
     ap.add_argument("--client", default="telegram", choices=["telegram", "ios"])
+    ap.add_argument("--chat", help="post the table into this chat instead of "
+                                   "printing it, with each reminder's photo")
     ap.add_argument("--detect", help="legacy: test the old keyword matcher")
     a = ap.parse_args()
 
@@ -957,7 +959,28 @@ if __name__ == "__main__":
             title, noun = _whose(a.owner) + " — overdue", "overdue"
         else:
             title, noun = _whose(a.owner), "pending"
-    print(render(rows, title=title, noun=noun, client=a.client))
+    table = render(rows, title=title, noun=noun, client=a.client)
+    if not a.chat:
+        print(table)
+        raise SystemExit(0)
+
+    # POSTING is the whole point of the table on a phone: it goes through
+    # tg_api, which routes a GFM table to sendRichMessage so Telegram draws it
+    # natively instead of showing pipes, and degrades to readable rows if the
+    # rich send fails. The photos follow as real photo messages — a reminder
+    # whose whole content is "look at this" is not served by a row of text
+    # saying a picture exists.
+    #
+    # This exists because the reflex that used to do it only ran when a keyword
+    # matched. With the model deciding instead, the delivery had nowhere to live
+    # and the agent was left pasting a table into a chat that renders pipes.
+    sys.path.insert(0, os.path.join(C.WORKSPACE_ROOT, "telegram"))
+    import tg_api as TG
+    chat = int(a.chat)
+    if not TG.send_message(chat, table):
+        raise SystemExit(f"could not post the table to {chat}")
+    n = send_photos(chat, rows)
+    print(f"posted to {chat}: {len(rows)} row(s), {n} photo(s)")
     print(f"\n({(time.time() - t0) * 1000:.0f}ms)")
 
 
