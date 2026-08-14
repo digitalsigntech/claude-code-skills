@@ -217,7 +217,12 @@ def _owner_sql(owner):
     """owner is now a single key, or None for unfiltered (CLI, cron)."""
     if not owner:
         return "", []
-    return " AND COALESCE(owner,C.PRIMARY_OWNER_KEY) = ?", [owner]
+    # The default owner is a VALUE, bound like any other. It was scrubbed into
+    # the SQL text itself — `COALESCE(owner,C.PRIMARY_OWNER_KEY)` — where SQLite
+    # reads it as a column name and the query errors. Valid Python, broken SQL,
+    # and invisible to any test that does not pass an owner: the CLI never does,
+    # the gateway always does. Found on a second install, by that install.
+    return " AND COALESCE(owner,?) = ?", [C.PRIMARY_OWNER_KEY, owner]
 
 
 def scope_of(text, viewer):
