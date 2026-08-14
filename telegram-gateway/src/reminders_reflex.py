@@ -897,12 +897,42 @@ def try_handle(chat_id, text, send, owner=None):
 
 
 if __name__ == "__main__":
-    import sys
-    q = " ".join(sys.argv[1:])
-    if q:
-        print(f"detect({q!r}) = {detect(q)}")
+    # A TOOL for a turn that has already understood the sentence, not a parser
+    # trying to understand it. The model decides what was asked — in whatever
+    # language it was asked in — and names the view it wants.
+    import argparse
+    ap = argparse.ArgumentParser(description="render the reminders table")
+    ap.add_argument("--owner", help="whose list (omit for the shared view)")
+    ap.add_argument("--all", action="store_true", help="include done and cancelled")
+    ap.add_argument("--done", action="store_true", help="completed rows only")
+    ap.add_argument("--overdue", action="store_true", help="overdue rows only")
+    ap.add_argument("--client", default="telegram", choices=["telegram", "ios"])
+    ap.add_argument("--detect", help="legacy: test the old keyword matcher")
+    a = ap.parse_args()
+
+    if a.detect:
+        print(f"detect({a.detect!r}) = {detect(a.detect)}")
+        raise SystemExit(0)
+
     t0 = time.time()
-    print(render())
+    if a.done:
+        rows = completed(50, owner=a.owner)
+        title, noun = "Completed reminders", "completed"
+    elif a.all:
+        rows = sorted(pending(owner=a.owner) + completed(50, owner=a.owner),
+                      key=lambda r: r.get("epoch") or 0)
+        title, noun = _whose(a.owner) + " — everything", "row"
+    else:
+        rows = pending(owner=a.owner)
+        if a.overdue:
+            # The row carries its own flag, computed where the due date is
+            # understood. Re-deriving it here from a key these rows do not have
+            # keeps every row and labels the lot overdue.
+            rows = [r for r in rows if r.get("overdue")]
+            title, noun = _whose(a.owner) + " — overdue", "overdue"
+        else:
+            title, noun = _whose(a.owner), "pending"
+    print(render(rows, title=title, noun=noun, client=a.client))
     print(f"\n({(time.time() - t0) * 1000:.0f}ms)")
 
 
