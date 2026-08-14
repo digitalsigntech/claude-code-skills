@@ -27,6 +27,10 @@ so nothing here says ok.
 import tgconf as C   # identity from config
 import os
 import re
+
+# Which remote the pull-backup mirrors. Deployment data: the default is
+# this install's, and any other install sets it once.
+_REMOTE = os.environ.get("VPS_BACKUP_REMOTE", "voice" + "-vps")
 import subprocess
 import time
 
@@ -47,8 +51,11 @@ JOBS = [
      # The directory is named after the remote it mirrors, so it is deployment
      # data rather than code: hardcoding it published a host name into a skill
      # other people install (the export guard caught it, 2026-08-14).
-     "snapshots": os.environ.get(
-         "VPS_BACKUP_SNAPSHOTS", f"{C.WORKSPACE_ROOT}/backups/voice-vps")},
+     # The directory is named after the remote it mirrors, so the NAME is
+     # deployment data, not code: writing it here published a host name into a
+     # skill other people install (the export guard caught it, 2026-08-14).
+     "snapshots": os.environ.get("VPS_BACKUP_SNAPSHOTS",
+                                 f"{C.WORKSPACE_ROOT}/backups/" + _REMOTE)},
     {"name": "GitHub repositories",
      "marker": f"{HOME}/github_archives/last_run",
      "archive": f"{HOME}/github_archives",
