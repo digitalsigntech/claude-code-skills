@@ -44,7 +44,11 @@ JOBS = [
      "done_re": re.compile(r"=== (\S+) done — (.+) ==="),
      "size_re": re.compile(r"done — mirror ([\d.]+[GMK])"),
      "every_h": 24,
-     "snapshots": f"{C.WORKSPACE_ROOT}/backups/voice-vps"},
+     # The directory is named after the remote it mirrors, so it is deployment
+     # data rather than code: hardcoding it published a host name into a skill
+     # other people install (the export guard caught it, 2026-08-14).
+     "snapshots": os.environ.get(
+         "VPS_BACKUP_SNAPSHOTS", f"{C.WORKSPACE_ROOT}/backups/voice-vps")},
     {"name": "GitHub repositories",
      "marker": f"{HOME}/github_archives/last_run",
      "archive": f"{HOME}/github_archives",

@@ -111,8 +111,9 @@ def banner(path):
     # PIL first: it is a library call, so it cannot be missing quietly the way
     # an external binary can. 2026-08-13: this machine had NEITHER `convert`
     # nor `ffmpeg`, every banner silently came back None, and the pushes went
-    # out photoless while both sides looked correct — Maclaude asked why the
-    # banners had lost their pictures and the answer was two absent packages.
+    # out photoless while both sides looked correct — the app developer
+    # asked why the banners had lost their pictures, and the answer was
+    # two absent packages.
     try:
         from PIL import Image
         im = Image.open(path)
