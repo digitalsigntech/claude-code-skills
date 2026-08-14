@@ -943,6 +943,16 @@ def _reminder_owner(msg):
         return None
 
 
+# Keyword reflexes no longer intercept messages (2026-08-14). A pattern of NOUN
+# plus filler cannot tell a request from a complaint that mentions the same noun,
+# and cannot read a language nobody wrote a branch for — measured here, the local
+# embedder scores a Russian request for reminders no higher than an unrelated
+# English sentence, and scores an English COMPLAINT about reminders higher than
+# either. The model reads every message instead, and calls the reflex modules as
+# tools. Set TG_REFLEX_INTERCEPT=1 for the old instant path with those limits.
+REFLEX_INTERCEPT = os.environ.get("TG_REFLEX_INTERCEPT", "0") == "1"
+
+
 def handle_text(msg, chat_id, text):
     # Match just the first token, lowercased, with the @botname suffix (added in
     # groups, e.g. "/clear@your_bot") stripped — so commands work everywhere.
@@ -1054,7 +1064,7 @@ def handle_text(msg, chat_id, text):
     # Tasks reflex (2026-08-07, the owner: "show me the currently running tasks ... should
     # take no time without LLM roundtrips. It should be hardcoded in Python"): a
     # registry lookup + the table the voice server already renders. ~50ms, no turn.
-    if C.TASKS_REFLEX:
+    if REFLEX_INTERCEPT and C.TASKS_REFLEX:
         try:
             summary = tasks_reflex.try_handle(chat_id, text, TG.send_message)
         except Exception as e:
@@ -1096,7 +1106,7 @@ def handle_text(msg, chat_id, text):
     # Reminders reflex (2026-08-07, the owner: "when the user wants to see all
     # reminders, present them as a table"). A SELECT plus a token mint per
     # photo row. ~5ms.
-    if C.REMINDERS_REFLEX:
+    if REFLEX_INTERCEPT and C.REMINDERS_REFLEX:
         try:
             # "per user" (the owner 2026-08-10): the list belongs to whoever
             # sent the message, not to the chat. In a shared group each of
@@ -1115,7 +1125,7 @@ def handle_text(msg, chat_id, text):
     # Backup reflex (2026-08-07, the owner: "when I ask to show the status of our
     # backups the backend should have a very quick answer"). Same shape as the
     # tasks reflex — file checks, no model turn. ~2ms.
-    if C.BACKUP_REFLEX:
+    if REFLEX_INTERCEPT and C.BACKUP_REFLEX:
         try:
             summary = backup_reflex.try_handle(chat_id, text, TG.send_message)
         except Exception as e:
