@@ -1,38 +1,48 @@
 #!/bin/bash
-# Refuse to publish anything that names a person, a machine or an account.
+# Block any push whose tree names a person, a machine or an account.
 #
-# Install as this repo's pre-push hook:
-#   ln -sf ../../tools/scrub-check.sh .git/hooks/pre-push
+# Install:  cp tools/pre-push-hook.sh .git/hooks/pre-push && chmod +x .git/hooks/pre-push
 #
-# The patterns live OUTSIDE the repository, in $SKILLS_SCRUB_PATTERNS or
-# ~/.config/skills-scrub/patterns.txt — one extended regex per line, # for
-# comments. That is not tidiness: the first version of this hook carried its
-# patterns inline, and publishing it would have published a tidy list of every
-# name, host and id it exists to keep out. A denylist of your own identifiers is
-# itself a list of your own identifiers.
+# The patterns are NOT in this file. They are the very strings that must never be
+# published, and an earlier version listed them here in plain text — a scrub gate
+# that was itself the largest single disclosure in the repository, and which
+# eventually blocked its own push by matching itself.
 #
-# See tools/patterns.example.txt for the shape.
-set -u
+# So the list lives outside the tree, one extended-regex pattern per line:
+#
+#   $IDENTITY_GUARD_FILE            if set
+#   ../.identity-guard              beside the checkout (the usual place)
+#   ~/.config/skills/identity-guard
+#
+# See identity-guard.example for the shape and for what belongs in it. With no
+# list the hook says so and lets the push through: a guard that silently passes
+# when unconfigured is worse than none, and one that blocks every push on a fresh
+# clone gets deleted within the day.
 cd "$(git rev-parse --show-toplevel)" || exit 1
-PATTERNS="${SKILLS_SCRUB_PATTERNS:-$HOME/.config/skills-scrub/patterns.txt}"
 
-if [ ! -r "$PATTERNS" ]; then
-  echo "scrub-check: no pattern file at $PATTERNS — nothing is being checked." >&2
-  echo "Copy tools/patterns.example.txt there and list what must never ship." >&2
-  exit 0            # a fresh clone with nothing to hide is not an error
+for candidate in "$IDENTITY_GUARD_FILE" "../.identity-guard" \
+                 "$HOME/.config/skills/identity-guard"; do
+  [ -n "$candidate" ] && [ -f "$candidate" ] && GUARD="$candidate" && break
+done
+
+if [ -z "$GUARD" ]; then
+  echo "note: no identity-guard list found — pushing unchecked." >&2
+  echo "      see tools/identity-guard.example to set one up." >&2
+  exit 0
 fi
 
-RE=$(grep -vE '^\s*(#|$)' "$PATTERNS" | paste -sd'|' -)
-[ -z "$RE" ] && exit 0
+# Comments and blank lines out; everything else is a pattern.
+PATTERNS=$(grep -vE '^\s*(#|$)' "$GUARD" | paste -sd'|' -)
+[ -z "$PATTERNS" ] && exit 0
 
-# -I skips binaries: a stale .pyc used to match as noise and hide the real hit.
-HITS=$(grep -rIn -E "$RE" --exclude-dir=.git .)
+HITS=$(grep -rIn -E "$PATTERNS" --exclude-dir=.git .)
 if [ -n "$HITS" ]; then
   echo "PUSH BLOCKED — this tree names something that must not be published:" >&2
   echo "$HITS" | head -20 >&2
   echo >&2
-  echo "Replace each with a variable read from config at install time, commit," >&2
-  echo "then push again. Never --no-verify." >&2
+  echo "Every one of these is an identifier: a person, a company, a host, a chat," >&2
+  echo "a mailbox. Replace it with a variable read from config at install time," >&2
+  echo "commit, and push again. Never --no-verify." >&2
   exit 1
 fi
 exit 0
