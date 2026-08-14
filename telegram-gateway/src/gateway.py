@@ -336,7 +336,7 @@ def handle_album(msgs, chat_id):
         handle_project_album(msgs, chat_id, paths, caption)
         return
     # Personal notes (the owner 2026-07-10): a caption-less album in his DM = one note per file.
-    if not caption.strip() and chat_id == personal_notes.VLAD:
+    if not caption.strip() and chat_id == personal_notes.OWNER:
         ids = []
         for p in paths:
             try:
@@ -474,7 +474,7 @@ def handle_file(msg, chat_id):
         return
     # Personal notes (the owner 2026-07-10): a file in HIS DM with no caption is a personal
     # note — stored in the private personal/ db, never offered the KB-ingest keyboard.
-    if not caption.strip() and chat_id == personal_notes.VLAD:
+    if not caption.strip() and chat_id == personal_notes.OWNER:
         try:
             nid, dest = personal_notes.add(path, orig_name=os.path.basename(path))
             log(f"personal note #{nid} saved: {os.path.basename(dest)}")

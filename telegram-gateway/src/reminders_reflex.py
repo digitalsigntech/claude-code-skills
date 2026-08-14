@@ -42,6 +42,10 @@ HOME = os.path.expanduser("~")
 # copy and every read AND write follows it.
 DB = os.environ.get("REMINDERS_DB",
                     f"{C.WORKSPACE_ROOT}/operations/reminders/reminders.db")
+# The queue module lives beside its database by convention, so a second
+# install (Max) needs no second env var: point REMINDERS_DB at that
+# machine's store and the code that writes it is found alongside.
+REMINDERS_PKG = os.path.dirname(DB)
 REALTIME = f"{C.WORKSPACE_ROOT}/voice/realtime"
 MINT_URL = "http://127.0.0.1:8478/{secret}/mint-token"
 SENDFILE = f"{C.WORKSPACE_ROOT}/telegram/sendfile.py"
@@ -50,7 +54,20 @@ LIMIT = 20
 
 def _mint(path):
     """File token from the RUNNING server — its token map lives there, and a
-    second derivation here would be a second copy of the same secret rule."""
+    second derivation here would be a second copy of the same secret rule.
+
+    2026-08-13: a second install (Max, on its own VPS) has the same reflex and a
+    different token minter — its adapter mints in-process, with no HTTP endpoint
+    to call. `REMINDERS_MINT_MODULE` names a module exposing `media_token(path)`
+    for those installs. Unset, nothing changes here.
+    """
+    mod = os.environ.get("REMINDERS_MINT_MODULE")
+    if mod:
+        try:
+            import importlib
+            return importlib.import_module(mod).media_token(path)
+        except Exception:
+            return None
     try:
         secret = open(os.path.join(REALTIME, ".secret")).read().strip()
         bearer = open(os.path.join(REALTIME, ".hook_secret")).read().strip()
@@ -92,7 +109,7 @@ def _summarize(text):
     a reminder says."""
     try:
         import sys
-        sys.path.insert(0, f"{C.WORKSPACE_ROOT}/operations/reminders")
+        sys.path.insert(0, REMINDERS_PKG)
         import reminders
         return reminders.summarize(text)
     except Exception:
@@ -103,6 +120,26 @@ def _cell(text):
     """No pipes, no newlines, nothing cut — a pipe ends the column early and
     shifts every later value under the wrong heading."""
     return " ".join(str(text or "").replace("|", "/").split())
+
+
+def _sentence(text):
+    """First letter up. Dictation arrives lower-case and a printed table reads
+    as sloppy without it (the owner, 2026-08-13).
+
+    ONLY when the first word is plain lower-case letters. `iPhone charger`,
+    `pH meter`, `x5 gaskets` and part codes like `dx7-114` are deliberately
+    shaped and capitalising them would be a correction, not a tidy-up — which
+    is exactly why this belongs here and not in the app, where it would hit
+    every cell in every table.
+    """
+    s = str(text or "")
+    head = s.split(" ", 1)[0]
+    # `head.islower()` and not just the first character: `iPhone` and `pH` have
+    # a lower-case first letter and a capital that MEANS something, and my
+    # first cut turned them into `IPhone` and `PH meter`.
+    if head.isalpha() and head.islower():
+        return s[0].upper() + s[1:]
+    return s
 
 
 # "per user" (the owner 2026-08-10, refined the same day): ONE list at a time.
@@ -451,8 +488,10 @@ def render(rows=None, title="Reminders", empty="No reminders set.",
         # The comment goes to the APP only. Telegram has no HTML comments in
         # rich messages — it would render the marker as literal text, which is
         # the same class of mistake as the vb-token cell it silently dropped.
-        when = _cell(r["when"]) + (f"<!--id:{r['id']}-->" if ios else "")
-        cells = [when, _cell(r["text"])]
+        # Both cells go through _sentence: "today 18:30" and a dictated
+        # reminder both arrive lower-case, and this is a printed surface.
+        when = _sentence(_cell(r["when"])) + (f"<!--id:{r['id']}-->" if ios else "")
+        cells = [when, _sentence(_cell(r["text"]))]
         if ios:
             cells.append(f"![](vb-token:{r['token']})" if r.get("token") else "")
         out.append("| " + " | ".join(cells) + " |")
@@ -1198,7 +1237,7 @@ def amend(question, owner=None):
     else:
         rid = int(m.group(1))
         _audit(question, rid, "id taken FROM THE SENTENCE")
-    sys.path.insert(0, f"{C.WORKSPACE_ROOT}/operations/reminders")
+    sys.path.insert(0, REMINDERS_PKG)
     import reminders
     row = None
     # Scoped to the asker: naming a number must not reach past ownership. A row

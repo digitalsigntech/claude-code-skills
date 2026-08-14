@@ -115,7 +115,7 @@ NAT with no public IP or inbound ports.
   allowlisted users. The `personal/` tree is excluded from the file-reflex walk
   and any agent file search; in the owner's DM, "get my <name> note" retrieves
   one sub-second via the file reflex. Notes can carry a `label` (description)
-  and content `keywords` — both searchable via `search()`. See `src/personal_notes.py` (set `VLAD` to
+  and content `keywords` — both searchable via `search()`. See `src/personal_notes.py` (set `OWNER` to
   your owner user id).
 - **Voice conversation mode (optional, fully on-box).** In chats listed in
   `VOICE_CHATS`, a voice note becomes a spoken turn: ogg/opus → ffmpeg 16k wav →

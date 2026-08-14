@@ -25,7 +25,7 @@ import os, re, json, time, shutil, sqlite3, threading
 import tgconf as C
 import tg_api as TG
 
-VLAD = C.OWNER_ID                       # the owner's Telegram user id == his DM chat id
+OWNER = C.OWNER_ID                       # the owner's Telegram user id == his DM chat id
 PERSONAL_DIR = os.path.join(C.WORKSPACE_ROOT, "personal")
 NOTES_DIR = os.path.join(PERSONAL_DIR, "notes")
 DB = os.path.join(PERSONAL_DIR, "notes.db")
@@ -90,7 +90,7 @@ def add(path, orig_name=None, tg_file_id=None, label=None, keywords=None):
 # ---- the privacy gate -------------------------------------------------------------
 def allowed_chat(chat_id):
     """True only for the owner's DM or a live-verified bot+the owner-only group."""
-    if chat_id == VLAD:
+    if chat_id == OWNER:
         return True
     if chat_id > 0:                    # someone else's DM
         return False
@@ -101,7 +101,7 @@ def allowed_chat(chat_id):
     try:
         r = TG._call("getChatMemberCount", chat_id=chat_id, _timeout=10)
         if r.get("ok") and r.get("result") == 2:   # the bot + exactly one human
-            m = TG._call("getChatMember", chat_id=chat_id, user_id=VLAD, _timeout=10)
+            m = TG._call("getChatMember", chat_id=chat_id, user_id=OWNER, _timeout=10)
             ok = bool(m.get("ok")) and (m.get("result", {}).get("status")
                                         in ("creator", "administrator", "member"))
     except Exception:

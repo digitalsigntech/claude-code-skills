@@ -78,7 +78,7 @@ works and the bot tells you to grant admin.
    send `/project <slug>` in the group.
 4. Optional: set `PROJECTS_VISION_MODEL` (default: a Nemotron VL model on
    OpenRouter) for photo auto-annotation; `OPENROUTER_API_KEY` in
-   `~/.config/dst/secrets.env`.
+   `~/.config/<agent>/secrets.env` (set `TG_SECRETS_ENV`).
 
 ## Lessons baked in
 
