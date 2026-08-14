@@ -421,6 +421,52 @@ def owner_keys_in_db():
     return keys
 
 
+def rows_with_wrong_hour():
+    """Rows whose stored wall-clock text does not match their epoch under THIS
+    install's zone.
+
+    when_local is what the owner asked for; when_epoch is when it actually fires.
+    They are written together and can only disagree if the zone changed between
+    writes — a box moved, REMINDERS_TZ set after some rows existed, or an agent
+    that converted the hour itself before handing it over. The row then displays
+    one time and fires at another, and nothing says so: the list looks right and
+    the phone rings five hours early.
+
+    Returns [(id, stored_text, what_the_epoch_actually_is)]."""
+    out = []
+    try:
+        c = _db()
+        rows = c.execute("SELECT id, when_local, when_epoch FROM reminders "
+                         "WHERE status='pending'").fetchall()
+        c.close()
+    except Exception:
+        return out
+    for rid, wl, we in rows:
+        if not wl or not we:
+            continue
+        try:
+            meant = time.mktime(time.strptime(wl.strip(), TIME_FMT))
+        except ValueError:
+            continue
+        if abs(meant - float(we)) >= 60:
+            out.append((rid, wl, time.strftime(TIME_FMT, time.localtime(we))))
+    return out
+
+
+def warn_on_hour_drift(out=sys.stderr):
+    drift = rows_with_wrong_hour()
+    if drift:
+        print(f"reminders: {len(drift)} row(s) will fire at a different time than "
+              f"they display — the zone changed after they were written "
+              f"(REMINDERS_TZ is {os.environ.get('REMINDERS_TZ') or 'unset'}):",
+              file=out)
+        for rid, wl, actual in drift[:5]:
+            print(f"  #{rid} says {wl}, fires {actual}", file=out)
+        print("  Re-set each with: reminders.py edit <id> --when \"<the time you "
+              "meant>\"", file=out)
+    return drift
+
+
 def warn_on_key_mismatch(out=sys.stderr):
     stray = {k for k in owner_keys_in_db() if k and k not in OWNERS}
     if stray:
@@ -761,6 +807,7 @@ def main():
         print(f"queued #{rid} for {when}" + (" (with photo)" if ns.photo else ""))
     elif ns.cmd == "list":
         warn_on_key_mismatch()
+        warn_on_hour_drift()
         for r in list_rows(ns.all, owner=getattr(ns, "owner", None)):
             print(f"#{r['id']} {r['when']} [{r['status']}] {r['kind']} chat={r['chat_id']} "
                   f"owner={r['owner']}: {r['text'][:100]}"

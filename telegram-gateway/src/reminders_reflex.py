@@ -105,6 +105,13 @@ def _mint(path):
 import threading as _threading
 _VIEW = _threading.local()
 
+# The zone this deployment's PEOPLE are in, when that is not the server's. The
+# queue already pins it when writing a row (REMINDERS_TZ); without the same value
+# here the row was written at 09:15 in the shop's zone and rendered at 14:15 in
+# the server's, so the two views of one reminder disagreed. Both being wrong
+# would have been better: disagreement makes the reader decide which to believe.
+DEPLOY_TZ = os.environ.get("REMINDERS_TZ") or os.environ.get("TG_TZ")
+
 
 def set_viewer_tz(tz):
     """Called once per request by whatever received it. Passing None clears."""
@@ -121,7 +128,8 @@ def _zone(tz=None):
     is. Unset falls back to this machine's zone, which is correct for a box
     that sits in the same room as its owner and wrong for a VPS.
     """
-    tz = tz or getattr(_VIEW, "tz", None)
+    # The asking client's zone, then this deployment's, then the machine's.
+    tz = tz or getattr(_VIEW, "tz", None) or DEPLOY_TZ
     if tz:
         try:
             from zoneinfo import ZoneInfo

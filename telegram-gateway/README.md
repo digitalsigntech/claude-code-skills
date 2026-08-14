@@ -106,6 +106,7 @@ Everything that was a literal is now config:
 | `TG_OWNER_PUSH_ACCOUNT` / `TG_PUSH_ACCOUNTS` | voice-app accounts to push; unset means it does not push |
 | `TG_REMINDER_CHAT_ID` | where a reminder fires when the caller names no chat; `add` refuses rather than queue one that would fire nowhere |
 | `REMINDERS_DB` | overrides the path derived from `WORKSPACE_ROOT` |
+| `REMINDERS_TZ` | the zone the OWNER lives in, IANA name — set it on any rented box |
 
 Installing the queue is half of it. The other half is `AGENT-REMINDERS.md`: the
 instruction block that has to reach the agent's own context, because an agent that
@@ -115,6 +116,21 @@ edits a row that never existed.
 
 Owner keys live in the DATABASE, so changing one after rows exist means migrating
 them. Pick it at install time.
+
+**`REMINDERS_TZ` is not optional on a hosted box.** The times in the queue are the
+owner's wall clock — "07:30 Monday" is 07:30 in their shop, not on a server in
+another country. Unset, a rented machine parses it as UTC and the reminder fires
+five hours early while the list still reads 07:30. The reflex reads the same
+variable, so what is displayed and what fires come from one source.
+
+Rows written before it was set keep their old epoch. `reminders.py list` names them:
+
+    reminders: 1 row(s) will fire at a different time than they display …
+      #6 says 2026-08-18 07:30, fires 2026-08-18 07:30
+
+Re-set each with `edit <id> --when "<the time you meant>"`. Nothing rewrites them
+automatically — the queue cannot know whether the stored hour or the stored epoch
+was the intention.
 
 ## When the bot goes quiet, something has to say so
 
