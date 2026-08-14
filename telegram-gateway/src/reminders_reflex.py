@@ -42,6 +42,22 @@ HOME = os.path.expanduser("~")
 # copy and every read AND write follows it.
 DB = os.environ.get("REMINDERS_DB",
                     f"{C.WORKSPACE_ROOT}/operations/reminders/reminders.db")
+
+
+def db_missing():
+    """The path this install will read, if it is not there.
+
+    A reminders lookup against a database that does not exist answered "No
+    reminders set." — indistinguishable from a genuinely empty list, and wrong in
+    the one way the user cannot see. A second install spent a day being told,
+    politely, that it had nothing scheduled.
+
+    Silence is the bug. Everything that reads rows says this instead."""
+    return None if os.path.exists(DB) else (
+        f"⚠️ No reminders database at `{DB}`.\n\nThis install is reading a path "
+        f"that does not exist, so it cannot tell an empty list from a missing "
+        f"one. Point `REMINDERS_DB` at the real file, or check that "
+        f"`WORKSPACE_ROOT` is the directory this deployment actually uses.")
 # The queue module lives beside its database by convention, so a second
 # install (Max) needs no second env var: point REMINDERS_DB at that
 # machine's store and the code that writes it is found alongside.
@@ -519,6 +535,10 @@ def render(rows=None, title="Reminders", empty="No reminders set.",
     comment inside the When cell — no column, no width, nothing on screen,
     and a two-character regex on his side.
     """
+    missing = db_missing()
+    if missing:
+        return missing
+
     rows = pending() if rows is None else rows
     if not rows:
         return empty
