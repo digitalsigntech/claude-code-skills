@@ -208,8 +208,9 @@ def _chatdb():
 # guest must not read the owner's conversation or write into the owner's chat.
 #
 # 2026-08-14, found while building the demo endpoint: a freshly minted demo
-# account asked for its history and was handed Vladimir's — "Visual sign." and
-# Max's reply — because history is per MACHINE and nothing asked whose it was.
+# account asked for its history and was handed the OWNER'S — their words and
+# the agent's replies — because history is per MACHINE and nothing asked whose
+# it was.
 _WHO = threading.local()
 
 
