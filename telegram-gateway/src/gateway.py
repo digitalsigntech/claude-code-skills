@@ -10,7 +10,40 @@ from concurrent.futures import ThreadPoolExecutor
 from email.utils import parseaddr
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import tgconf as C
+import tgconf as _tgconf
+
+
+class _Config:
+    """The settings module, but a missing setting is a feature off — not a dead
+    gateway.
+
+    gateway.py and tgconf.py are two files that travel separately: an install
+    updates one, keeps the other, and every reference the new code added is an
+    AttributeError. Raised from handle_text, that is not a degraded feature, it is
+    a gateway that accepts messages and answers none of them, with the reason only
+    in a log nobody is reading — a chat that has gone quiet looks the same as one
+    with nothing to say.
+
+    So an absent UPPERCASE setting reads as None (falsy: reflexes stay off) and is
+    named once in the log. A missing path still fails where it is used, loudly and
+    with the name already printed."""
+
+    _warned = set()
+
+    def __getattr__(self, name):
+        try:
+            return getattr(_tgconf, name)
+        except AttributeError:
+            if not name.isupper():
+                raise
+            if name not in self._warned:
+                self._warned.add(name)
+                print(f"gateway: config {name} not in tgconf.py — treating as off "
+                      f"(update tgconf.py to enable it)", flush=True)
+            return None
+
+
+C = _Config()
 import tg_api as TG
 import bridge
 import privacy_router
@@ -31,10 +64,23 @@ import voice_mode
 try:
     import qa_cache            # needs numpy + an embedding server
 except Exception as _e:        # a missing optional dep must not cost the whole bot
-    class qa_cache:            # noqa: N801 - inert stand-in, same call surface
+    class _InertModule:
+        """Stand-in for an optional module that would not import.
+
+        It answers ANY attribute with a no-op returning None, because the list of
+        methods the caller uses is not a list this class can be trusted to keep up
+        with. Naming three of them was already wrong: `cacheable` was added later,
+        and on a machine without numpy every message then died on the stub meant to
+        keep it alive — the bot accepted messages and answered none of them.
+
+        An optional feature that is off must cost exactly its own feature."""
+
         enabled = False
-        lookup = staticmethod(lambda *a, **k: None)
-        store = staticmethod(lambda *a, **k: None)
+
+        def __getattr__(self, name):
+            return lambda *a, **k: None
+
+    qa_cache = _InertModule()
     print(f"gateway: qa_cache off ({_e})", flush=True)
 import projects_mode
 
