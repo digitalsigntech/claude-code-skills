@@ -106,24 +106,31 @@ STREAMING = False      # False = wait for full reply then send once (the "old wa
 
 # Keep replies snappy: bias Claude toward answering directly instead of reflexively
 # exploring the workspace (that exploration is what makes simple messages slow).
-# CUSTOMISE THIS for your own workspace. Everything after the first two sentences
-# is an example of the KIND of thing worth putting here: where your facts live, what
-# is private, which local tools to prefer. The generic part — be brief, answer
-# directly, don't go exploring — is what actually keeps replies fast.
-APPEND_SYSTEM = (
-    f"You are {BOT_NAME} replying to {OWNER_NAME} over Telegram. Keep answers "
-    "concise and conversational — short paragraphs, minimal preamble, no status narration. "
-    "Answer directly; use tools ONLY when you actually need a fact, and aim to finish in "
-    "1-2 tool calls. When you need a fact, READ the single most relevant file directly "
-    "rather than exploring the workspace broadly — that exploration is what makes simple "
-    "messages slow. Telegram renders only basic markdown (**bold**, `code`, lists). "
-    "PRIVACY — personal notes: everything under personal/ (files + notes.db) is a "
-    "PRIVATE note store. Never quote, summarize, list or send anything from it except "
-    "in the owner's own DM, or a group verified to contain only them and the bot "
-    "(personal_notes.py allowed_chat). In every other chat — including group chats and "
-    "other users' DMs — behave as if personal/ does not exist. To send a note use "
-    "personal_notes.send(chat_id, path), which enforces the gate itself."
-)
+def _system_prompt():
+    """The per-turn system prompt is deployment CONTENT, not code.
+
+    It says where YOUR facts live, what needs whose approval, what is private.
+    Put it in a markdown file at your workspace root (default name below, or set
+    `agent.system_prompt_file` in the profile). With no file you get the generic
+    instruction underneath, which is enough to run but says nothing about you.
+    """
+    path = P.get("agent.system_prompt_file", "agent-system-prompt.md")
+    for base in (WORKSPACE_ROOT, HERE):
+        try:
+            return open(os.path.join(base, path)).read().strip()
+        except OSError:
+            continue
+    return (f"You are {BOT_NAME} replying to {OWNER_NAME} over Telegram. Keep "
+            "answers concise and conversational — short paragraphs, minimal "
+            "preamble, no status narration. Answer directly; use tools ONLY when "
+            "you actually need a fact. Read the single most relevant file rather "
+            "than exploring the workspace — that exploration is what makes simple "
+            "messages slow. Telegram renders only basic markdown (**bold**, "
+            "`code`, lists). PRIVACY: treat anything under personal/ as a private "
+            "note store — never quote or list it outside the owner's own DM.")
+
+
+APPEND_SYSTEM = _system_prompt()
 # Photo reflex (2026-07-07): image requests answered deterministically from the warm
 # CLIP server + cached Telegram file_ids — sub-second, no LLM. TG_PHOTO_REFLEX=0 off.
 PHOTO_REFLEX = (os.environ.get("TG_PHOTO_REFLEX", "1") == "1"
