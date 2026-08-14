@@ -194,3 +194,26 @@ would know is the honest test.
 - [ ] `conformance.py` exits 0 — no required type unanswered
 - [ ] `pair.py --test` returns ok
 - [ ] A real spoken question answered from this machine's files
+
+## Reminders that actually fire (2026-08-13)
+
+The adapter can list and amend reminders as soon as `telegram-gateway`'s
+`reminders_reflex.py` and a store are present. **Firing is separate**, and an
+install without it creates reminders that are listed correctly and go off
+nowhere — the agent will reach for whatever scheduler it can find, and a cloud
+routine delivers into the Claude app rather than into the owner's chat.
+
+    cp fire_reminders.py /opt/voice-agent/
+    apt-get install -y python3-pil          # or imagemagick / ffmpeg
+    crontab -e
+    TZ=<the owner's zone, e.g. America/Toronto>
+    * * * * * VOICE_ACCOUNT=acct-xxxx /usr/bin/python3 /opt/voice-agent/fire_reminders.py >> <workdir>/operations/reminders/cron.log 2>&1
+
+`TZ` matters: a VPS runs UTC and reminder times are the owner's. **The image
+library matters too** — without one, every push banner is silently dropped and
+the notification arrives with no picture. The loop now says so in its log
+rather than failing quietly, but installing one is better.
+
+Delivery is Telegram first (that IS the reminder) and an APNs nudge second,
+best-effort, through the plane's `/api/notify`. The agent authenticates with
+its own plane secret, which the plane scopes to that one account.

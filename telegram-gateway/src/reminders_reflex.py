@@ -23,7 +23,6 @@ moment it is made.
 """
 
 
-import tgconf as C   # identity from config
 import json
 import os
 import re
@@ -32,6 +31,9 @@ import subprocess
 import sys
 import time
 import urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import tgconf as C          # the owner key is config, not a literal in a query
 
 HOME = os.path.expanduser("~")
 # A test must never be able to touch the live queue. Twice tonight I ran an
@@ -42,24 +44,8 @@ HOME = os.path.expanduser("~")
 # copy and every read AND write follows it.
 DB = os.environ.get("REMINDERS_DB",
                     f"{C.WORKSPACE_ROOT}/operations/reminders/reminders.db")
-
-
-def db_missing():
-    """The path this install will read, if it is not there.
-
-    A reminders lookup against a database that does not exist answered "No
-    reminders set." — indistinguishable from a genuinely empty list, and wrong in
-    the one way the user cannot see. A second install spent a day being told,
-    politely, that it had nothing scheduled.
-
-    Silence is the bug. Everything that reads rows says this instead."""
-    return None if os.path.exists(DB) else (
-        f"⚠️ No reminders database at `{DB}`.\n\nThis install is reading a path "
-        f"that does not exist, so it cannot tell an empty list from a missing "
-        f"one. Point `REMINDERS_DB` at the real file, or check that "
-        f"`WORKSPACE_ROOT` is the directory this deployment actually uses.")
 # The queue module lives beside its database by convention, so a second
-# install needs no second env var: point REMINDERS_DB at that
+# install (Max) needs no second env var: point REMINDERS_DB at that
 # machine's store and the code that writes it is found alongside.
 REMINDERS_PKG = os.path.dirname(DB)
 REALTIME = f"{C.WORKSPACE_ROOT}/voice/realtime"
@@ -72,7 +58,7 @@ def _mint(path):
     """File token from the RUNNING server — its token map lives there, and a
     second derivation here would be a second copy of the same secret rule.
 
-    2026-08-13: a second install, on its own server, has the same reflex and a
+    2026-08-13: a second install (Max, on its own VPS) has the same reflex and a
     different token minter — its adapter mints in-process, with no HTTP endpoint
     to call. `REMINDERS_MINT_MODULE` names a module exposing `media_token(path)`
     for those installs. Unset, nothing changes here.
@@ -105,13 +91,6 @@ def _mint(path):
 import threading as _threading
 _VIEW = _threading.local()
 
-# The zone this deployment's PEOPLE are in, when that is not the server's. The
-# queue already pins it when writing a row (REMINDERS_TZ); without the same value
-# here the row was written at 09:15 in the shop's zone and rendered at 14:15 in
-# the server's, so the two views of one reminder disagreed. Both being wrong
-# would have been better: disagreement makes the reader decide which to believe.
-DEPLOY_TZ = os.environ.get("REMINDERS_TZ") or os.environ.get("TG_TZ")
-
 
 def set_viewer_tz(tz):
     """Called once per request by whatever received it. Passing None clears."""
@@ -128,8 +107,7 @@ def _zone(tz=None):
     is. Unset falls back to this machine's zone, which is correct for a box
     that sits in the same room as its owner and wrong for a VPS.
     """
-    # The asking client's zone, then this deployment's, then the machine's.
-    tz = tz or getattr(_VIEW, "tz", None) or DEPLOY_TZ
+    tz = tz or getattr(_VIEW, "tz", None)
     if tz:
         try:
             from zoneinfo import ZoneInfo
@@ -225,11 +203,9 @@ def _owner_sql(owner):
     """owner is now a single key, or None for unfiltered (CLI, cron)."""
     if not owner:
         return "", []
-    # The default owner is a VALUE, bound like any other. It was scrubbed into
-    # the SQL text itself — `COALESCE(owner,C.PRIMARY_OWNER_KEY)` — where SQLite
-    # reads it as a column name and the query errors. Valid Python, broken SQL,
-    # and invisible to any test that does not pass an owner: the CLI never does,
-    # the gateway always does. Found on a second install, by that install.
+    # Bound as a VALUE, like the export. A literal here is what forced the scrub
+    # to rewrite the query text at publication time, and that rewrite is what
+    # broke every per-user lookup on the install that received it.
     return " AND COALESCE(owner,?) = ?", [C.PRIMARY_OWNER_KEY, owner]
 
 
@@ -548,10 +524,6 @@ def render(rows=None, title="Reminders", empty="No reminders set.",
     comment inside the When cell — no column, no width, nothing on screen,
     and a two-character regex on his side.
     """
-    missing = db_missing()
-    if missing:
-        return missing
-
     rows = pending() if rows is None else rows
     if not rows:
         return empty
@@ -649,6 +621,8 @@ def detect_all(text):
         return False
     if CREATE.search(t):
         return False
+    if guard.talking_about_it(t):
+        return False
     return bool(NOUN.search(t)) and bool(ALL_ISH.search(t))
 
 
@@ -658,7 +632,27 @@ def detect_done(text):
         return False
     if CREATE.search(t):
         return False
+    if guard.talking_about_it(t):
+        return False
     return bool(NOUN.search(t)) and bool(DONE_ISH.search(t))
+
+
+def _asking_for_the_list(t):
+    """NOUN plus a list verb is not enough, and never was.
+
+    "show", "see", "any" and "all" are filler: almost every sentence that
+    mentions reminders contains one, so this fired on the noun alone. It ate two
+    of the owner's bug reports about ANOTHER agent's reminders on 2026-08-14 —
+    the second one being "I don't need to see reminders that I have with Claude"
+    — until he censored the word to get a sentence past it. Same fault the backup
+    reflex was fixed for three days earlier; the fix now lives in reflex_guard
+    so it cannot be fixed once per reflex again.
+
+    A request either opens like one, or has its verb next to the noun."""
+    if guard.talking_about_it(t):
+        return False
+    return (guard.opens_with(t, LIST_ISH.pattern)
+            or guard.near(t, NOUN.pattern, LIST_ISH.pattern))
 
 
 def detect(text):
@@ -667,7 +661,7 @@ def detect(text):
         return False
     if CREATE.search(t):
         return False
-    return bool(NOUN.search(t)) and bool(LIST_ISH.search(t))
+    return bool(NOUN.search(t)) and _asking_for_the_list(t)
 
 
 def after_amend(rid, owner=None):
@@ -764,11 +758,15 @@ def interpret(text, now=None):
             return None
     if CREATE.search(t) or OTHER_TOPIC.search(t):
         return None
-    # Is this a request, or is the owner talking about an answer already given?
-    # "show" and "see" are ordinary English: with the noun alone effectively the
-    # trigger, this reflex answered two bug reports about ANOTHER agent with the
-    # owner's own table. Same fault the backup reflex was fixed for days earlier,
-    # which is why the guard is shared rather than written a third time.
+    # Is this a request, or is he talking about an answer he already got?
+    #
+    # THIS is the live path — detect() below is used by the CLI, and guarding
+    # only that would have fixed nothing. On 2026-08-14 two bug reports about
+    # another agent's reminders were answered with his own table, because
+    # "show" and "see" are ordinary English and the noun was effectively the
+    # whole trigger. The same fault was fixed in the backup reflex three days
+    # earlier; the shared guard exists so the next reflex inherits the fix
+    # instead of the bug.
     if guard.talking_about_it(t):
         return None
     now = now or time.time()
@@ -930,9 +928,9 @@ def try_handle(chat_id, text, send, owner=None):
 
 
 if __name__ == "__main__":
-    # A TOOL for a turn that has already understood the sentence, not a parser
+    # A TOOL for the turn that already understood the sentence, not a parser
     # trying to understand it. The model decides what was asked — in whatever
-    # language it was asked in — and names the view it wants.
+    # language it was asked in — and names the view it wants here.
     import argparse
     ap = argparse.ArgumentParser(description="render the reminders table")
     ap.add_argument("--owner", help="whose list (omit for the shared view)")
@@ -940,8 +938,6 @@ if __name__ == "__main__":
     ap.add_argument("--done", action="store_true", help="completed rows only")
     ap.add_argument("--overdue", action="store_true", help="overdue rows only")
     ap.add_argument("--client", default="telegram", choices=["telegram", "ios"])
-    ap.add_argument("--chat", help="post the table into this chat instead of "
-                                   "printing it, with each reminder's photo")
     ap.add_argument("--detect", help="legacy: test the old keyword matcher")
     a = ap.parse_args()
 
@@ -955,41 +951,21 @@ if __name__ == "__main__":
         title, noun = "Completed reminders", "completed"
     elif a.all:
         rows = sorted(pending(owner=a.owner) + completed(50, owner=a.owner),
-                      key=lambda r: r.get("epoch") or 0)
+                      key=lambda r: r.get("due") or 0)
         title, noun = _whose(a.owner) + " — everything", "row"
     else:
         rows = pending(owner=a.owner)
         if a.overdue:
-            # The row carries its own flag, computed where the due date is
-            # understood. Re-deriving it here from a key these rows do not have
-            # keeps every row and labels the lot overdue.
+            # The row carries its own `overdue` flag — computed where the due
+            # date is actually understood. Re-deriving it here from a key called
+            # `due`, which does not exist on these rows, silently kept every row
+            # and labelled the lot "overdue".
             rows = [r for r in rows if r.get("overdue")]
             title, noun = _whose(a.owner) + " — overdue", "overdue"
         else:
             title, noun = _whose(a.owner), "pending"
-    table = render(rows, title=title, noun=noun, client=a.client)
-    if not a.chat:
-        print(table)
-        raise SystemExit(0)
-
-    # POSTING is the whole point of the table on a phone: it goes through
-    # tg_api, which routes a GFM table to sendRichMessage so Telegram draws it
-    # natively instead of showing pipes, and degrades to readable rows if the
-    # rich send fails. The photos follow as real photo messages — a reminder
-    # whose whole content is "look at this" is not served by a row of text
-    # saying a picture exists.
-    #
-    # This exists because the reflex that used to do it only ran when a keyword
-    # matched. With the model deciding instead, the delivery had nowhere to live
-    # and the agent was left pasting a table into a chat that renders pipes.
-    sys.path.insert(0, os.path.join(C.WORKSPACE_ROOT, "telegram"))
-    import tg_api as TG
-    chat = int(a.chat)
-    if not TG.send_message(chat, table):
-        raise SystemExit(f"could not post the table to {chat}")
-    n = send_photos(chat, rows)
-    print(f"posted to {chat}: {len(rows)} row(s), {n} photo(s)")
-    print(f"\n({(time.time() - t0) * 1000:.0f}ms)")
+    print(render(rows, title=title, noun=noun, client=a.client))
+    print(f"\n({(time.time() - t0) * 1000:.0f}ms)", file=sys.stderr)
 
 
 # ---------------------------------------------------------------- #109 -----

@@ -5,6 +5,7 @@ workspace) with one persistent session per chat. Files are saved to inbox/ and t
 bot offers: Ingest to KB / Analyze / Hold for this chat. Locked to an allowlist of
 Telegram user IDs. Run via start_telegram.sh (single-instance, @reboot).
 """
+import tgconf as C   # identity from config
 import os, sys, time, json, re, uuid, datetime, threading, subprocess, traceback, tempfile
 from concurrent.futures import ThreadPoolExecutor
 from email.utils import parseaddr
@@ -943,13 +944,9 @@ def _reminder_owner(msg):
         return None
 
 
-# Keyword reflexes no longer intercept messages (2026-08-14). A pattern of NOUN
-# plus filler cannot tell a request from a complaint that mentions the same noun,
-# and cannot read a language nobody wrote a branch for — measured here, the local
-# embedder scores a Russian request for reminders no higher than an unrelated
-# English sentence, and scores an English COMPLAINT about reminders higher than
-# either. The model reads every message instead, and calls the reflex modules as
-# tools. Set TG_REFLEX_INTERCEPT=1 for the old instant path with those limits.
+# Reflex interception, off since 2026-08-14. A keyword gate cannot tell a
+# request from a complaint, and cannot read a language nobody wrote a branch
+# for. Set TG_REFLEX_INTERCEPT=1 to restore the instant path with those limits.
 REFLEX_INTERCEPT = os.environ.get("TG_REFLEX_INTERCEPT", "0") == "1"
 
 
@@ -1064,7 +1061,7 @@ def handle_text(msg, chat_id, text):
     # Tasks reflex (2026-08-07, the owner: "show me the currently running tasks ... should
     # take no time without LLM roundtrips. It should be hardcoded in Python"): a
     # registry lookup + the table the voice server already renders. ~50ms, no turn.
-    if REFLEX_INTERCEPT and C.TASKS_REFLEX:
+    if C.TASKS_REFLEX:
         try:
             summary = tasks_reflex.try_handle(chat_id, text, TG.send_message)
         except Exception as e:
@@ -1106,6 +1103,27 @@ def handle_text(msg, chat_id, text):
     # Reminders reflex (2026-08-07, the owner: "when the user wants to see all
     # reminders, present them as a table"). A SELECT plus a token mint per
     # photo row. ~5ms.
+    #
+    # 2026-08-14 (the owner): "I should be able to ask you about Reminders in any
+    # language and you should show them, but please do not look for a trigger
+    # word. you need to actually understand the message."
+    #
+    # He is right, and no keyword list can do this. The pattern matched a NOUN
+    # plus filler, so it fired on sentences that mentioned reminders while
+    # asking for something else — twice on his own bug reports — and it never
+    # fired on Russian at all unless a hand-written Russian branch happened to
+    # cover the phrasing. Both faults are the same fault: matching words instead
+    # of reading the sentence.
+    #
+    # The local embedder cannot replace it either. Measured on this box against
+    # "show me my reminders": a Russian request scores 0.41 — indistinguishable
+    # from "what is the weather tomorrow" at 0.43 — while an English COMPLAINT
+    # about reminders scores 0.85. It fails in exactly the two ways that matter.
+    #
+    # So the reflex stops deciding. The one thing here that reads a sentence in
+    # any language is the model, and it now sees every message. The table is
+    # still rendered by this module — as a TOOL the turn calls, not a router
+    # that intercepts. The cost is honest: seconds instead of milliseconds.
     if REFLEX_INTERCEPT and C.REMINDERS_REFLEX:
         try:
             # "per user" (the owner 2026-08-10): the list belongs to whoever
@@ -1125,7 +1143,7 @@ def handle_text(msg, chat_id, text):
     # Backup reflex (2026-08-07, the owner: "when I ask to show the status of our
     # backups the backend should have a very quick answer"). Same shape as the
     # tasks reflex — file checks, no model turn. ~2ms.
-    if REFLEX_INTERCEPT and C.BACKUP_REFLEX:
+    if C.BACKUP_REFLEX:
         try:
             summary = backup_reflex.try_handle(chat_id, text, TG.send_message)
         except Exception as e:
