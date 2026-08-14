@@ -104,7 +104,14 @@ Everything that was a literal is now config:
 | `TG_SECOND_OWNER_KEY` | a second owner, if this deployment has one |
 | `TG_OWNER_EMAIL`, `TG_SECOND_OWNER_EMAIL` | where a fired reminder mails; unset means it does not mail |
 | `TG_OWNER_PUSH_ACCOUNT` / `TG_PUSH_ACCOUNTS` | voice-app accounts to push; unset means it does not push |
+| `TG_REMINDER_CHAT_ID` | where a reminder fires when the caller names no chat; `add` refuses rather than queue one that would fire nowhere |
 | `REMINDERS_DB` | overrides the path derived from `WORKSPACE_ROOT` |
+
+Installing the queue is half of it. The other half is `AGENT-REMINDERS.md`: the
+instruction block that has to reach the agent's own context, because an agent that
+cannot see the queue will schedule the reminder with a cloud tool it can see, say
+"done", and mean it — while the queue stays empty and the amendment two turns later
+edits a row that never existed.
 
 Owner keys live in the DATABASE, so changing one after rows exist means migrating
 them. Pick it at install time.
