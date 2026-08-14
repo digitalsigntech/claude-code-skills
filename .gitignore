@@ -12,7 +12,7 @@ inject/
 *.key
 logs/
 mail/
-mail-vlad/
+mail-*/
 *.pem
 # Populated data / state — ship code, not data
 *.pyc

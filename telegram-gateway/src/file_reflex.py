@@ -61,9 +61,9 @@ EXT_HINT = {"pdf": ".pdf", "csv": ".csv", "xlsx": ".xlsx"}
 # "from-pdfs" (email-KB extraction artifacts — hash-prefixed .md mirrors of every
 # emailed PDF that would out-tie the real document).
 EXCLUDE_DIRS = {".git", "__pycache__", "node_modules", "state", "logs", "log",
-                "store", "cache", "tmp", "mail", "mail-vlad", "telegram",
-                "chatlog", "inbox", "media", "from-pdfs",
-                "personal"}   # the owner's private notes — served ONLY via personal_notes gate
+                "store", "cache", "tmp", "inbox", "media", "from-pdfs"
+                } | set(C.FILE_REFLEX_EXCLUDE_DIRS)   # the private-note dir is in there,
+# and it is served ONLY via the personal_notes gate
 EXCLUDE_DIR_PREFIXES = ("venv", ".")
 SENSITIVE = re.compile(r"token|secret|credential|password|api[_-]?key|id_rsa"
                        r"|\.pem$|\.key$|\.env$", re.I)

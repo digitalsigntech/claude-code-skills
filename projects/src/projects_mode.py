@@ -46,7 +46,7 @@ OLD_SUFFIXES = ["🧠 Wisdom"]
 def _or_key():
     try:
         return next((l.split("=", 1)[1].strip()
-                     for l in open(os.path.expanduser("~/.config/dst/secrets.env"))
+                     for l in open(C.SECRETS_ENV)
                      if l.startswith("OPENROUTER_API_KEY=")), None)
     except Exception:
         return None
