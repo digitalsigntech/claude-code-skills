@@ -84,6 +84,27 @@ default. A missing profile is never an error.
 
 ---
 
+## When the bot goes quiet, something has to say so
+
+`watchdog.py`, from cron every few minutes:
+
+    */5 * * * * cd /path/to/telegram && python3 watchdog.py >> logs/watchdog.log 2>&1
+
+The failure it exists for is the one nothing else catches: the process is up,
+`systemctl is-active` says active, Telegram is delivering — and every message dies in
+the handler, so the bot receives everything and answers nothing. Every component
+reports itself healthy, so the only detector is a person who eventually asks why they
+are being ignored. That took hours the first time.
+
+It watches two things: an inbound message in the archive with nothing after it for
+ten minutes, and tracebacks written to the log since its last run. The alert goes
+straight to the Bot API from the watchdog's own process — routing it through the
+gateway would be asking the broken component to report that it is broken.
+
+It alerts once per incident, not once per run, and its first run only sets a
+baseline: a watchdog that cries about last week's log is one that gets muted.
+
+
 ## What it does
 
 - **Every message → a real Claude turn.** `bridge.py` shells out to
