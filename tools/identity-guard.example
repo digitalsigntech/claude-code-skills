@@ -1,0 +1,36 @@
+# Identity guard — one extended-regex pattern per line, '#' comments allowed.
+#
+# Copy to ../.identity-guard (beside the checkout, NOT inside it) or to
+# ~/.config/skills/identity-guard, and fill in the identifiers that belong to
+# your deployment. This file is the example; the real one never enters the repo,
+# because its contents are exactly what must not be published.
+#
+# What belongs in it, each class learned from something that actually shipped:
+#
+#   people and companies — a fresh install once greeted its owner by the name of
+#   the company that wrote the skill, from a hardcoded string in a prompt.
+#
+#   machines and hosts — a file copied from a working box kept that box's home
+#   directory and read a database path that did not exist for two days.
+#
+#   ids, mailboxes, addresses — a chat id or mailbox left in code routes a
+#   stranger's install back to you.
+#
+# Include OTHER machines and personas in your estate too, not just your own: a
+# second install's hostname and a demo company's name are somebody's private
+# information, and naming one in a comment is how it reaches a third party.
+
+# people / companies
+[Ff]irstname [Ll]astname
+\bYourCompany\b
+yourcompany\.example
+
+# machines / hosts
+/home/youruser
+\byour-hostname\b
+\byour-vps-alias\b
+
+# ids / mailboxes / addresses
+\b1234567890\b
+you@yourcompany\.example
+\b203\.0\.113\.10\b

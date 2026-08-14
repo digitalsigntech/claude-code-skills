@@ -25,3 +25,6 @@ state/
 *token*.json
 .venv/
 venv/
+
+# The scrub gate's own pattern list, if anyone keeps it in-tree by mistake.
+.identity-guard
