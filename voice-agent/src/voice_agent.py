@@ -202,6 +202,42 @@ def _chatdb():
         return None
 
 
+# ---------------------------------------------------------------- guests ---
+# One machine, more than one caller. The account this agent BELONGS to is its
+# owner; anyone else — a demo unlock, a colleague trying it — is a guest, and a
+# guest must not read the owner's conversation or write into the owner's chat.
+#
+# 2026-08-14, found while building the demo endpoint: a freshly minted demo
+# account asked for its history and was handed Vladimir's — "Visual sign." and
+# Max's reply — because history is per MACHINE and nothing asked whose it was.
+_WHO = threading.local()
+
+
+def set_caller(account):
+    _WHO.account = str(account or "") or None
+
+
+def caller():
+    return getattr(_WHO, "account", None)
+
+
+def owner_account():
+    """The account this install belongs to. Unset means single-user: every
+    caller is the owner, which is what every existing install expects."""
+    return str(config().get("owner_account") or "") or None
+
+
+def is_guest():
+    own = owner_account()
+    who = caller()
+    return bool(own and who and who != own)
+
+
+def guest_chat_id(account=None):
+    """A private, stable chat id for a guest, well away from Telegram's range."""
+    a = account or caller() or "guest"
+    return -(int(hashlib.sha256(a.encode()).hexdigest()[:12], 16) % 10**9) - 10**12
+
 # ---------------------------------------------------------------- telegram
 # 2026-08-13, from the owner of an install that had both: "it has a telegram
 # gateway. Messages must be synched to telegram, too."
@@ -233,6 +269,12 @@ def telegram():
         except Exception:
             pass
     return _TG_CACHE["mod"]
+
+
+def archive_chat_id():
+    """Which chat this caller's lines belong to: the owner's Telegram chat, or
+    the guest's own private one."""
+    return guest_chat_id() if is_guest() else (telegram_chat() or 0)
 
 
 def telegram_chat():
@@ -273,6 +315,8 @@ def telegram_chat():
 
 
 def _chat_title():
+    if is_guest():
+        return caller() or "Guest"
     """The archive's name for that chat. Derived, never hardcoded: an upstream
     install spent a week filing one person's words under another's name, because
     a name was written into the code back when only one person used it."""
@@ -330,11 +374,12 @@ def archive(text, direction, sender, account_name="", mirror=True):
     if db and text:
         try:
             db.record(text[:4000], direction,
-                      sender=sender, chat_id=chat or 0,
+                      sender=sender, chat_id=archive_chat_id(),
                       chat_title=_chat_title(), kind="text")
         except Exception:
             pass
-    if mirror and text:
+    # A guest's words go nowhere near the owner's Telegram.
+    if mirror and text and not is_guest():
         tg_text(text, who=(sender if direction == "in" else None))
 
 
@@ -414,12 +459,12 @@ def archive_file(paths, caption, sender):
     # "[camera photo: photo-210115.png]" in somebody's Telegram is a filename
     # where a photograph should be. The marker is the archive's business.
     sent = True
-    if telegram_chat():
+    if telegram_chat() and not is_guest():
         for i, p in enumerate(paths):
             sent = tg_file(p, caption if i == 0 else None) and sent
     try:
         db.record(text[:4000] + ("" if sent else " [NOT delivered to the chat]"),
-                  "in", sender=sender or "you", chat_id=telegram_chat() or 0,
+                  "in", sender=sender or "you", chat_id=archive_chat_id(),
                   chat_title=_chat_title(), kind="photo")
     except Exception:
         return False
@@ -457,10 +502,17 @@ def list_attachments(since=0.0, limit=30):
     try:
         import sqlite3
         cx = sqlite3.connect(f"file:{d / 'chat.db'}?mode=ro", uri=True, timeout=3)
-        rows = cx.execute(
-            "SELECT epoch, text FROM messages WHERE epoch > ? AND "
-            "(text LIKE '[camera photo%' OR text LIKE '[file: %') "
-            "ORDER BY epoch DESC LIMIT ?", (since, limit)).fetchall()
+        if is_guest():
+            rows = cx.execute(
+                "SELECT epoch, text FROM messages WHERE epoch > ? AND "
+                "chat_id = ? AND (text LIKE '[camera photo%' OR "
+                "text LIKE '[file: %') ORDER BY epoch DESC LIMIT ?",
+                (since, guest_chat_id(), limit)).fetchall()
+        else:
+            rows = cx.execute(
+                "SELECT epoch, text FROM messages WHERE epoch > ? AND "
+                "(text LIKE '[camera photo%' OR text LIKE '[file: %') "
+                "ORDER BY epoch DESC LIMIT ?", (since, limit)).fetchall()
         cx.close()
     except Exception:
         return []
@@ -534,10 +586,16 @@ def _archive_history(limit, since):
     try:
         import sqlite3
         cx = sqlite3.connect(f"file:{d / 'chat.db'}?mode=ro", uri=True, timeout=3)
-        rows = cx.execute(
-            "SELECT epoch, sender, text, direction FROM messages "
-            "WHERE epoch > ? ORDER BY epoch DESC LIMIT ?",
-            (since, limit)).fetchall()
+        if is_guest():
+            rows = cx.execute(
+                "SELECT epoch, sender, text, direction FROM messages "
+                "WHERE epoch > ? AND chat_id = ? ORDER BY epoch DESC LIMIT ?",
+                (since, guest_chat_id(), limit)).fetchall()
+        else:
+            rows = cx.execute(
+                "SELECT epoch, sender, text, direction FROM messages "
+                "WHERE epoch > ? ORDER BY epoch DESC LIMIT ?",
+                (since, limit)).fetchall()
         cx.close()
     except Exception:
         return None
@@ -1299,6 +1357,7 @@ class Handler(BaseHTTPRequestHandler):
 
         kind = str(d.get("type") or "")
         account = str(d.get("account") or "default")
+        set_caller(account)
         name = str(d.get("account_name") or "")
 
         if kind == "capabilities":
