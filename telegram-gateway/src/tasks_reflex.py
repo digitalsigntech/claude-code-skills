@@ -28,6 +28,8 @@ TIMEOUT = 4
 # "what are you working on right now", "current jobs". Deliberately requires both
 # a task-ish noun and a running-ish word, so "I ran the backup task yesterday"
 # does not trigger it.
+import reflex_guard as guard
+
 NOUN = re.compile(r"\b(task|tasks|job|jobs|process|processes|agent|agents)\b", re.I)
 RUNNING = re.compile(r"\b(running|run|active|in progress|ongoing|going on|"
                      r"current|currently|now|right now|working on|status|busy)\b", re.I)
@@ -49,6 +51,8 @@ def detect(text):
     if not t or len(t) > 120 or "\n" in t or t.startswith("/"):
         return False
     if ABOUT.search(t):
+        return False
+    if guard.talking_about_it(t):
         return False
     if BARE.search(t):
         return True

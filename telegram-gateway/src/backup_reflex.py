@@ -265,6 +265,8 @@ def render(rows=None):
 # backup run", "when was the last backup". Falls through on questions ABOUT
 # backups — how to add one, why one failed last week, how to restore — because
 # those want Claude, not a table.
+import reflex_guard as guard
+
 NOUN = re.compile(r"\bback[- ]?ups?\b", re.I)
 # 2026-08-11 (the owner: "fix the bug that brings up that table upon typing in
 # the keyword, without looking at my actual message"). He wrote "You said the
@@ -299,7 +301,7 @@ def detect(text):
     t = (text or "").strip()
     if not t or len(t) > 120 or "\n" in t or t.startswith("/"):
         return False
-    if ABOUT.search(t) or META.search(t):
+    if ABOUT.search(t) or META.search(t) or guard.talking_about_it(t):
         return False
     if not NOUN.search(t):
         return False

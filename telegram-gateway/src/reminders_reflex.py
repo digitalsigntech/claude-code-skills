@@ -580,6 +580,8 @@ def send_photos(chat_id, rows):
 # "show me my reminders", "what reminders do I have", "list reminders", "any
 # reminders?". Must NOT fire on "remind me to ..." — that is a request to
 # CREATE one, and answering it with a list would swallow the instruction.
+import reflex_guard as guard
+
 NOUN = re.compile(r"\breminders?\b", re.I)
 # Russian too: he asks in both languages, and "покажи мои напоминания" used to
 # fall through to the model while its English twin was instant. The date and
@@ -728,6 +730,13 @@ def interpret(text, now=None):
         if not t or len(t) > 140:
             return None
     if CREATE.search(t) or OTHER_TOPIC.search(t):
+        return None
+    # Is this a request, or is the owner talking about an answer already given?
+    # "show" and "see" are ordinary English: with the noun alone effectively the
+    # trigger, this reflex answered two bug reports about ANOTHER agent with the
+    # owner's own table. Same fault the backup reflex was fixed for days earlier,
+    # which is why the guard is shared rather than written a third time.
+    if guard.talking_about_it(t):
         return None
     now = now or time.time()
 
