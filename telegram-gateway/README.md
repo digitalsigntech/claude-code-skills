@@ -50,6 +50,38 @@ NAT with no public IP or inbound ports.
 > no-ops and the core chat gateway runs unaffected. See
 > [Optional integrations](#optional-integrations) for how to strip or keep them.
 
+
+## The agent profile — configure this before anything else
+
+One file describes your deployment; the code reads roles, never names.
+
+    cp agent-profile.example.json <your-workspace>/agent-profile.json
+    $EDITOR <your-workspace>/agent-profile.json
+
+| Section | What it sets |
+|---|---|
+| `agent` | bot name, its mailbox, model, and `system_prompt_file` |
+| `host` | how the bot refers to the machine (defaults to the hostname) |
+| `org` | company name, short name, domain |
+| `workspace` | `root`, display label, the `dirs` map, dirs to never index |
+| `people` | `owner` / `second_owner` / `friend` — by ROLE, each with name, email, mailbox, Telegram id |
+| `capabilities` | which local services actually exist here |
+| `channels` | Telegram chat ids per behaviour |
+
+**Capabilities are the important part.** Features that need a local service —
+the semantic answer cache, the CLIP photo reflex, the KB reflex, the privacy
+router — ask `has()` before arming themselves. Everything ships **off**, so a
+fresh install degrades quietly instead of erroring on every message. Turn one on
+only once the service behind it is really there.
+
+**Your system prompt is content, not code.** Put it in a markdown file at your
+workspace root (`agent-system-prompt.md` by default) — where your facts live,
+what needs whose approval, what is private. With no file you get a generic
+instruction that runs fine and says nothing about you.
+
+Overrides, in order: `AGENT_<SECTION>_<KEY>` env → the profile → the built-in
+default. A missing profile is never an error.
+
 ---
 
 ## What it does
