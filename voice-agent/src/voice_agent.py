@@ -313,47 +313,6 @@ def tg_file(path, caption=None):
         return False
 
 
-_DEDUPE_S = 15          # one utterance, two writers, seconds apart
-
-
-def _norm(t):
-    return re.sub(r"[^\w\s]", "", (t or "").lower()).strip()
-
-
-def _already_archived(text, direction):
-    """True when this line is the SECOND copy of one thing the user said.
-
-    2026-08-14: "Visual sign." and "visual sign?" landed in the archive one
-    second apart and both went into the chat, because two paths record the same
-    utterance — the app posts the transcript, and the relayed question is
-    archived when it arrives. Two writers, one sentence, different punctuation
-    because they capture it at different moments. The first writer wins;
-    everything about the second is a duplicate bubble.
-
-    Only inbound lines, only a few seconds, and only an exact match once case
-    and punctuation are removed: someone genuinely saying "yes" twice a minute
-    apart still gets two rows, which is right.
-    """
-    if direction != "in":
-        return False
-    n = _norm(text)
-    if not n:
-        return False
-    d = archive_dir()
-    if not d:
-        return False
-    try:
-        import sqlite3
-        cx = sqlite3.connect(f"file:{d / 'chat.db'}?mode=ro", uri=True, timeout=3)
-        rows = cx.execute(
-            "SELECT text FROM messages WHERE direction='in' AND epoch > ? "
-            "ORDER BY epoch DESC LIMIT 5", (time.time() - _DEDUPE_S,)).fetchall()
-        cx.close()
-    except Exception:
-        return False
-    return any(_norm(r[0]) == n for r in rows)
-
-
 def archive(text, direction, sender, account_name="", mirror=True):
     """Record a voice turn in the machine's archive, and mirror it to Telegram.
 
@@ -363,7 +322,7 @@ def archive(text, direction, sender, account_name="", mirror=True):
     to one agent should read back as one conversation, whichever way the words
     arrived."""
     chat = telegram_chat()
-    if _already_archived(text, direction):
+    if direction == "in" and _already_archived(text, within=15, direction="in"):
         print(f"[voice-agent] duplicate line not archived: {str(text)[:40]!r}",
               file=sys.stderr)
         return
@@ -522,26 +481,48 @@ def list_attachments(since=0.0, limit=30):
     return items
 
 
-def _already_archived(text, within=180):
+def _norm(t):
+    """For comparison only: case and punctuation removed.
+
+    2026-08-14: "Visual sign." and "visual sign?" are one thing somebody said,
+    recorded by two writers a second apart — the app posts the transcript and
+    the relayed question is archived when it arrives. Comparing the raw strings
+    called them different sentences, so both went into the chat and the agent
+    answered a fragment twice.
+    """
+    return re.sub(r"[^\w\s]", "", (t or "").lower()).strip()
+
+
+def _already_archived(text, within=180, direction=None):
     """Has this line just been written? Used only to stop a double entry.
 
-    Compared on the first 200 characters: the voice model's `log` call and the
-    answer `ask` archived are the same sentence, but one of them can arrive
-    truncated or with trailing punctuation from the speech pipeline."""
+    Compared on the first 200 characters with case and punctuation removed: the
+    voice model's `log` call and the archived `ask` are the same sentence, but
+    one of them can arrive truncated, re-punctuated, or rewritten in passing by
+    the speech pipeline.
+
+    `direction` narrows it to one side of the conversation, and a SHORT window
+    goes with it: somebody saying "yes" twice a minute apart means it twice.
+    """
     d = archive_dir()
     if not d or not text:
         return False
     try:
         import sqlite3
         cx = sqlite3.connect(f"file:{d / 'chat.db'}?mode=ro", uri=True, timeout=3)
-        rows = cx.execute("SELECT text FROM messages WHERE epoch > ? "
-                          "ORDER BY epoch DESC LIMIT 4",
-                          (time.time() - within,)).fetchall()
+        if direction:
+            rows = cx.execute("SELECT text FROM messages WHERE epoch > ? AND "
+                              "direction = ? ORDER BY epoch DESC LIMIT 4",
+                              (time.time() - within, direction)).fetchall()
+        else:
+            rows = cx.execute("SELECT text FROM messages WHERE epoch > ? "
+                              "ORDER BY epoch DESC LIMIT 4",
+                              (time.time() - within,)).fetchall()
         cx.close()
     except Exception:
         return False
-    head = " ".join(text.split())[:200]
-    return any(" ".join(str(r[0] or "").split())[:200] == head for r in rows)
+    head = _norm(text)[:200]
+    return bool(head) and any(_norm(r[0])[:200] == head for r in rows)
 
 
 def _archive_history(limit, since):
