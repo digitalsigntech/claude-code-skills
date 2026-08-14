@@ -20,6 +20,24 @@ self-contained with its own `README.md` (what it does + how to install it); secr
 credentials, populated databases, and personal data are never included — templates
 (`*.example.*`) ship instead.
 
+## Nothing in here names a person or a machine
+
+These skills carry no operator identity: no personal or company names, no host names,
+no chat ids, no mailboxes, no absolute home directories — not in code, not in config,
+not in a comment. Every one of those is a variable, set for the target machine at
+install time.
+
+That is enforced rather than remembered. `tools/pre-push-hook.sh` (installed as this
+repo's `pre-push`) refuses any push whose tree contains an identifier belonging to a
+person, a machine or an account in the estate this was extracted from. It is not a
+style rule: a greeting once introduced somebody's fresh install as its author's
+appliance, and a hand-copied file spent two days reading another box's database path.
+
+The mirror of it lives in the gateway skill as `install_check.py`, which asks the same
+question of an installed machine: does anything here name a deployment that is not
+this one? Run it after installing, and after copying anything from a machine that
+already worked.
+
 ## Data privacy
 
 Several of these skills share a deliberate design principle: **sensitive data is
