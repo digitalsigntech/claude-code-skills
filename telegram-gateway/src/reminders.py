@@ -213,16 +213,34 @@ PRIMARY = OWNERS[0]
 
 
 def owner_of(tg_id):
-    """Telegram id -> owner key, from the accounts registry. None for anyone
-    else — a guest cannot own one of these."""
+    """Telegram id -> owner key. None for anyone this install does not know —
+    a guest cannot own one of these.
+
+    A multi-user install answers from the accounts registry. MOST installs have
+    one owner and no registry, and returning None for them is not neutral: every
+    query then runs unfiltered, which looks perfect with one person and silently
+    shows each of two people the other's rows on the day a second arrives. The
+    gateway already knows who the owner is, so ask it."""
     try:
         sys.path.insert(0, os.path.join(WORKSPACE_ROOT, "operations", "accounts"))
         import accounts
         u = accounts.get(tg_id) or {}
+        first = (u.get("name") or "").split()[0].lower()
+        if first in OWNERS:
+            return first
     except Exception:
-        return None
-    first = (u.get("name") or "").split()[0].lower()
-    return first if first in OWNERS else None
+        pass
+    try:
+        sys.path.insert(0, os.path.join(WORKSPACE_ROOT, "telegram"))
+        import tgconf as C
+        if tg_id and int(tg_id) == int(getattr(C, "OWNER_ID", 0) or 0):
+            return PRIMARY
+        second = getattr(C, "SECOND_OWNER_ID", 0)
+        if tg_id and second and int(tg_id) == int(second) and len(OWNERS) > 2:
+            return OWNERS[1]
+    except Exception:
+        pass
+    return None
 
 
 def owner_email(owner):
@@ -370,6 +388,31 @@ def resolve_id(target):
             raise ValueError(f"{target!r} matches {len(found)} reminders ({ids})"
                              " — name one by number")
     raise ValueError(f"no reminder matching {target!r}")
+
+
+def owner_keys_in_db():
+    """Owner keys present in the data, so a mismatch with this install's config
+    cannot hide. Rows written while TG_PRIMARY_OWNER_KEY was unset are keyed to
+    the default and then invisible to every per-owner query — they are still in
+    the list, under a name nobody is asking for, and nothing says so."""
+    try:
+        c = _db()
+        keys = {r[0] for r in c.execute(
+            "SELECT DISTINCT COALESCE(owner,?) FROM reminders", (PRIMARY,))}
+        c.close()
+    except Exception:
+        return set()
+    return keys
+
+
+def warn_on_key_mismatch(out=sys.stderr):
+    stray = {k for k in owner_keys_in_db() if k and k not in OWNERS}
+    if stray:
+        print(f"reminders: rows are keyed to {sorted(stray)}, which this install "
+              f"does not use (its keys are {list(OWNERS)}). Those rows will not "
+              f"appear in a per-owner list. Re-key them, or set the env to match.",
+              file=out)
+    return stray
 
 
 def list_rows(all_rows=False, owner=None):
@@ -693,6 +736,7 @@ def main():
                         photo=ns.photo)
         print(f"queued #{rid} for {when}" + (" (with photo)" if ns.photo else ""))
     elif ns.cmd == "list":
+        warn_on_key_mismatch()
         for r in list_rows(ns.all, owner=getattr(ns, "owner", None)):
             print(f"#{r['id']} {r['when']} [{r['status']}] {r['kind']} chat={r['chat_id']} "
                   f"owner={r['owner']}: {r['text'][:100]}"
