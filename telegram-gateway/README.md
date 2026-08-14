@@ -84,6 +84,31 @@ default. A missing profile is never an error.
 
 ---
 
+## The reminders queue ships with the gateway now
+
+`src/reminders.py` is the scheduled-job queue the reminders reflex reads: add,
+list, edit, cancel, plus firing into a chat. Install it at
+`<workspace>/operations/reminders/reminders.py` — that is where the reflex and the
+firing cron look for it.
+
+It was previously not published in this form, so a second install had a copy taken
+off the machine it was extracted from, carrying that deployment's owner keys, staff
+mail addresses and voice-app push accounts. A reminder firing there would have
+emailed and paged people with no connection to it.
+
+Everything that was a literal is now config:
+
+| Variable | What it decides |
+|---|---|
+| `TG_PRIMARY_OWNER_KEY` | the owner key rows default to (`owner` if unset) |
+| `TG_SECOND_OWNER_KEY` | a second owner, if this deployment has one |
+| `TG_OWNER_EMAIL`, `TG_SECOND_OWNER_EMAIL` | where a fired reminder mails; unset means it does not mail |
+| `TG_OWNER_PUSH_ACCOUNT` / `TG_PUSH_ACCOUNTS` | voice-app accounts to push; unset means it does not push |
+| `REMINDERS_DB` | overrides the path derived from `WORKSPACE_ROOT` |
+
+Owner keys live in the DATABASE, so changing one after rows exist means migrating
+them. Pick it at install time.
+
 ## When the bot goes quiet, something has to say so
 
 `watchdog.py`, from cron every few minutes:
