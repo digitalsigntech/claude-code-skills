@@ -313,6 +313,47 @@ def tg_file(path, caption=None):
         return False
 
 
+_DEDUPE_S = 15          # one utterance, two writers, seconds apart
+
+
+def _norm(t):
+    return re.sub(r"[^\w\s]", "", (t or "").lower()).strip()
+
+
+def _already_archived(text, direction):
+    """True when this line is the SECOND copy of one thing the user said.
+
+    2026-08-14: "Visual sign." and "visual sign?" landed in the archive one
+    second apart and both went into the chat, because two paths record the same
+    utterance — the app posts the transcript, and the relayed question is
+    archived when it arrives. Two writers, one sentence, different punctuation
+    because they capture it at different moments. The first writer wins;
+    everything about the second is a duplicate bubble.
+
+    Only inbound lines, only a few seconds, and only an exact match once case
+    and punctuation are removed: someone genuinely saying "yes" twice a minute
+    apart still gets two rows, which is right.
+    """
+    if direction != "in":
+        return False
+    n = _norm(text)
+    if not n:
+        return False
+    d = archive_dir()
+    if not d:
+        return False
+    try:
+        import sqlite3
+        cx = sqlite3.connect(f"file:{d / 'chat.db'}?mode=ro", uri=True, timeout=3)
+        rows = cx.execute(
+            "SELECT text FROM messages WHERE direction='in' AND epoch > ? "
+            "ORDER BY epoch DESC LIMIT 5", (time.time() - _DEDUPE_S,)).fetchall()
+        cx.close()
+    except Exception:
+        return False
+    return any(_norm(r[0]) == n for r in rows)
+
+
 def archive(text, direction, sender, account_name="", mirror=True):
     """Record a voice turn in the machine's archive, and mirror it to Telegram.
 
@@ -322,6 +363,10 @@ def archive(text, direction, sender, account_name="", mirror=True):
     to one agent should read back as one conversation, whichever way the words
     arrived."""
     chat = telegram_chat()
+    if _already_archived(text, direction):
+        print(f"[voice-agent] duplicate line not archived: {str(text)[:40]!r}",
+              file=sys.stderr)
+        return
     db = _chatdb()
     if db and text:
         try:
