@@ -78,6 +78,18 @@ no-ops and the core gateway runs unaffected.
 On a clean box, confirm from the README which ones are inert, and strip anything that
 is not. Do not leave a reflex enabled that will throw on every message.
 
+## 3b. If you install the reminders queue, install its instructions too
+
+`src/reminders.py` plus a firing cron gives the machine a queue. It does not give
+the agent one — nothing in a queue announces itself, and an agent asked for a
+reminder will otherwise use a cloud scheduler it can already see, answer "done",
+and leave the queue empty.
+
+Follow `AGENT-REMINDERS.md`: set `TG_REMINDER_CHAT_ID` and `TG_PRIMARY_OWNER_KEY`,
+and paste its instruction block into the file this deployment's agent reads on
+every turn — the project `CLAUDE.md`. Put it in a system-prompt file only after
+checking that the adapter actually passes that file to the CLI.
+
 ## 4. Run it as a service
 
 Set it up to start on boot and restart on failure. Then **the trap that catches

@@ -93,6 +93,12 @@ EMAIL_PY = os.path.join(WORKSPACE_ROOT, "email", "venv", "bin", "python")
 PRIVACY_ROUTE = os.path.join(WORKSPACE_ROOT, "email", "kb", "privacy_route.py")
 MAX_ATTEMPTS = 3
 TIME_FMT = "%Y-%m-%d %H:%M"
+# Where a reminder fires when the caller does not name a chat. An agent asked to
+# "remind me tomorrow at nine" knows the time and the words; it does not know the
+# numeric id of the chat it is being spoken to through, and an install where that
+# id has to be guessed is one where the agent reaches for a scheduler it CAN call
+# without asking — and the reminder then fires somewhere the owner never looks.
+DEFAULT_CHAT_ID = os.environ.get("TG_REMINDER_CHAT_ID") or os.environ.get("TG_OWNER_CHAT_ID")
 
 
 def _db():
@@ -709,7 +715,9 @@ def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("add")
-    a.add_argument("when"); a.add_argument("chat_id", type=int)
+    a.add_argument("when")
+    a.add_argument("chat_id", type=int, nargs="?", default=None,
+                   help="chat to fire into; omit to use TG_REMINDER_CHAT_ID")
     a.add_argument("kind", choices=("ping", "task", "delmsg")); a.add_argument("text")
     a.add_argument("--by", default="claude")
     a.add_argument("--photo", help="image to send with the reminder (e.g. the "
@@ -731,7 +739,13 @@ def main():
     sub.add_parser("fire")
     ns = ap.parse_args()
     if ns.cmd == "add":
-        rid, when = add(ns.when, ns.chat_id, ns.kind, ns.text, label=ns.label,
+        chat_id = ns.chat_id if ns.chat_id is not None else DEFAULT_CHAT_ID
+        if chat_id in (None, ""):
+            print("no chat to fire into: pass one, or set TG_REMINDER_CHAT_ID "
+                  "for this install. Refusing to queue a reminder that would "
+                  "fire nowhere.")
+            return
+        rid, when = add(ns.when, int(chat_id), ns.kind, ns.text, label=ns.label,
                         created_by=ns.by, owner=ns.owner,
                         photo=ns.photo)
         print(f"queued #{rid} for {when}" + (" (with photo)" if ns.photo else ""))
