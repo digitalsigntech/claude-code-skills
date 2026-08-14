@@ -28,7 +28,14 @@ import tasks_reflex
 import feedback_reply
 import personal_notes
 import voice_mode
-import qa_cache
+try:
+    import qa_cache            # needs numpy + an embedding server
+except Exception as _e:        # a missing optional dep must not cost the whole bot
+    class qa_cache:            # noqa: N801 - inert stand-in, same call surface
+        enabled = False
+        lookup = staticmethod(lambda *a, **k: None)
+        store = staticmethod(lambda *a, **k: None)
+    print(f"gateway: qa_cache off ({_e})", flush=True)
 import projects_mode
 
 # Searchable chat archive (every message + reply -> SQLite/FTS5). Best-effort: if the

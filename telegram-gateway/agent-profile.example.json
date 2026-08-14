@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "_comment": "Copy to agent-profile.json at your workspace root and edit. Every skill reads this; nothing about you is written into code. Override any field with AGENT_<SECTION>_<KEY>.",
+  "agent": {
+    "name": "Aria",
+    "mailbox": "assistant@",
+    "model": "claude-opus-5"
+  },
+  "host": {
+    "label": "acme-box",
+    "kind": "vps"
+  },
+  "org": {
+    "name": "Acme Widgets Inc.",
+    "short": "Acme",
+    "domain": "acme.example"
+  },
+  "workspace": {
+    "root": "~/acme",
+    "label": "Acme workspace",
+    "dirs": {
+      "knowledge_base": "knowledge-base",
+      "customers": "customers",
+      "mail": "email",
+      "projects": "projects",
+      "operations": "operations",
+      "private": "personal",
+      "brand": "brand"
+    }
+  },
+  "people": {
+    "owner": {
+      "name": "Jane",
+      "full_name": "Jane Doe",
+      "title": "Owner",
+      "email": "jane@acme.example",
+      "mailbox": "jane@",
+      "telegram_id": 0,
+      "private_info": true,
+      "write_code": true
+    },
+    "second_owner": {
+      "name": "Sam",
+      "email": "sam@acme.example",
+      "mailbox": "sam@",
+      "telegram_id": 0,
+      "private_info": true,
+      "write_code": false
+    }
+  },
+  "capabilities": {
+    "embeddings": {
+      "enabled": false
+    },
+    "image_search": {
+      "enabled": false
+    },
+    "kb_index": {
+      "enabled": false
+    },
+    "private_model": {
+      "enabled": false
+    },
+    "speech_to_text": {
+      "enabled": false
+    },
+    "text_to_speech": {
+      "enabled": false
+    },
+    "mail": {
+      "enabled": false
+    },
+    "crm": {
+      "enabled": false
+    },
+    "chat_archive": {
+      "enabled": false
+    },
+    "reminders": {
+      "enabled": false
+    },
+    "voice_plane": {
+      "enabled": false
+    },
+    "doc_scan": {
+      "enabled": false
+    },
+    "secrets_env": {
+      "enabled": false
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "always_cloud_chats": [],
+      "always_local_chats": [],
+      "voice_chats": [],
+      "project_chats": {}
+    }
+  }
+}
