@@ -17,7 +17,7 @@ Resolution order, first hit wins:
 
 A missing profile is NOT an error. Every accessor takes a default, so a skill
 installed on a bare machine runs with generic values instead of dying — which is
-the failure mode that made Max's install a day of hand-patching.
+the failure mode that made the second install a day of hand-patching.
 
 Vendored, not imported across skills: each skill ships its own copy so it has no
 dependency on any other skill being present. sync_exports.py keeps them identical.
@@ -34,7 +34,8 @@ def _candidates():
     if env:
         # An EXPLICIT profile is exclusive. Falling through to the search when it
         # is missing would silently run one deployment under another's identity —
-        # you would think you were testing Max and be answering as us.
+        # you would think you were testing the new install and be answering as the
+        # one it was copied from.
         yield os.path.expanduser(env)
         return
     here = os.path.dirname(os.path.abspath(__file__))
@@ -110,7 +111,8 @@ def roles():
 def has(capability):
     """True if this machine actually provides a capability.
 
-    Max's install notes are a list of features that assumed our services existed:
+    A second install's notes are a list of features that assumed the first
+    deployment's services existed:
     a semantic answer cache that needs an embedding server, a photo reflex that
     needs a CLIP server, a privacy router that needs a local model and FAILS
     CLOSED. Each of those is now a question asked before the feature arms itself.
@@ -141,7 +143,7 @@ def capability(name, field=None, default=None):
 
 def workspace(sub=None, default=None):
     """Absolute path into the workspace tree. The layout is per-deployment: ours
-    is ~/the workspace with email/ and crm/, Max's is /root/summit-label with jobs/ and
+    is ~/the workspace with email/ and crm/; another is a company directory with jobs/ and
     purchasing/. Skills ask for a ROLE of directory, not a path."""
     root = get("workspace.root") or default or os.path.expanduser("~")
     root = os.path.expanduser(root)

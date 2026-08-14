@@ -848,7 +848,8 @@ def address_candidates(workdir, max_messages=600):
     """Names the USER uses to address this agent, counted from its own sessions.
 
     An agent's name is the one identity fact that is never written down: it is
-    established by being used. "You are Max" appears in no file on Max's machine,
+    established by being used. "You are <name>" appears in no file on the machine
+    of an agent everyone calls by that name,
     and asking the operator to add it is asking them to configure the thing we
     said would configure itself. The transcripts are where it does exist.
 

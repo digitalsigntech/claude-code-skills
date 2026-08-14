@@ -6,12 +6,12 @@ times about three different reflexes:
 
   2026-08-11, backups — "You said the backups are running well, but the last
   message here shows 2 failures" got the backup table again.
-  2026-08-14, reminders — twice. "I asked Max to show me reminders. Here is what
-  I got: …" and "I don't need to see reminders that I have with Claude. I am
-  reporting you that Max has a problem" both got the reminders table, so a bug
-  report about another machine was answered with a list of his own rows. He had
-  to censor the word — "why does the remind*** word trigger…" — to get a
-  sentence through to the model at all.
+  2026-08-14, reminders — twice. A bug report about ANOTHER agent's reminders
+  ("here is what I got: …") and a refusal ("I don't need to see reminders that I
+  have here") both came back with the reader's own table, so a report about a
+  different machine was answered with a list of their own rows. The owner had to
+  censor the keyword — "why does the remind*** word trigger…" — to get a sentence
+  through to the model at all.
 
 The shape is always the same: NOUN plus a common verb, matched anywhere in the
 sentence. But "show", "see", "any" and "all" are English filler — nearly every

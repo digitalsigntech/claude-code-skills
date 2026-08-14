@@ -59,7 +59,7 @@ def db_missing():
         f"one. Point `REMINDERS_DB` at the real file, or check that "
         f"`WORKSPACE_ROOT` is the directory this deployment actually uses.")
 # The queue module lives beside its database by convention, so a second
-# install (Max) needs no second env var: point REMINDERS_DB at that
+# install needs no second env var: point REMINDERS_DB at that
 # machine's store and the code that writes it is found alongside.
 REMINDERS_PKG = os.path.dirname(DB)
 REALTIME = f"{C.WORKSPACE_ROOT}/voice/realtime"
@@ -72,7 +72,7 @@ def _mint(path):
     """File token from the RUNNING server — its token map lives there, and a
     second derivation here would be a second copy of the same secret rule.
 
-    2026-08-13: a second install (Max, on its own VPS) has the same reflex and a
+    2026-08-13: a second install, on its own server, has the same reflex and a
     different token minter — its adapter mints in-process, with no HTTP endpoint
     to call. `REMINDERS_MINT_MODULE` names a module exposing `media_token(path)`
     for those installs. Unset, nothing changes here.
