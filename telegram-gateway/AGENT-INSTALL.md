@@ -119,3 +119,16 @@ came back. Then check the logs for exceptions on that turn.
 - [ ] Absolute `PATH` set so `claude` resolves under the service manager
 - [ ] A real message round-tripped from Telegram
 - [ ] Logs clean on that turn
+
+## Last step: prove this install is its own
+
+    python3 install_check.py
+
+It reports absolute paths that do not exist here, mailboxes outside this install's
+own, and chat ids that are neither the owner's nor in the allowlist — code and
+config only, never the company's content.
+
+Run it even when you installed from this repo, and especially if any file was copied
+from a machine that already worked. A copy runs immediately and keeps the original's
+home directory, owner and mailboxes; the failure surfaces days later as a database
+that is always empty, or a reminder that mails a stranger.
