@@ -157,6 +157,21 @@ KB = os.path.join(WORKSPACE_ROOT, "email", "kb", "kb")   # `kb ask "<question>" 
 # quick answers. Set TG_KB_REFLEX=1 to re-enable.
 KB_REFLEX = (os.environ.get("TG_KB_REFLEX", "0") == "1"
              and P.has("kb_index"))
+
+# Reflexes added 2026-08-07: each answers one common question from files or a
+# registry, with no model turn. They ship in this package — the modules are right
+# beside this file — so they default ON; set the env var to 0 to switch one off.
+#
+# These were referenced by gateway.py before they existed here, which on an install
+# that updated one file and not the other killed every message with an
+# AttributeError. gateway.py now treats an unknown setting as off, but a setting
+# that SHOULD exist belongs here: silently-off is a worse outcome than working.
+TASKS_REFLEX = os.environ.get("TG_TASKS_REFLEX", "1") == "1"
+BACKUP_REFLEX = os.environ.get("TG_BACKUP_REFLEX", "1") == "1"
+REMINDERS_REFLEX = os.environ.get("TG_REMINDERS_REFLEX", "1") == "1"
+KB_FILE_REFLEX = os.environ.get("TG_KB_FILE_REFLEX", "1") == "1"
+PERSONAL_NOTE_REFLEX = os.environ.get("TG_PERSONAL_NOTE_REFLEX", "1") == "1"
+
 # Tier-1 quick answer: retrieve a few KB chunks, let a FAST grounded LLM (Nemotron via
 # OpenRouter) answer from JUST those snippets or say ESCALATE. Replaces the old score-band
 # reflex — cosine score is a good retrieval signal but a bad correctness arbiter (a wrong
