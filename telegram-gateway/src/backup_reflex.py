@@ -44,8 +44,7 @@ JOBS = [
      "done_re": re.compile(r"=== (\S+) done — (.+) ==="),
      "size_re": re.compile(r"done — mirror ([\d.]+[GMK])"),
      "every_h": 24,
-     "snapshots": f"{C.WORKSPACE_ROOT}/backups/" + os.environ.get(
-         "TG_BACKUP_SNAPSHOT_DIR", "remote")},
+     "snapshots": f"{C.WORKSPACE_ROOT}/backups/voice-vps"},
     {"name": "GitHub repositories",
      "marker": f"{HOME}/github_archives/last_run",
      "archive": f"{HOME}/github_archives",

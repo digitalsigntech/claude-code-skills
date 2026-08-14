@@ -350,6 +350,10 @@ def archive(text, direction, sender, account_name="", mirror=True):
 # so history renders it. All three, or `posted` is false — a tick that means
 # less than that is a tick that will eventually lie, and did.
 UPLOAD_DIR = "voice-uploads"            # under workdir; created on first upload
+# Push banners are DERIVED copies made by the reminder firing loop, and they
+# live outside the uploads tree. Tokens for them must still resolve here or
+# the notification extension fetches a 404 and draws no picture.
+BANNER_DIR = os.environ.get("REMINDER_BANNER_DIR", "/tmp/reminder-banners")
 UPLOAD_MAX = 36 * 1024 * 1024           # matches the plane's own ceiling
 _EXT = {"image/jpeg": ".jpg", "image/png": ".png", "image/heic": ".heic",
         "image/webp": ".webp", "application/pdf": ".pdf"}
@@ -1065,8 +1069,14 @@ def _remint(token):
     if not token:
         return None
     root = os.path.join(os.path.expanduser(config()["workdir"]), UPLOAD_DIR)
-    for day in sorted(os.listdir(root), reverse=True) if os.path.isdir(root) else []:
-        dd = os.path.join(root, day)
+    dirs = [os.path.join(root, d)
+            for d in (sorted(os.listdir(root), reverse=True)
+                      if os.path.isdir(root) else [])]
+    # A reminder banner is minted in the CRON process, not this one, so a push
+    # carried a token this server had never seen and every extension fetch
+    # 404'd: derived correctly, named correctly, unreachable.
+    dirs.append(BANNER_DIR)
+    for dd in dirs:
         for nm in os.listdir(dd) if os.path.isdir(dd) else []:
             p = os.path.join(dd, nm)
             if media_token(p) == token:      # mints into MEDIA as a side effect
@@ -1109,6 +1119,97 @@ def branding():
     if logo and os.path.exists(logo):
         b["logo_token"] = media_token(logo)
     return b
+
+
+# Sentences that ASK for a change, and answers that CLAIM one. Both are
+# deliberately loose: a false confirmation is expensive and a needless snapshot
+# costs one SELECT.
+_AMEND_SHAPE = re.compile(
+    r"\b(change|move|set|make|edit|update|reschedul\w+|rename|push|delay|"
+    r"cancel|delete|remove|drop|snooze)\b.{0,80}\breminder\b|"
+    r"\breminder\b.{0,80}\b(to|for|at)\b", re.I | re.S)
+# ...unless the sentence is about a DIFFERENT system. The guard fired on my own
+# maintenance request ("delete both cloud routines") and called a true answer a
+# lie, because the local store had correctly not moved. A guard that polices
+# claims about a store it cannot see is worse than none.
+_ELSEWHERE = re.compile(r"\b(routine|remotetrigger|cloud|cron|calendar)\b", re.I)
+_CLAIMS_DONE = re.compile(
+    r"\b(done|updated|changed|moved|rescheduled|set for|now set|cancelled|"
+    r"canceled|deleted|removed)\b", re.I)
+
+
+def reminders_snapshot():
+    """Every reminder's id, time, text and status — the thing a confirmation is
+    supposed to be about. Compared before and after a model turn, so "done" has
+    to correspond to something that actually moved."""
+    db = os.environ.get("REMINDERS_DB") or os.path.join(
+        os.path.expanduser(config()["workdir"]),
+        "operations/reminders/reminders.db")
+    try:
+        import sqlite3
+        cx = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=3)
+        rows = cx.execute("SELECT id, when_epoch, text, status FROM reminders"
+                          ).fetchall()
+        cx.close()
+        return sorted(rows)
+    except Exception:
+        return None            # unknown state: never used to accuse the model
+
+
+def reflex_answer(question, tz=None):
+    """A deterministic answer for questions that never needed a model, or None.
+
+    One reflex today — reminders — and it exists because the app renders a GRID
+    when it receives a markdown table and prose when it does not. The table has
+    to be byte-shaped: a `<!--id:N-->` marker inside the When cell is what makes
+    a row tappable, and no model reproduces that reliably turn after turn.
+    """
+    d = os.path.join(os.path.expanduser(config()["workdir"]), "telegram")
+    if not os.path.isfile(os.path.join(d, "reminders_reflex.py")):
+        return None
+    if d not in sys.path:
+        sys.path.insert(0, d)
+    os.environ.setdefault("REMINDERS_DB", os.path.join(
+        os.path.expanduser(config()["workdir"]),
+        "operations/reminders/reminders.db"))
+    try:
+        import reminders_reflex
+        # The READER's zone, forwarded by the plane from the phone. A
+        # reminder due Saturday read "Tomorrow" because this VPS runs
+        # UTC and the reader does not.
+        if hasattr(reminders_reflex, "set_viewer_tz"):
+            reminders_reflex.set_viewer_tz(tz)
+        # AMEND FIRST, and this ordering is not cosmetic. 2026-08-13: an owner
+        # opened a reminder card and asked to move it. This function
+        # only tried `answer()`, which is the LISTING reader — the sentence
+        # contained "today 19:30" from the card, so it matched as a request for
+        # today's list, and the change fell through to the model. The model
+        # said "Done — fix the monitor is now set for 7:30 PM" and changed
+        # nothing: it confirmed the time it had been TOLD, which was the old
+        # one. Nobody was lying and nothing was edited.
+        #
+        # A confirmation must come from the store. `amend()` returns the answer
+        # it can prove and (None, False) for anything it cannot do exactly, and
+        # only then is this a listing question.
+        ans, changed = reminders_reflex.amend(question)
+        if ans:
+            if changed:
+                rid = re.search(r"\breminder\s+(\d+)", ans, re.I)
+                extra = (reminders_reflex.after_amend(int(rid.group(1)))
+                         if rid else
+                         reminders_reflex.render(reminders_reflex.pending(),
+                                                 client="ios"))
+                if extra:
+                    ans += "\n\n" + extra
+            return ans
+        out = reminders_reflex.answer(question, client="ios")
+    except Exception as e:
+        print(f"[voice-agent] reminders reflex: {e}", file=sys.stderr)
+        return None
+    if not out:
+        return None
+    return out[0] if isinstance(out, tuple) else out
+
 
 
 def capabilities():
@@ -1331,7 +1432,14 @@ class Handler(BaseHTTPRequestHandler):
             # table produces one shaped however it feels that turn, and the row
             # ids that make a row openable cannot survive that. So the same
             # reflex answers here, from this machine's own reminder store.
-            quick = reflex_answer(q)
+            # A CONFIRMATION MUST COME FROM THE STORE. An amend that falls
+            # through to the model gets answered from the REQUEST — "now
+            # set for 7:30 PM" while nothing moved — so the store is
+            # photographed first and the claim checked against it below.
+            before = (reminders_snapshot()
+                      if _AMEND_SHAPE.search(q) and not _ELSEWHERE.search(q)
+                      else None)
+            quick = reflex_answer(q, tz=str(d.get("tz") or "") or None)
             if quick:
                 self.log_message("reflex answered: %.40s", q)
                 archive(q, "in", sender=name or "you")
@@ -1344,6 +1452,15 @@ class Handler(BaseHTTPRequestHandler):
             res = ask(account, q, name)
             self.log_message("answered in %.1fs (%s)", time.time() - t0,
                              res.get("agent_error") or "ok")
+            if before is not None and reminders_snapshot() == before:
+                ans = str(res.get("answer") or "")
+                if _CLAIMS_DONE.search(ans):
+                    self.log_message("BLOCKED a false confirmation: "
+                                     "nothing in the reminder store changed")
+                    res["answer"] = (
+                        "I could not change that reminder — nothing in the "
+                        "store moved, so it is still set as it was. Say the "
+                        "new time again and I will try once more.")
             return self._send(200, res)
 
         # Everything else: the plane treats HTTP 400 as "ask-only agent".
