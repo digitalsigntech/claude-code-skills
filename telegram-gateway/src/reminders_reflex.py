@@ -82,25 +82,71 @@ def _mint(path):
         return None
 
 
-def _when(when_local, epoch):
-    """'tomorrow 10:00', 'Mon 09:15', 'Sat 10 Aug 09:15' — the shortest form
-    that is still unambiguous. A bare date makes the reader do arithmetic."""
+# The reader's zone for THIS request. Thread-local because the box answers
+# several accounts at once and a module-level string would let one caller's
+# timezone label another caller's reminders — the same class of leak as the
+# hardcoded sender name, in a field nobody would think to check.
+import threading as _threading
+_VIEW = _threading.local()
+
+
+def set_viewer_tz(tz):
+    """Called once per request by whatever received it. Passing None clears."""
+    _VIEW.tz = str(tz) if tz else None
+
+
+def _zone(tz=None):
+    """The READER's timezone, not the server's.
+
+    2026-08-13 (the app developer's agent): a reminder due Saturday read "Tomorrow 6:45 PM"
+    because in UTC Saturday was tomorrow while it was still Thursday evening
+    where he was standing. Every relayed question now carries `tz` — an IANA
+    name like America/Toronto — so relative words are computed where the reader
+    is. Unset falls back to this machine's zone, which is correct for a box
+    that sits in the same room as its owner and wrong for a VPS.
+    """
+    tz = tz or getattr(_VIEW, "tz", None)
+    if tz:
+        try:
+            from zoneinfo import ZoneInfo
+            return ZoneInfo(str(tz))
+        except Exception:
+            pass
+    return None                    # None = system local, the old behaviour
+
+
+def _when(when_local, epoch, tz=None):
+    """'Tomorrow 10:00 · 15 Aug', 'Mon 09:15 · 18 Aug' — the shortest form that
+    is still unambiguous, with the real date beside it.
+
+    THE DAY COMPARISON IS BY CALENDAR DATE, not by dividing epochs. The old
+    version did `epoch // 86400`, which counts UTC days: at 20:00 in Toronto it
+    is already tomorrow in UTC, so a third of every day was labelled wrong.
+
+    The ` · <date>` suffix is the app developer's agent's convention (2026-08-13): the card draws
+    what follows the middle dot small and grey under the time. It is appended
+    only to the RELATIVE forms — the absolute ones already say the date, and
+    repeating it would read as a mistake.
+    """
+    from datetime import datetime
     try:
-        t = time.localtime(epoch)
+        z = _zone(tz)
+        dt = datetime.fromtimestamp(epoch, z)
+        now = datetime.now(z)
     except Exception:
         return str(when_local)
-    now = time.localtime()
-    hhmm = time.strftime("%H:%M", t)
-    days = (int(epoch) // 86400) - (int(time.time()) // 86400)
+    hhmm = dt.strftime("%H:%M")
+    date = dt.strftime("%-d %b")
+    days = (dt.date() - now.date()).days
     if days == 0:
-        return f"today {hhmm}"
+        return f"today {hhmm} · {date}"
     if days == 1:
-        return f"tomorrow {hhmm}"
+        return f"tomorrow {hhmm} · {date}"
     if 1 < days < 7:
-        return f"{time.strftime('%a', t)} {hhmm}"
-    if t.tm_year == now.tm_year:
-        return f"{time.strftime('%-d %b', t)} {hhmm}"
-    return f"{time.strftime('%-d %b %Y', t)} {hhmm}"
+        return f"{dt.strftime('%a')} {hhmm} · {date}"
+    if dt.year == now.year:
+        return f"{date} {hhmm}"
+    return f"{dt.strftime('%-d %b %Y')} {hhmm}"
 
 
 def _summarize(text):
