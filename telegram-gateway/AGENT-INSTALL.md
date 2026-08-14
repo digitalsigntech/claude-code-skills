@@ -144,3 +144,21 @@ Run it even when you installed from this repo, and especially if any file was co
 from a machine that already worked. A copy runs immediately and keeps the original's
 home directory, owner and mailboxes; the failure surfaces days later as a database
 that is always empty, or a reminder that mails a stranger.
+
+## Reminders: the table is posted by the tool, not pasted by you
+
+When the owner asks about their reminders — in any language, however phrased — run:
+
+    python3 telegram/reminders_reflex.py --owner <key> --chat <chat id>
+
+It renders the table, posts it through `tg_api` (which routes GFM tables to
+`sendRichMessage`, so Telegram draws a real table instead of pipes, and degrades to
+readable rows if that fails), and sends each reminder's photo as a photo message.
+
+Do not paste the table into your reply instead. A reply is plain text: the table
+arrives as pipe characters, and the pictures do not arrive at all — which matters
+most for the reminders whose entire content is "look at this".
+
+Add `--all`, `--overdue` or `--done` for the other views. Without `--chat` it prints
+to stdout, which is what you want when you are reading it yourself rather than
+showing it to somebody.
