@@ -938,6 +938,25 @@ def answer(text, client="telegram", owner=None):
     if not spec:
         return None, []
     scope = scope_of(text, owner)
+    # ONE REMINDER ASKED FOR IS ONE ROW BACK (the app developer's agent, 2026-08-14, for the app:
+    # "when the client is the iOS app and the user asks for ONE reminder, answer
+    # with the single-row TABLE, not an image with a caption. A photo+caption
+    # blob has no row for the app to turn into a card.")
+    #
+    # "Show me the monitor reminder" used to return all six and leave the app to
+    # work out which one was meant — and an agent with no table to point at
+    # reached for a picture instead. The selector is the same resolver the
+    # amend path uses, so naming a row means the same thing whether you are
+    # changing it or looking at it. A window or a state ("today", "done") is a
+    # filter, not a name, and still lists.
+    if not spec.get("window") and not spec.get("label"):
+        one = resolve(text, scope)
+        if one:
+            rows = rows_for(spec, owner=scope)
+            hit = [r for r in rows if r.get("id") == one.get("id")]
+            if hit:
+                return render(hit, title="Reminder", noun="row",
+                              client=client), hit
     rows = rows_for(spec, owner=scope)
     label = spec["label"]
     return render(rows, title=_whose(scope) + (f" — {label}" if label else ""),
