@@ -767,7 +767,7 @@ def ask(account, question, account_name="", archive_question=True,
         archive_turn=True):
     """`archive_turn=False` for a LOOKUP: answer and drop.
 
-    2026-08-14 (Maclaude): when no table is on screen the app asks the agent
+    2026-08-14: when no table is on screen the app asks the agent
     itself and turns the answer into a card. Both halves were archived, so the
     poll returned the app's own question as the USER's sentence and the answer
     as a full table — and suppressing them live did not help, because a
