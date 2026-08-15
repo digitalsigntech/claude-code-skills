@@ -60,6 +60,7 @@ import urgent_reflex
 import kb_file_reflex
 import scan_reflex
 import personal_note_reflex
+import business_note_reflex
 import reminders_reflex
 import tasks_reflex
 import feedback_reply
@@ -1087,6 +1088,22 @@ def handle_text(msg, chat_id, text):
         if summary:
             _arc_out(chat_id, summary)
             log(f"personal note reflex chat={chat_id} {summary}")
+            return
+
+    # Business-note reflex (2026-08-15, same call as the personal one: "save
+    # this note in the business notes"). Company-private facts — a room code, a
+    # shop wifi password — that belong neither in his private store nor in the
+    # customer KB. Same owner gate as above: company-private is not public.
+    if personal_notes.allowed_chat(chat_id):
+        try:
+            summary = business_note_reflex.try_handle(chat_id, text,
+                                                      TG.send_message)
+        except Exception as e:
+            summary = None
+            log(f"business note reflex error: {e}")
+        if summary:
+            _arc_out(chat_id, summary)
+            log(f"business note reflex chat={chat_id} {summary}")
             return
 
     # KB filing reflex (2026-08-07, the owner: "the round trip of saving the PDF in
