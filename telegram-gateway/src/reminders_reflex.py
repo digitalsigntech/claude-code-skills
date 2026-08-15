@@ -947,11 +947,85 @@ def answer(text, client="telegram", owner=None):
                         else "matching"), client=client), rows
 
 
+# ------------------------------------------------------------- OPEN ONE ROW
+# the owner, 2026-08-15: he asked "open the reminder Протереть клавиатуру", then
+# "surely, the reminder about William?", and got the same LIST back both times.
+# Every intent in this module renders a table, so a request to see ONE row in
+# full had nowhere to land — and a list is precisely what he was trying to get
+# out of. The label a table shows is the SHORT form (#104); the runbook, the
+# full wording and the photo only exist in the row itself.
+OPEN_ISH = re.compile(
+    r"\b(open|expand|full (text|detail|version)|details?|in full|what does .{0,30}say)\b|"
+    r"\bоткр\w+\b|\bподробн\w+\b|\bцеликом\b", re.I)
+
+
+def detect_open(text):
+    t = (text or "").strip()
+    if not t or len(t) > 140 or "\n" in t or t.startswith("/"):
+        t = re.split(r"(?<=[.!?])\s", " ".join((text or "").split()), 1)[0]
+        if not t or len(t) > 140:
+            return False
+    if CREATE.search(t):
+        return False
+    # "open the LattePanda one" never says "reminder", but "the X one" is this
+    # module's own selector shape and means a row. Without it the open intent
+    # only worked for people who phrased it formally.
+    return bool(OPEN_ISH.search(t)) and bool(
+        NOUN.search(t) or RU_NOUN.search(t) or _ID.search(t)
+        or _THE_X_ONE.search(t))
+
+
+def open_one(question, owner=None):
+    """(detail_text, row) for a single reminder, or (None, None).
+
+    Deliberately NOT a table. A table is the wrong shape for one row — it was
+    the answer he kept being handed — so this reads as a short record: the full
+    text, when it fires, what state it is in, and the photo sent alongside.
+    """
+    q = " ".join((question or "").split())
+    scope = scope_of(q, owner)
+    m = _ID.search(q)
+    row = None
+    if m:
+        rid = int(m.group(1))
+        row = next((r for r in _all_rows(scope) if r["id"] == rid), None)
+    else:
+        # The WHOLE sentence, unstripped. _strip_selector exists for the amend
+        # path, where the selector words must not be read as the instruction —
+        # here there is no instruction, so stripping them threw away the only
+        # thing naming the row ("open the LattePanda one" became "open").
+        row = resolve(q, scope)
+    if not row:
+        return None, None
+    # The stored text, never the shortened label: the whole point of opening it.
+    try:
+        sys.path.insert(0, f"{C.WORKSPACE_ROOT}/operations/reminders")
+        import reminders
+        full = next((r for r in reminders.list_rows(all_rows=True, owner=scope)
+                     if r["id"] == row["id"]), None)
+    except Exception:
+        full = None
+    body = (full or {}).get("text") or row.get("text") or ""
+    state = row.get("state", "pending")
+    when = row.get("when", "")
+    lines = [f"*Reminder {row['id']}*", "", body, "",
+             f"_{when}" + ("" if state == "pending" else f" · {state}") + "_"]
+    return "\n".join(lines), row
+
+
 def try_handle(chat_id, text, send, owner=None):
     """#139: ONE reading of the sentence. The three special-cased branches that
     used to live here — all / done / pending — each answered a different part of
     it, and whichever matched first won, which is how "all PENDING reminders"
     became the everything view."""
+    # OPEN one row before considering a list: "open the William one" names a
+    # single reminder, and answering it with a table is the bug this fixes.
+    if detect_open(text):
+        detail, row = open_one(text, owner=owner)
+        if detail:
+            send(chat_id, detail)
+            n = send_photos(chat_id, [row])
+            return f"reminders reflex: opened #{row['id']}, {n} photo(s)"
     table, rows = answer(text, client="telegram", owner=owner)
     if table is None:
         return None
