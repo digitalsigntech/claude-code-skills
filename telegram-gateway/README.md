@@ -227,6 +227,15 @@ baseline: a watchdog that cries about last week's log is one that gets muted.
   spoken — a word found only in a long document's body does not qualify.
   Ambiguous or unmatched questions return nothing and fall through to the model.
   See `src/personal_note_reflex.py`.
+- **Business notes (optional).** A third store for facts that are neither
+  owner-private nor for customers — a room code, the shop wifi. One dated
+  bullet per note in `knowledge-base/private/business-notes.md`, a flat file
+  the owner can edit directly; `private/` is not in the KB index dirs, so
+  nothing there can surface in a customer answer or a public-group reply.
+  "Save this in the business notes. The code for the room is 9815." saves —
+  dictation puts the body in the NEXT sentence, so `.` counts as a separator —
+  and "what's the room code" reads it back, both in ~0.1ms. Gated like the
+  personal store. See `src/business_notes.py`, `src/business_note_reflex.py`.
 - **Voice conversation mode (optional, fully on-box).** In chats listed in
   `VOICE_CHATS`, a voice note becomes a spoken turn: ogg/opus → ffmpeg 16k wav →
   whisper.cpp (language autodetected; a Vulkan build runs the model on an
