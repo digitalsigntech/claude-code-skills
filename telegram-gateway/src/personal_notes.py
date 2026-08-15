@@ -87,6 +87,26 @@ def add(path, orig_name=None, tg_file_id=None, label=None, keywords=None):
     return cur.lastrowid, dest
 
 
+def add_text(body, name=None):
+    """Store a spoken/typed note as a text file. Returns (note_id, path).
+
+    the owner, 2026-08-15: "saving and retrieving passwords should be much faster".
+    A one-line fact does not need a download, a vision call or a model turn —
+    it needs a file. The slug skips bare numbers so the filename stays a
+    description ("big-ipad-password") and not the secret itself."""
+    body = (body or "").strip()
+    if not body:
+        return None, None
+    words = [w for w in _toks(body) if not w.isdigit()][:5]
+    slug = "-".join(words) or "note"
+    tmp = os.path.join("/tmp", f"{slug[:60]}.txt")
+    with open(tmp, "w") as fh:
+        fh.write(body + "\n")
+    return add(tmp, orig_name=name or f"{slug[:60]}.txt",
+               label=body[:120], keywords=", ".join(w for w in _toks(body)
+                                                    if not w.isdigit()))
+
+
 # ---- the privacy gate -------------------------------------------------------------
 def allowed_chat(chat_id):
     """True only for the owner's DM or a live-verified bot+the owner-only group."""
@@ -137,6 +157,70 @@ def search(query, limit=8):
                + _toks(label) + _toks(keywords))
         if all(any(t == h or (len(t) >= 3 and t in h) for h in hay) for t in qtoks):
             out.append((rid, ts, orig, path))
+        if len(out) >= limit:
+            break
+    return out
+
+
+TEXT_KINDS = ("txt", "md", "text")
+MAX_READBACK = 4000
+
+
+def body_of(path):
+    """The text of a text note, or None. Anything else (a photo, a PDF) has no
+    body to read aloud and must go back as a file, through send()."""
+    if os.path.splitext(path)[1].lstrip(".").lower() not in TEXT_KINDS:
+        return None
+    try:
+        if os.path.getsize(path) > MAX_READBACK:
+            return None
+        return open(path, errors="replace").read().strip() or None
+    except OSError:
+        return None
+
+
+SPOKEN_MAX = 300
+
+
+def search_text(query, limit=4, spoken=False):
+    """Text notes matching every query token in name, label, keywords OR body.
+
+    search() deliberately never opens a note; this one does, because a spoken
+    question ("what's my iPad password") names the CONTENT, and the content is
+    the only place the answer lives. Returns [(id, ts, name, path, body)].
+
+    spoken=True is the read-aloud contract and is deliberately stricter: only
+    short dictated facts, and at least one query word must hit the note's
+    DESCRIPTION. Without that second rule "what is my email address" matched a
+    hotel receipt that merely contained both words."""
+    qtoks = _toks(query)
+    if not qtoks:
+        return []
+    con = _db()
+    rows = con.execute("SELECT id, ts, orig_name, path, label, keywords "
+                       "FROM notes ORDER BY id DESC").fetchall()
+    con.close()
+    out = []
+    for rid, ts, orig, path, label, keywords in rows:
+        if not os.path.isfile(path):
+            continue
+        body = body_of(path)
+        if body is None:
+            continue
+        if spoken and len(body) > SPOKEN_MAX:
+            continue
+        named = (_toks(orig) + _toks(os.path.basename(path))
+                 + _toks(label) + _toks(keywords))
+        hay = named + _toks(ts[:10]) + _toks(body)
+
+        def hit(t, where):
+            return any(t == h or (len(t) >= 3 and t in h) for h in where)
+
+        if not all(hit(t, hay) for t in qtoks):
+            continue
+        if spoken and not any(hit(t, named) for t in qtoks):
+            continue
+        out.append((rid, ts, orig, path, body))
         if len(out) >= limit:
             break
     return out
