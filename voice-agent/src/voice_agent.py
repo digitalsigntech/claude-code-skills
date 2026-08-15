@@ -370,7 +370,7 @@ def archive(text, direction, sender, account_name="", mirror=True):
     if direction == "in" and _already_archived(text, within=15, direction="in"):
         print(f"[voice-agent] duplicate line not archived: {str(text)[:40]!r}",
               file=sys.stderr)
-        return
+        return "duplicate"
     db = _chatdb()
     if db and text:
         try:
@@ -380,8 +380,22 @@ def archive(text, direction, sender, account_name="", mirror=True):
         except Exception:
             pass
     # A guest's words go nowhere near the owner's Telegram.
-    if mirror and text and not is_guest():
-        tg_text(text, who=(sender if direction == "in" else None))
+    #
+    # AND THE CALLER IS TOLD WHICH HAPPENED. 2026-08-14: this returned nothing,
+    # so `log` answered `mirrored: true` for every line — including a demo
+    # account's, which has no chat at all — and the app drew a delivery tick
+    # for a delivery that could not happen. A tick has to mean something.
+    if not text:
+        return "empty"
+    if not mirror:
+        return "archived_only"
+    if is_guest():
+        return "guest_no_chat"
+    if not telegram_chat():
+        return "no_chat"
+    return True if tg_text(text,
+                           who=(sender if direction == "in" else None)) \
+        else "send_failed"
 
 
 # ------------------------------------------------------------- attachments
@@ -1429,9 +1443,24 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": True, "mirrored": False,
                                         "suppressed": "already_archived"})
             nm = branding().get("bot_name") or "agent"
-            archive(text, "out" if who != "you" else "in",
-                    sender=nm if who != "you" else (name or "you"))
-            return self._send(200, {"ok": True, "mirrored": True})
+            outcome = archive(text, "out" if who != "you" else "in",
+                              sender=nm if who != "you" else (name or "you"))
+            # `ok` means recorded — it is in the conversation the app shows.
+            # `mirrored` means it reached the user's OTHER chat, and it is only
+            # true when a send actually succeeded. A demo account has no chat
+            # behind it by design, so it gets a reason rather than a tick.
+            body = {"ok": True, "mirrored": outcome is True}
+            if isinstance(outcome, str):
+                body["suppressed"] = outcome
+                body["reason"] = {
+                    "guest_no_chat": "this account has no chat of its own — "
+                                     "the line is in the app's conversation",
+                    "no_chat": "no chat is linked to this agent",
+                    "send_failed": "the chat refused the message",
+                    "archived_only": "recorded, not mirrored by design",
+                    "duplicate": "the same line was already recorded",
+                }.get(outcome, outcome)
+            return self._send(200, body)
         if kind == "reset":
             # A new conversation: the next turn opens a fresh session instead
             # of resuming. The transcript stays — this ends a thread, it does
