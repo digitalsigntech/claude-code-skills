@@ -122,10 +122,132 @@ def detect(text):
         return False
     if NOT_SAVE.search(t):
         return False
+    if text_of(t):                       # "my notes: X is Y" is a TEXT note,
+        return False                     # not a request to file the last photo
     return bool(NOTE_NOUN.search(t)) and bool(SAVE_ISH.search(t))
 
 
+# ------------------------------------------------------------------ TEXT NOTES
+# the owner, 2026-08-15, on the phone: "saving and retrieving passwords should be
+# much faster." Dictating a password and asking for it back were both full
+# model turns — a file write and a filename match, waited on for seconds. The
+# save half is the same shape as the photo half above; the READ half is new,
+# and it is the first thing in this module that ever says a note out loud, so
+# it runs behind allowed_chat() exactly like personal_notes.send() does.
+_SAVE_VERB = r"(?:save|store|keep|add|put|write|note|remember|record)"
+TEXT_SAVE = re.compile(
+    r"^\s*(?:please\s+|can you\s+|could you\s+)*"
+    rf"(?:{_SAVE_VERB}\s+)?(?:this\s+|that\s+|it\s+)?(?:in|to|into)?\s*"
+    r"(?:my\s+)?(?:personal\s+|private\s+)?notes?\b\s*[:,\-–—]+\s*(?P<body>.+)$",
+    re.I)
+NOTE_TO_SELF = re.compile(r"^\s*note to self\s*[:,\-–—]*\s*(?P<body>.+)$", re.I)
+RU_SAVE = re.compile(
+    r"^\s*(?:сохрани\w*\s+|запиши\w*\s+)?(?:в\s+)?(?:мои\s+|моих\s+)?"
+    r"(?:личны\w+\s+|приватны\w+\s+)?заметк\w+\s*[:,\-–—]+\s*(?P<body>.+)$", re.I)
+
+
+def text_of(text):
+    """The note body in a 'my notes: X' line, or None. A question is never a
+    save — "my notes: what did I put there?" is someone searching out loud."""
+    t = (text or "").strip()
+    if not t or len(t) > 600 or t.startswith("/"):
+        return None
+    for pat in (NOTE_TO_SELF, TEXT_SAVE, RU_SAVE):
+        m = pat.match(t)
+        if m:
+            body = m.group("body").strip().strip("\"'“”")
+            if len(body) >= 3 and not body.endswith("?"):
+                return body
+    return None
+
+
+def save_text(body, chat_id=None):
+    """(answer, note_id). Writes the note and answers in the same breath."""
+    import personal_notes
+    if chat_id is not None and not personal_notes.allowed_chat(chat_id):
+        return None, None                # never write into his store from
+    note_id, _ = personal_notes.add_text(body)   # someone else's chat
+    if not note_id:
+        return None, None
+    return "Saved to your private notes.", note_id
+
+
+# Read-back. Two gates before a private note is ever spoken: the chat must pass
+# allowed_chat(), and the question must actually NAME a note — a query that
+# matches nothing returns None and falls through to the model, which is the
+# behaviour we had before this reflex existed.
+SECRET_NOUN = re.compile(
+    r"\b(password|passcode|passphrase|pin|code|login|username|key|account|"
+    r"пароль|пин|код|логин)\b", re.I)
+MINE = re.compile(r"\b(my|mine|мой|моя|мои|моего|моих|у меня)\b", re.I)
+ASKING = re.compile(r"\b(what|what's|whats|which|where|remind|tell|give|"
+                    r"say|какой|какая|что|где|напомни|скажи)\b", re.I)
+STOP = {"what", "whats", "what's", "which", "where", "is", "the", "a", "an",
+        "my", "mine", "me", "again", "tell", "remind", "give", "say", "was",
+        "of", "for", "to", "do", "does", "i", "have", "it", "s", "please",
+        "какой", "какая", "какие", "что", "где", "мой", "моя", "мои", "моего",
+        "моих", "напомни", "скажи", "у", "меня", "мне", "от"}
+
+
+def detect_lookup(text):
+    t = (text or "").strip()
+    if not t or len(t) > 160 or t.startswith("/"):
+        return False
+    if not ASKING.search(t) and not MINE.search(t):
+        return False
+    return bool(MINE.search(t) or SECRET_NOUN.search(t))
+
+
+# He dictates in English and asks in Russian, or the other way round — the note
+# is stored in whichever language he spoke it. A dozen words cover the things
+# people actually keep in a private note; anything else falls through to Claude.
+RU_EN = {"пароль": "password", "пин": "pin", "код": "code", "логин": "login",
+         "ключ": "key", "айпад": "ipad", "айпада": "ipad", "айфон": "iphone",
+         "айфона": "iphone", "телефон": "phone", "телефона": "phone",
+         "ноутбук": "laptop", "ноутбука": "laptop", "макбук": "macbook",
+         "макбука": "macbook", "вайфай": "wifi", "гараж": "garage",
+         "гаража": "garage", "сейф": "safe", "сейфа": "safe",
+         "почта": "email", "почты": "email", "банк": "bank", "банка": "bank",
+         "карта": "card", "карты": "card", "большой": "big", "большого": "big"}
+
+
+def _query_terms(text):
+    toks = [w for w in re.split(r"[^\w']+", (text or "").lower()) if w]
+    return [RU_EN.get(w, w) for w in toks if w not in STOP and len(w) > 1]
+
+
+def lookup(text, chat_id):
+    """The note's text, or None to let the model answer. Private-store read —
+    refuses outside the same chats personal_notes.send() will deliver to."""
+    if not detect_lookup(text):
+        return None
+    import personal_notes
+    if chat_id is None or not personal_notes.allowed_chat(chat_id):
+        return None
+    terms = _query_terms(text)
+    if len(terms) < 2:                   # one word is not a name, it is a topic
+        return None
+    hits = personal_notes.search_text(" ".join(terms), limit=4, spoken=True)
+    if not hits or len(hits) > 2:        # ambiguous: let the model disambiguate
+        return None
+    body = hits[0][4]
+    if len(hits) == 2:
+        return f"{body}\n\n(You have another note matching that too.)"
+    return body
+
+
 def try_handle(chat_id, text, send):
+    body = text_of(text)
+    if body:
+        answer, note_id = save_text(body, chat_id=chat_id)
+        if not answer:
+            return None
+        send(chat_id, answer)
+        return f"personal note reflex: text note {note_id}"
+    found = lookup(text, chat_id)
+    if found:
+        send(chat_id, found)
+        return "personal note reflex: read back a note"
     if not detect(text):
         return None
     answer, note_id = save_it(chat_id=chat_id)

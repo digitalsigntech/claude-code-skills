@@ -218,6 +218,15 @@ baseline: a watchdog that cries about last week's log is one that gets muted.
   one sub-second via the file reflex. Notes can carry a `label` (description)
   and content `keywords` — both searchable via `search()`. See `src/personal_notes.py` (set `OWNER` to
   your owner user id).
+- **Dictated notes, no model turn.** "my notes: big iPad password is 1248" /
+  "note to self: …" writes a text note and answers in ~15ms (`add_text`), and
+  "what's my iPad password" reads it back in under a millisecond
+  (`search_text(spoken=True)`) — both halves used to be full model turns. The
+  read half is gated twice: the chat must pass `allowed_chat()`, and only SHORT
+  text notes (≤300 chars) whose name/label/keywords match a query word are ever
+  spoken — a word found only in a long document's body does not qualify.
+  Ambiguous or unmatched questions return nothing and fall through to the model.
+  See `src/personal_note_reflex.py`.
 - **Voice conversation mode (optional, fully on-box).** In chats listed in
   `VOICE_CHATS`, a voice note becomes a spoken turn: ogg/opus → ffmpeg 16k wav →
   whisper.cpp (language autodetected; a Vulkan build runs the model on an
