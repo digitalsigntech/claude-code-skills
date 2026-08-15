@@ -763,8 +763,17 @@ def remember_session(account, sid):
         save(STATE, st)
 
 
-def ask(account, question, account_name="", archive_question=True):
-    """`archive_question=False` for a turn whose words are already recorded.
+def ask(account, question, account_name="", archive_question=True,
+        archive_turn=True):
+    """`archive_turn=False` for a LOOKUP: answer and drop.
+
+    2026-08-14 (Maclaude): when no table is on screen the app asks the agent
+    itself and turns the answer into a card. Both halves were archived, so the
+    poll returned the app's own question as the USER's sentence and the answer
+    as a full table — and suppressing them live did not help, because a
+    relaunch replayed them out of history. Only not writing them can fix that.
+
+    `archive_question=False` for a turn whose words are already recorded.
 
     A captioned upload writes ONE row — the marker with the caption on it — and
     then runs the caption as a turn. Left to archive itself, that turn added a
@@ -801,7 +810,8 @@ def ask(account, question, account_name="", archive_question=True):
     with _inflight_lock:
         INFLIGHT[turn_id] = {"started": time.time(), "question": question}
     if archive_question:
-        archive(question, "in", sender=account_name or "you")
+        if archive_turn:
+            archive(question, "in", sender=account_name or "you")
 
     sid = session_id(account)
     if sid:
@@ -847,7 +857,8 @@ def ask(account, question, account_name="", archive_question=True):
 
     remember_session(account, sid)
     _finish_turn(turn_id)
-    archive(out, "out", sender=branding().get("bot_name") or "agent")
+    if archive_turn:
+        archive(out, "out", sender=branding().get("bot_name") or "agent")
     return {"answer": out[:8000]}
 
 
@@ -1400,7 +1411,12 @@ class Handler(BaseHTTPRequestHandler):
                 since = float(d.get("since") or 0)
             except (TypeError, ValueError):
                 since = 0.0
-            return self._send(200, {"messages": history(limit, since)})
+            # `chat` is false when this caller has nowhere for a line to be
+            # delivered TO — a guest, or an agent with no chat linked. The app
+            # draws its ticks from it: an archived line is not a delivered one.
+            return self._send(200, {"messages": history(limit, since),
+                                    "chat": bool(telegram_chat())
+                                            and not is_guest()})
         if kind == "health":
             return self._send(200, health())
         if kind == "branding":
@@ -1557,14 +1573,19 @@ class Handler(BaseHTTPRequestHandler):
             quick = reflex_answer(q, tz=str(d.get("tz") or "") or None)
             if quick:
                 self.log_message("reflex answered: %.40s", q)
-                archive(q, "in", sender=name or "you")
-                archive(quick, "out",
-                        sender=branding().get("bot_name") or "agent",
-                        mirror=False)     # the table is for the app's grid
+                if d.get("archive") is not False:
+                    archive(q, "in", sender=name or "you")
+                    archive(quick, "out",
+                            sender=branding().get("bot_name") or "agent",
+                            mirror=False)   # the table is for the app's grid
                 return self._send(200, {"answer": quick})
             self.log_message("ask from %s: %.60s", name or account, q)
             t0 = time.time()
-            res = ask(account, q, name)
+            # {"archive": false} — a lookup the app makes on the user's
+            # behalf. Answer it and leave no trace: no row, no mirror, nothing
+            # for history restore to replay.
+            keep = d.get("archive")
+            res = ask(account, q, name, archive_turn=(keep is not False))
             self.log_message("answered in %.1fs (%s)", time.time() - t0,
                              res.get("agent_error") or "ok")
             if before is not None and reminders_snapshot() == before:
