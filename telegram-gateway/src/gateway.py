@@ -4,6 +4,9 @@ Long-polls Telegram; every text message runs a real Claude turn (full tools, in 
 workspace) with one persistent session per chat. Files are saved to inbox/ and the
 bot offers: Ingest to KB / Analyze / Hold for this chat. Locked to an allowlist of
 Telegram user IDs. Run via start_telegram.sh (single-instance, @reboot).
+
+The published copy of this file is GENERATED from here by tools/sync_exports.py
+(a post-commit hook regenerates it), so edit this one — never the export.
 """
 import tgconf as C   # identity from config
 import os, sys, time, json, re, uuid, datetime, threading, subprocess, traceback, tempfile
