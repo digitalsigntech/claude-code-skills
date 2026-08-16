@@ -221,9 +221,12 @@ def _send(chat_id, hits, footer):
     return msgs
 
 
-def try_handle(chat_id, text):
+def try_handle(chat_id, text, sent_out=None):
     """The reflex. Returns a short summary string if the message was fully handled
-    (photos sent), else None -> the gateway falls through to the normal Claude turn."""
+    (photos sent), else None -> the gateway falls through to the normal Claude turn.
+
+    sent_out: optional list, filled with the absolute paths sent, so the caller can
+    audit this answer against a real model turn (reflex_audit)."""
     q = detect(text)
     if not q:
         return None
@@ -246,6 +249,8 @@ def try_handle(chat_id, text):
     if not sent:
         return None                      # send failed -> let Claude try
     total = int((time.time() - t0) * 1000)
+    if sent_out is not None:
+        sent_out.extend(h["path"] for h in hits)
     return (f"[photo reflex: sent {len(hits)} photo(s) for '{q}' in {total}ms: "
             + ", ".join(os.path.basename(h["path"]) for h in hits) + "]")
 

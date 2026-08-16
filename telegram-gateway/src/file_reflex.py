@@ -318,9 +318,13 @@ def _send_imgs(chat_id, hits, q, t0):
             + ", ".join(os.path.basename(h["path"]) for h in hits) + "]")
 
 
-def try_handle(chat_id, text):
+def try_handle(chat_id, text, sent_out=None):
     """Returns a short summary string if the message was fully handled (file or
-    photos sent), else None -> the gateway falls through to the normal Claude turn."""
+    photos sent), else None -> the gateway falls through to the normal Claude turn.
+
+    sent_out: optional list, filled with the absolute paths actually sent, so the
+    caller can audit this answer against a real model turn (reflex_audit). Personal
+    notes are never reported — they are gated, and the audit must not reach them."""
     t0 = time.time()
     r = resolve(chat_id, text)
     if not r:
@@ -331,8 +335,14 @@ def try_handle(chat_id, text):
             return None
         return f"[file reflex: sent personal note {sent} in {int((time.time()-t0)*1000)}ms]"
     if r[0] == "doc":
-        return _send_doc(chat_id, r[1], t0)
-    return _send_imgs(chat_id, r[1], r[2], t0)
+        summary = _send_doc(chat_id, r[1], t0)
+        if summary and sent_out is not None:
+            sent_out.append(r[1])
+        return summary
+    summary = _send_imgs(chat_id, r[1], r[2], t0)
+    if summary and sent_out is not None:
+        sent_out.extend(h["path"] for h in r[1])
+    return summary
 
 
 if __name__ == "__main__":
