@@ -236,14 +236,18 @@ baseline: a watchdog that cries about last week's log is one that gets muted.
   dictation puts the body in the NEXT sentence, so `.` counts as a separator —
   and "what's the room code" reads it back, both in ~0.1ms. Gated like the
   personal store. See `src/business_notes.py`, `src/business_note_reflex.py`.
-- **Notes as a table.** "Show me the business notes" renders two columns (Date,
-  Note); "show me all notes" renders three (Date, Type, Note) across both
-  stores; bare "show my notes" still means the personal ones. Plain GFM, which
-  the gateway renders natively in Telegram. A photo or PDF note lists its
-  `label`, a filed document its first heading, a text note its text. Email
-  boilerplate (logos, spacers, tracking pixels — each saved as its own note) is
-  hidden from the LIST only, never from the store or from search. Newest 25
-  with the total named below the cut. See `src/notes_table_reflex.py`.
+- **Notes as a table.** **Date | Note | Picture** per store, plus a Type column
+  for "show me all notes"; bare "show my notes" means the personal ones. A note
+  is not a file: everything written by one `add()` sweep (one forwarded email =
+  summary + ticket + PDF) groups into ONE row, keyed by the stored filename
+  stamp `YYYYMMDD-HHMMSS` — not by label, since each attachment gets its own
+  label. The row's words come from its text note; the rest hang off it as
+  attachments. Same client split as the reminders table: the app gets real
+  `![](vb-token:…)` thumbnails (several per cell, PDFs named with 📄), while
+  Telegram — which silently drops image syntax inside a table cell — gets a
+  "2 photos, 1 file" cell and each attachment as its own captioned message via
+  `sendfile.py`, one per message, never an album. Newest 25 with the total
+  named below the cut. See `src/notes_table_reflex.py`.
 - **Voice conversation mode (optional, fully on-box).** In chats listed in
   `VOICE_CHATS`, a voice note becomes a spoken turn: ogg/opus → ffmpeg 16k wav →
   whisper.cpp (language autodetected; a Vulkan build runs the model on an
