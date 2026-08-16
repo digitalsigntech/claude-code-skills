@@ -143,6 +143,11 @@ DOC_REFLEX = os.environ.get("TG_DOC_REFLEX", "1") == "1"
 # KB image set, or (DM chats only) the closest-matching workspace file. Strict
 # all-tokens-match; anything ambiguous falls through. TG_FILE_REFLEX=0 off.
 FILE_REFLEX = os.environ.get("TG_FILE_REFLEX", "1") == "1"
+# Reflex audit: after a CLIP/media reflex answers a "show me" request, the same
+# prompt goes to the main LLM on a background thread; anything it finds that the
+# reflex did not send is posted as a supplement. The fast answer is never delayed,
+# and a complete answer says nothing. TG_REFLEX_AUDIT=0 off.
+REFLEX_AUDIT = os.environ.get("TG_REFLEX_AUDIT", "1") == "1"
 # QR reflex: the owner asking for a login QR ("make me a qr for the app") runs
 # TG_QR_SCRIPT directly (called with `--chat <chat_id>`) — no LLM. Off unless
 # TG_QR_SCRIPT is set. TG_QR_CHATS = comma-separated chat ids where it may fire
