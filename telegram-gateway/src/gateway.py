@@ -1640,6 +1640,7 @@ def main():
         log("WARNING: allowlist is EMPTY — every message will be denied until you add a user ID "
             "to telegram/allowlist.json")
     threading.Thread(target=drain_injections, daemon=True).start()
+    file_reflex.warm()          # keep the workspace list hot (2026-08-15)
     log(f"email→chat injection queue active: {INJECT_DIR}")
 
     # Project chats: assert the privacy-mode suffix on each bound group's title once

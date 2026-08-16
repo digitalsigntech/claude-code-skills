@@ -121,6 +121,26 @@ def _index():
     return files
 
 
+def warm(background=True):
+    """Build the workspace list before anyone asks for it.
+
+    The walk costs ~1.8s cold and 0ms warm, and it expires every WALK_TTL —
+    so whoever asks first after a quiet stretch pays for everyone. That is the
+    person waiting on a voice call. A daemon thread keeps it warm instead
+    (the owner, 2026-08-15: "can you speed up the knowledge base item retrieval")."""
+    def loop():
+        while True:
+            try:
+                _index()
+            except Exception:
+                pass
+            time.sleep(max(10, WALK_TTL - 15))
+    if background:
+        threading.Thread(target=loop, daemon=True).start()
+    else:
+        _index()
+
+
 def _hit(tok, toks):
     """Query token matches a file token exactly or as a >=3-char substring either
     way ('expo' in 'labelexpo'; file token 'label' in query 'labelexpo')."""
@@ -191,6 +211,24 @@ def resolve(chat_id, text):
     imgs = [] if file_hint else _images(qtoks)
     ws_ok = chat_id > 0 or chat_id in C.ALWAYS_NEMOTRON_CHATS
     files = [] if (img_hint or not ws_ok) else _files(qtoks, ext)
+    # "Plausible several ways" was counting the SAME document twice. the owner,
+    # 2026-08-15, asked why "show me the drill template" took 18 seconds: the
+    # media index had the PDF (products/media/...drill_template.pdf) and the
+    # workspace walk had its twin in uploads/, so this call declined as
+    # ambiguous and handed an unambiguous request to a full model turn.
+    # Two paths to one file is not a choice; it is one answer found twice.
+    def _same_doc(a, b):
+        stem = lambda p: re.sub(r"^\d{8}-\d{6}[-_]", "",
+                                os.path.splitext(os.path.basename(p))[0]).lower()
+        return stem(a) == stem(b)
+
+    if imgs and files and _same_doc(imgs[0]["path"], files[0][3]):
+        # Keep ONE of them: a document goes as a document (it prints to scale
+        # and it is what was asked for), an image goes as an image.
+        if os.path.splitext(files[0][3])[1].lower() in (".pdf", ".doc", ".docx"):
+            imgs = []
+        else:
+            files = []
     if sum(1 for s in (nhits, imgs, files) if s) > 1:
         return None                      # plausible several ways -> Claude decides
     if nhits:
@@ -199,6 +237,14 @@ def resolve(chat_id, text):
         return ("note", nhits[0][3])
     if imgs:
         return ("imgs", imgs, q)
+    if not (nhits or imgs or files):
+        # Nothing matched by NAME. The words a person uses are not the words in
+        # a filename ("the drilling diagram" vs 20260724-095931_HDCES3200_
+        # drill_template.pdf), so ask the company index what the request MEANS
+        # and hand back the document behind the best answer (2026-08-15).
+        doc = _semantic_doc(q)
+        if doc:
+            return ("doc", doc)
     if files:
         top = files[0]
         peers = {os.path.basename(f[3]) for f in files
@@ -206,6 +252,40 @@ def resolve(chat_id, text):
         if len(peers) >= GENERIC_CAP:    # "get me the invoice" -> too vague
             return None
         return ("doc", top[3])
+    return None
+
+
+SEMANTIC_FLOOR = 0.66
+STAMP = re.compile(r"(\d{8}-\d{6})")
+
+
+def _semantic_doc(query):
+    """The FILE behind the best semantic hit in the company KB, or None.
+
+    A filed PDF leaves a .md beside it (that is what makes it searchable), and
+    both carry the same YYYYMMDD-HHMMSS stamp — so the stamp maps an answer back
+    to the document it came from. No stamp, no mapping: an .md with no file
+    behind it is knowledge, not a document to send."""
+    try:
+        import kb_query
+        hits = kb_query.search("company", query, k=3, min_score=SEMANTIC_FLOOR)
+    except Exception:
+        return None
+    for h in hits:
+        m = STAMP.search(os.path.basename(h.get("source") or ""))
+        if not m:
+            continue
+        want = m.group(1)
+        best = None
+        for path, ntoks, dtoks, mtime in _index():
+            base = os.path.basename(path)
+            if want in base and os.path.splitext(base)[1].lower() in (
+                    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".png", ".jpg", ".jpeg"):
+                # Prefer the curated copy over the raw upload when both exist.
+                if best is None or "/products/" in path:
+                    best = path
+        if best:
+            return best
     return None
 
 
