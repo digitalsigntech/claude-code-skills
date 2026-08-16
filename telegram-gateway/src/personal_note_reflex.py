@@ -153,10 +153,20 @@ RU_SAVE = re.compile(
 
 
 def text_of(text):
-    """The note body in a 'my notes: X' line, or None. A question is never a
-    save — "my notes: what did I put there?" is someone searching out loud."""
+    """The note body of a save request, or None.
+
+    The DECISION is intent.classify (2026-08-15: understand the request, do not
+    react to keywords); the patterns below only find where the body starts once
+    the answer is yes. A question is never a save — "my notes: what did I put
+    there?" is someone searching out loud."""
     t = (text or "").strip()
     if not t or len(t) > 600 or t.startswith("/"):
+        return None
+    try:
+        import intent as _intent
+        if _intent.classify(t)[0] != "kb.save.personal":
+            return None
+    except Exception:
         return None
     for pat in (NOTE_TO_SELF, TEXT_SAVE, RU_SAVE):
         m = pat.match(t)
@@ -164,6 +174,25 @@ def text_of(text):
             body = m.group("body").strip().strip("\"'“”")
             if len(body) >= 3 and not body.endswith("?"):
                 return body
+    return _body_after_the_ask(t)
+
+
+def _body_after_the_ask(t):
+    """Understanding said SAVE; the patterns did not recognise the wording.
+
+    "keep this for me: parking spot B4" is a save in any language, and no
+    regex here matches it. The content is what follows the colon, or the
+    sentence after the one that asked — take that rather than dropping a
+    request we already understood."""
+    if ":" in t:
+        body = t.split(":", 1)[1].strip().strip("\"'“”")
+        if len(body) >= 3 and not body.endswith("?"):
+            return body
+    parts = re.split(r"(?<=[.!])\s+", t)
+    if len(parts) > 1:
+        body = " ".join(parts[1:]).strip()
+        if len(body) >= 3 and not body.endswith("?"):
+            return body
     return None
 
 
@@ -200,12 +229,17 @@ STOP = {"what", "whats", "what's", "which", "where", "is", "the", "a", "an",
 
 
 def detect_lookup(text):
+    """Is he asking for something he saved? Meaning, not keywords — "what is
+    the room code" and "напомни какой код от мастерской" are the same request
+    and share no word."""
     t = (text or "").strip()
-    if not t or len(t) > 160 or t.startswith("/"):
+    if not t or len(t) > 200 or t.startswith("/"):
         return False
-    if not ASKING.search(t) and not MINE.search(t):
+    try:
+        import intent as _intent
+        return _intent.classify(t)[0] == "kb.recall"
+    except Exception:
         return False
-    return bool(MINE.search(t) or SECRET_NOUN.search(t))
 
 
 # He dictates in English and asks in Russian, or the other way round — the note
