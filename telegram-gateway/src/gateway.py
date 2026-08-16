@@ -54,6 +54,7 @@ import privacy_router
 import photo_reflex
 import doc_reflex
 import file_reflex
+import reflex_audit
 import qr_reflex
 import backup_reflex
 import urgent_reflex
@@ -1237,14 +1238,19 @@ def handle_text(msg, chat_id, text):
     # on an exact keyword match against curated tags/annotations; anything fuzzy costs
     # ~10ms and falls through to the normal paths below.
     if C.PHOTO_REFLEX:
+        sent_paths = []
         try:
-            summary = photo_reflex.try_handle(chat_id, text)
+            summary = photo_reflex.try_handle(chat_id, text, sent_paths)
         except Exception as e:
             summary = None
             log(f"photo reflex error: {e}")
         if summary:
             _arc_out(chat_id, summary)
             log(f"photo reflex chat={chat_id} {summary}")
+            # The fast answer has already gone out; now check it against a real model
+            # turn on the same prompt and post anything it found that we missed
+            # (the owner, 2026-08-16). Background thread — this return is not delayed.
+            reflex_audit.spawn(chat_id, text, sent_paths, log)
             return
 
     # File reflex (2026-07-10, the owner: "show me / fetch / get / give me ... PDF, images,
@@ -1253,14 +1259,16 @@ def handle_text(msg, chat_id, text):
     # group only) a cached walk of the workspace. Only a candidate covering EVERY distinctive
     # query token is sent; ambiguous/partial/question-shaped asks fall through.
     if C.FILE_REFLEX:
+        sent_paths = []
         try:
-            summary = file_reflex.try_handle(chat_id, text)
+            summary = file_reflex.try_handle(chat_id, text, sent_paths)
         except Exception as e:
             summary = None
             log(f"file reflex error: {e}")
         if summary:
             _arc_out(chat_id, summary)
             log(f"file reflex chat={chat_id} {summary}")
+            reflex_audit.spawn(chat_id, text, sent_paths, log)
             return
 
     # Always-Claude chats: no local-model interception of any kind — every message
