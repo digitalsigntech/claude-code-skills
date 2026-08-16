@@ -48,12 +48,21 @@ def _db():
         size INTEGER,
         tg_file_id TEXT,
         label TEXT,
-        keywords TEXT)""")
+        keywords TEXT,
+        owner INTEGER)""")
     # migrate a pre-2026-07-11 db (no label/keywords columns) in place
     cols = {r[1] for r in con.execute("PRAGMA table_info(notes)")}
     for c in ("label", "keywords"):
         if c not in cols:
             con.execute(f"ALTER TABLE notes ADD COLUMN {c} TEXT")
+    # 2026-08-15 (the owner: "The personal notes should be accessible only to the
+    # User who created them"). Every row already here is his — the store has
+    # only ever had one writer — so backfilling to OWNER is the true answer,
+    # not a guess.
+    if "owner" not in cols:
+        con.execute("ALTER TABLE notes ADD COLUMN owner INTEGER")
+        con.execute("UPDATE notes SET owner=? WHERE owner IS NULL", (OWNER,))
+        con.commit()
     return con
 
 
@@ -74,7 +83,8 @@ def _reindex():
 
 
 # ---- capture --------------------------------------------------------------------
-def add(path, orig_name=None, tg_file_id=None, label=None, keywords=None):
+def add(path, orig_name=None, tg_file_id=None, label=None, keywords=None,
+        owner=None):
     """Move a downloaded file into the personal store and record it. Returns note id.
     `label` is a human description (e.g. an email subject); `keywords` a list or
     comma-string of content keywords — both are matched by search()."""
@@ -94,17 +104,18 @@ def add(path, orig_name=None, tg_file_id=None, label=None, keywords=None):
         con = _db()
         with con:
             cur = con.execute(
-                "INSERT INTO notes(ts, orig_name, path, kind, size, tg_file_id, label, keywords) "
-                "VALUES(?,?,?,?,?,?,?,?)",
+                "INSERT INTO notes(ts, orig_name, path, kind, size, tg_file_id, label, "
+                "keywords, owner) VALUES(?,?,?,?,?,?,?,?,?)",
                 (time.strftime("%Y-%m-%d %H:%M:%S"), orig, dest,
                  os.path.splitext(orig)[1].lstrip(".").lower() or "file",
-                 os.path.getsize(dest), tg_file_id, label, keywords))
+                 os.path.getsize(dest), tg_file_id, label, keywords,
+                 int(owner) if owner else OWNER))
         con.close()
     _reindex()
     return cur.lastrowid, dest
 
 
-def add_text(body, name=None):
+def add_text(body, name=None, owner=None):
     """Store a spoken/typed note as a text file. Returns (note_id, path).
 
     the owner, 2026-08-15: "saving and retrieving passwords should be much faster".
@@ -119,32 +130,61 @@ def add_text(body, name=None):
     tmp = os.path.join("/tmp", f"{slug[:60]}.txt")
     with open(tmp, "w") as fh:
         fh.write(body + "\n")
-    return add(tmp, orig_name=name or f"{slug[:60]}.txt",
+    return add(tmp, orig_name=name or f"{slug[:60]}.txt", owner=owner,
                label=body[:120], keywords=", ".join(w for w in _toks(body)
                                                     if not w.isdigit()))
 
 
 # ---- the privacy gate -------------------------------------------------------------
-def allowed_chat(chat_id):
-    """True only for the owner's DM or a live-verified bot+the owner-only group."""
-    if chat_id == OWNER:
+def allowed_chat(chat_id, viewer=None):
+    """True only for VIEWER's own DM or a live-verified bot+viewer-only group.
+
+    2026-08-15, the owner: "The personal notes should be accessible only to the User
+    who created them." The chat gate answers WHERE a note may be delivered; the
+    owner column answers WHOSE notes those are. Both are needed — his DM is the
+    right room for his notes and the wrong room for anyone else's."""
+    viewer = int(viewer) if viewer else OWNER
+    if chat_id == viewer:
         return True
     if chat_id > 0:                    # someone else's DM
         return False
-    hit = _CHAT_OK.get(chat_id)
+    hit = _CHAT_OK.get((chat_id, viewer))
     if hit and time.time() - hit[1] < CHAT_TTL:
         return hit[0]
     ok = False
     try:
         r = TG._call("getChatMemberCount", chat_id=chat_id, _timeout=10)
         if r.get("ok") and r.get("result") == 2:   # the bot + exactly one human
-            m = TG._call("getChatMember", chat_id=chat_id, user_id=OWNER, _timeout=10)
+            m = TG._call("getChatMember", chat_id=chat_id, user_id=viewer, _timeout=10)
             ok = bool(m.get("ok")) and (m.get("result", {}).get("status")
                                         in ("creator", "administrator", "member"))
     except Exception:
         ok = False                     # fail closed
-    _CHAT_OK[chat_id] = (ok, time.time())
+    _CHAT_OK[(chat_id, viewer)] = (ok, time.time())
     return ok
+
+
+
+def known_user(tg_id):
+    """Is this a person the deployment knows? The registry is the answer — a
+    guest's DM should not start a private store on this box."""
+    try:
+        import sys
+        sys.path.insert(0, os.path.join(C.WORKSPACE_ROOT, "operations", "accounts"))
+        import accounts
+        return bool(accounts.get(int(tg_id)))
+    except Exception:
+        return False
+
+
+def may_create(chat_id, sender):
+    """True where a no-caption file becomes THAT person's personal note: their
+    own DM, and only if the deployment knows them. the second owner dictating in her own
+    chat files under the second owner (2026-08-15) — before this, the store had exactly
+    one writer and everyone else's DM fell through to the ingest keyboard."""
+    if not sender or int(chat_id) != int(sender):
+        return False
+    return int(sender) == OWNER or known_user(sender)
 
 
 def is_personal_path(path):
@@ -158,13 +198,15 @@ def _toks(s):
     return [t for t in re.split(r"[^a-z0-9]+", (s or "").lower()) if t]
 
 
-def search(query, limit=8):
+def search(query, limit=8, viewer=None):
     """Notes whose original name / stored name / date / label / keywords matches
-    every query token, newest first. Returns [(id, ts, orig_name, path)]."""
+    every query token, newest first. Returns [(id, ts, orig_name, path)].
+    Only the VIEWER's own notes — this store is per-creator (2026-08-15)."""
     qtoks = _toks(query)
     con = _db()
     rows = con.execute(
-        "SELECT id, ts, orig_name, path, label, keywords FROM notes ORDER BY id DESC").fetchall()
+        "SELECT id, ts, orig_name, path, label, keywords FROM notes "
+        "WHERE owner=? ORDER BY id DESC", (int(viewer) if viewer else OWNER,)).fetchall()
     con.close()
     out = []
     for rid, ts, orig, path, label, keywords in rows:
@@ -199,7 +241,7 @@ def body_of(path):
 SPOKEN_MAX = 300
 
 
-def search_text(query, limit=4, spoken=False):
+def search_text(query, limit=4, spoken=False, viewer=None):
     """Text notes matching every query token in name, label, keywords OR body.
 
     search() deliberately never opens a note; this one does, because a spoken
@@ -215,7 +257,8 @@ def search_text(query, limit=4, spoken=False):
         return []
     con = _db()
     rows = con.execute("SELECT id, ts, orig_name, path, label, keywords "
-                       "FROM notes ORDER BY id DESC").fetchall()
+                       "FROM notes WHERE owner=? ORDER BY id DESC",
+                       (int(viewer) if viewer else OWNER,)).fetchall()
     con.close()
     out = []
     for rid, ts, orig, path, label, keywords in rows:
@@ -243,10 +286,11 @@ def search_text(query, limit=4, spoken=False):
     return out
 
 
-def recent(limit=10):
+def recent(limit=10, viewer=None):
     con = _db()
-    rows = con.execute("SELECT id, ts, orig_name, path FROM notes "
-                       "ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    rows = con.execute("SELECT id, ts, orig_name, path FROM notes WHERE owner=? "
+                       "ORDER BY id DESC LIMIT ?",
+                       (int(viewer) if viewer else OWNER, limit)).fetchall()
     con.close()
     return rows
 

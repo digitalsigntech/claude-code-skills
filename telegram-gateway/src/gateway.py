@@ -61,6 +61,7 @@ import kb_file_reflex
 import scan_reflex
 import personal_note_reflex
 import business_note_reflex
+import business_notes
 import notes_table_reflex
 import reminders_reflex
 import tasks_reflex
@@ -395,11 +396,13 @@ def handle_album(msgs, chat_id):
         handle_project_album(msgs, chat_id, paths, caption)
         return
     # Personal notes (the owner 2026-07-10): a caption-less album in his DM = one note per file.
-    if not caption.strip() and chat_id == personal_notes.OWNER:
+    if not caption.strip() and personal_notes.may_create(
+            chat_id, (msgs[0].get("from") or {}).get("id")):
         ids = []
         for p in paths:
             try:
-                nid, _ = personal_notes.add(p, orig_name=os.path.basename(p))
+                nid, _ = personal_notes.add(p, orig_name=os.path.basename(p),
+                                            owner=(msgs[0].get("from") or {}).get("id"))
                 ids.append(nid)
             except Exception as e:
                 log(f"personal note save FAILED for {p}: {e}")
@@ -533,9 +536,11 @@ def handle_file(msg, chat_id):
         return
     # Personal notes (the owner 2026-07-10): a file in HIS DM with no caption is a personal
     # note — stored in the private personal/ db, never offered the KB-ingest keyboard.
-    if not caption.strip() and chat_id == personal_notes.OWNER:
+    if not caption.strip() and personal_notes.may_create(
+            chat_id, (msg.get("from") or {}).get("id")):
         try:
-            nid, dest = personal_notes.add(path, orig_name=os.path.basename(path))
+            nid, dest = personal_notes.add(path, orig_name=os.path.basename(path),
+                                           owner=(msg.get("from") or {}).get("id"))
             log(f"personal note #{nid} saved: {os.path.basename(dest)}")
             TG.send_message(chat_id, f"📝 Saved as personal note #{nid} (private — "
                             f"only ever shared back to you).", reply_to=msg["message_id"])
@@ -1079,10 +1084,15 @@ def handle_text(msg, chat_id, text):
 
     # Personal-note reflex (2026-08-07, the owner: "it should take just a few
     # seconds"). Stores and answers now; the vision labelling runs behind it.
-    if C.PERSONAL_NOTE_REFLEX and personal_notes.allowed_chat(chat_id):
+    #
+    # WHO is asking, not just where (2026-08-15): personal notes belong to the
+    # person who created them, so the gate takes the sender's id and the store
+    # only ever returns that person's rows.
+    asker = (msg.get("from") or {}).get("id")
+    if C.PERSONAL_NOTE_REFLEX and personal_notes.allowed_chat(chat_id, viewer=asker):
         try:
             summary = personal_note_reflex.try_handle(chat_id, text,
-                                                      TG.send_message)
+                                                      TG.send_message, viewer=asker)
         except Exception as e:
             summary = None
             log(f"personal note reflex error: {e}")
@@ -1095,10 +1105,11 @@ def handle_text(msg, chat_id, text):
     # form of table"). Listing was the one case both note reflexes handed to
     # Claude — right while the answer had to be composed, wrong once its shape
     # is fixed. Owner-gated: the personal rows are his private store.
-    if personal_notes.allowed_chat(chat_id):
+    if personal_notes.allowed_chat(chat_id, viewer=asker) or \
+            business_notes.allowed_chat(chat_id, viewer=asker):
         try:
             summary = notes_table_reflex.try_handle(chat_id, text,
-                                                    TG.send_message)
+                                                    TG.send_message, viewer=asker)
         except Exception as e:
             summary = None
             log(f"notes table reflex error: {e}")
@@ -1111,7 +1122,7 @@ def handle_text(msg, chat_id, text):
     # this note in the business notes"). Company-private facts — a room code, a
     # shop wifi password — that belong neither in his private store nor in the
     # customer KB. Same owner gate as above: company-private is not public.
-    if personal_notes.allowed_chat(chat_id):
+    if business_notes.allowed_chat(chat_id, viewer=asker):
         try:
             summary = business_note_reflex.try_handle(chat_id, text,
                                                       TG.send_message)
