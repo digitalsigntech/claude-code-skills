@@ -1,7 +1,7 @@
 """Which part of a dictated note is the note.
 
-the owner, 2026-08-16: "My Marriott Bonvoy membership number is 869200125. Save to
-our biz KB. Postal code used: L6H7M7" — and what got saved was "L6H7M7". Two
+the owner, 2026-08-16: "My Marriott Bonvoy membership number is 000000000. Save to
+our biz KB. Postal code used: A1A1A1" — and what got saved was "A1A1A1". Two
 faults of the same shape. The phrase patterns were anchored to the start or the
 end of the message, so an instruction sitting BETWEEN two facts matched
 neither; the fallback then took "everything after the first colon", which here

@@ -1,13 +1,13 @@
 """Dictating a business note, and asking for it back, without a model turn.
 
 the owner, 2026-08-15, immediately after the personal-note reflex shipped: "save
-this note in the business notes. The code for the room is 9815." — then, told
+this note in the business notes. The code for the room is 1234." — then, told
 that phrasing missed the new fast path, "yes, please" to teaching it.
 
 Two things the personal reflex did not have to handle:
 
   • The body arrives in the NEXT SENTENCE. Speech-to-text writes "save this
-    note in the business notes. The code for the room is 9815." — a period,
+    note in the business notes. The code for the room is 1234." — a period,
     not a colon. So the separator set includes '.' and the body is whatever
     follows the phrase, even across a sentence boundary.
   • Nothing to save is a real case ("save this in business notes" and then
