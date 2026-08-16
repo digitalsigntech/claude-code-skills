@@ -225,7 +225,8 @@ def pending(limit=LIMIT, owner=None):
             # whatever the agent needs at fire time, runbook and all. Three of
             # his seven rows were 583, 680 and 715 bytes of procedure written
             # to me — 70% of the table, none of it addressed to him.
-            "COALESCE(NULLIF(TRIM(label), ''), text), photo FROM reminders "
+            "COALESCE(NULLIF(TRIM(label), ''), text), photo, repeat_days "
+            "FROM reminders "
             # #110: kind='delmsg' rows are HOUSEKEEPING — each one's "text" is
             # a Telegram message_id, queued by qr-login to delete an expired QR
             # picture. the owner saw one as a reminder reading "5756" and
@@ -239,7 +240,7 @@ def pending(limit=LIMIT, owner=None):
         c.close()
     out = []
     now = time.time()
-    for rid, wl, we, text, photo in rows:
+    for rid, wl, we, text, photo, repeat_days in rows:
         # Rows written before labels existed still hold a runbook here. The
         # same summariser the writer now uses, applied on the way out.
         if len(text or "") > 120:
@@ -252,6 +253,13 @@ def pending(limit=LIMIT, owner=None):
         # passed and nobody acted on it — so it stays, and says so.
         overdue = bool(we and we < now)
         when = _when(wl, we) + (", overdue" if overdue else "")
+        # A repeating row shows the NEXT occurrence like any other, but the
+        # table has to say it comes back — otherwise "23 Aug 12:00" reads as a
+        # one-off and he queues it again by hand every week.
+        if repeat_days:
+            when += (" · weekly" if repeat_days == 7 else
+                     " · daily" if repeat_days == 1 else
+                     f" · every {repeat_days}d")
         out.append({"id": rid, "when": when, "epoch": we, "text": text,
                     "token": tok, "overdue": overdue, "state": "pending",
                     "photo": photo if (photo and os.path.exists(photo)) else None})
