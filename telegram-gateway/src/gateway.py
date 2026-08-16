@@ -61,6 +61,7 @@ import kb_file_reflex
 import scan_reflex
 import personal_note_reflex
 import business_note_reflex
+import notes_table_reflex
 import reminders_reflex
 import tasks_reflex
 import feedback_reply
@@ -1088,6 +1089,22 @@ def handle_text(msg, chat_id, text):
         if summary:
             _arc_out(chat_id, summary)
             log(f"personal note reflex chat={chat_id} {summary}")
+            return
+
+    # Notes-table reflex (2026-08-15, the owner: "I want the notes to be output in
+    # form of table"). Listing was the one case both note reflexes handed to
+    # Claude — right while the answer had to be composed, wrong once its shape
+    # is fixed. Owner-gated: the personal rows are his private store.
+    if personal_notes.allowed_chat(chat_id):
+        try:
+            summary = notes_table_reflex.try_handle(chat_id, text,
+                                                    TG.send_message)
+        except Exception as e:
+            summary = None
+            log(f"notes table reflex error: {e}")
+        if summary:
+            _arc_out(chat_id, summary)
+            log(f"notes table reflex chat={chat_id} {summary}")
             return
 
     # Business-note reflex (2026-08-15, same call as the personal one: "save
