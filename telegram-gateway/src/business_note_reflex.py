@@ -105,23 +105,18 @@ RU_EN = {"код": "code", "комната": "room", "комнаты": "room", "
          "счёт": "account", "счет": "account", "телефон": "phone"}
 
 
-# He asks in abbreviations and the note is written out in full. "membership
-# no?" found nothing against "membership number" (2026-08-16) because search
-# requires every token to appear.
-ABBREV = {"no": "number", "num": "number", "nr": "number", "#": "number",
-          "acct": "account", "pw": "password", "pwd": "password",
-          "tel": "phone", "номер": "number", "тел": "phone"}
-
-
 def _query_terms(text):
-    toks = [w for w in re.split(r"[^\w'#]+", (text or "").lower()) if w]
-    toks = [t.rstrip(".") for t in toks]
-    out = []
-    for w in toks:
-        w = ABBREV.get(w, RU_EN.get(w, w))
-        if w not in STOP and len(w) > 1:
-            out.append(w)
-    return out
+    """The content words of the question.
+
+    There is deliberately no abbreviation table here. "membership no?" found
+    nothing against a note saying "membership number", and my first fix was to
+    map no→number — the owner, 2026-08-16: "You should understand the meaning of
+    'no'. You are not a dumb hard-coded system. Moreover, I could have asked
+    'my marriott membership' without the word 'number'." Both cases are the
+    search's problem, and business_notes.search now ranks by meaning; a lookup
+    table would only have covered the spellings I happened to think of."""
+    toks = [w.rstrip(".") for w in re.split(r"[^\w']+", (text or "").lower()) if w]
+    return [RU_EN.get(w, w) for w in toks if w not in STOP and len(w) > 1]
 
 
 def _spoken(text):

@@ -29,6 +29,9 @@ OWNER = C.OWNER_ID                       # the owner's Telegram user id == his D
 PERSONAL_DIR = os.path.join(C.WORKSPACE_ROOT, "personal")
 NOTES_DIR = os.path.join(PERSONAL_DIR, "notes")
 DB = os.path.join(PERSONAL_DIR, "notes.db")
+# Meaning-vectors for the read-back search, inside the private tree with the
+# notes they describe — never in a shared cache (2026-08-16).
+VECTORS = os.path.join(PERSONAL_DIR, ".note_vectors.json")
 MAX_MB = 49
 
 _LOCK = threading.Lock()
@@ -195,7 +198,9 @@ def is_personal_path(path):
 
 # ---- retrieval --------------------------------------------------------------------
 def _toks(s):
-    return [t for t in re.split(r"[^a-z0-9]+", (s or "").lower()) if t]
+    """Words, in any alphabet — see business_notes._toks (2026-08-16). The
+    ASCII-only split made every Cyrillic question tokenise to nothing."""
+    return [t for t in re.split(r"[^\w]+", (s or "").lower(), flags=re.U) if t]
 
 
 def search(query, limit=8, viewer=None):
@@ -260,7 +265,7 @@ def search_text(query, limit=4, spoken=False, viewer=None):
                        "FROM notes WHERE owner=? ORDER BY id DESC",
                        (int(viewer) if viewer else OWNER,)).fetchall()
     con.close()
-    out = []
+    out, candidates = [], []
     for rid, ts, orig, path, label, keywords in rows:
         if not os.path.isfile(path):
             continue
@@ -276,6 +281,7 @@ def search_text(query, limit=4, spoken=False, viewer=None):
         def hit(t, where):
             return any(t == h or (len(t) >= 3 and t in h) for h in where)
 
+        candidates.append((rid, ts, orig, path, body, named, hay))
         if not all(hit(t, hay) for t in qtoks):
             continue
         if spoken and not any(hit(t, named) for t in qtoks):
@@ -283,7 +289,26 @@ def search_text(query, limit=4, spoken=False, viewer=None):
         out.append((rid, ts, orig, path, body))
         if len(out) >= limit:
             break
-    return out
+    if out:
+        return out
+    # Nothing matched word for word. Rank by MEANING instead of giving up —
+    # the same fix as business_notes.search (2026-08-16): he asks "membership
+    # no", the note says "number", and one unmatched word should not be the
+    # difference between an answer and "I don't have it".
+    # The read-aloud contract still holds here: a note only answers a spoken
+    # question if the question names what the note IS, not merely something its
+    # body happens to contain. Meaning replaces "every word matched" — it does
+    # not replace the description rule.
+    pool = candidates
+    if spoken:
+        pool = [c for c in candidates if any(hit(t, c[5]) for t in qtoks)]
+    try:
+        import note_search
+        texts = [f"{c[2]} {' '.join(c[5])} {c[4]}" for c in pool]
+        ranked = note_search.rank(query, texts, note_search.VectorCache(VECTORS))
+        return [pool[i][:5] for _, i in ranked[:limit]]
+    except Exception:
+        return []
 
 
 def recent(limit=10, viewer=None):
