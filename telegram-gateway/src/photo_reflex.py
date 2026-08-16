@@ -82,16 +82,50 @@ def _find(q, k=8):
 _STOP = {"the", "a", "an", "my", "our", "some", "me", "us", "please", "of", "for"}
 
 
+# A word naming a KIND of document has to be answered by what the hit IS, not by a
+# tag that happens to mention it. The HDC-ES3200 wiring diagram carried 'manual' in
+# its tags, so "show me the epson s3200 meteor manual" covered every token against it
+# and shipped the wrong document — while the real manual sat unindexed (the owner,
+# 2026-08-16: "why couldn't you find based on keywords such as S3200, ES3200, meteor?").
+KIND = [
+    r"manual|\bhum\b|handbook",
+    r"\bguide\b|instruction",
+    r"datasheet|data sheet|technical data|\btds\b",
+    r"\bspec\b|specification",
+    r"diagram|schematic",
+    r"drawing",
+    r"template",
+    r"catalog|catalogue",
+    r"brochure|flyer|leaflet",
+    r"\bsds\b|\bmsds\b|safety data",
+    r"pin ?out",
+    r"price ?list",
+]
+
+
+def _kind_ok(q, h):
+    """If the request names a kind of document, the hit's own identity — its filename
+    and the title its annotation opens with — must be that kind. Tags do not count:
+    they are where cross-references live ('this diagram belongs to the X manual')."""
+    ident = " ".join([os.path.basename(h.get("path") or ""),
+                      (h.get("annotation") or "")[:90]]).lower().replace("_", " ")
+    ql = q.lower()
+    for pat in KIND:
+        if re.search(pat, ql) and not re.search(pat, ident):
+            return False
+    return True
+
+
 def _covers(q, h):
     """EVERY distinctive query token must appear in the hit's own tags/annotation/
     filename — one shared token is not a match ('my label expo pass' once sent a
     printhead photo because 'label' matched a barcode-label tag; 'expo' and 'pass'
-    matched nothing)."""
+    matched nothing). A named document kind must match the hit itself (_kind_ok)."""
     hay = " ".join([h.get("tags") or "", h.get("annotation") or "",
                     os.path.basename(h.get("path") or "")]).lower()
     toks = [t for t in re.split(r"[^a-z0-9]+", q.lower()) if t and t not in _STOP]
     return bool(toks) and all(
-        (t.rstrip("s") if len(t) > 3 else t) in hay for t in toks)
+        (t.rstrip("s") if len(t) > 3 else t) in hay for t in toks) and _kind_ok(q, h)
 
 
 # ---- file_id cache -----------------------------------------------------------
