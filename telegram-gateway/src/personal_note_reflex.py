@@ -29,6 +29,8 @@ import subprocess
 import threading
 import time
 
+import note_body
+
 HOME = os.path.expanduser("~")
 CAMERA = f"{C.WORKSPACE_ROOT}/voice/realtime/camera"
 # The DB lives under workspace/personal, not ~/personal — getting this wrong would
@@ -150,6 +152,20 @@ RU_SAVE = re.compile(
     r"^\s*(?:сохрани\w*\s+|запиши\w*\s+)?(?:в\s+)?(?:мои\s+|моих\s+)?"
     r"(?:личны\w+\s+|приватны\w+\s+)?(?:заметк\w+|база\s?знаний)"
     r"\s*[:,\-–—]+\s*(?P<body>.+)$", re.I)
+# Unanchored twins of the above, for an ask spoken in the middle of the note.
+# The verb is required here — unanchored, "my notes" alone is a topic, not a
+# request, and cutting it out of a sentence would mangle the fact.
+TEXT_PHRASE = re.compile(
+    r"(?:please\s+|can\s+you\s+|could\s+you\s+)*"
+    rf"{_SAVE_VERB}\s+(?:this\s+|that\s+|it\s+)?(?:in|to|into|for)?\s*"
+    rf"(?:my\s+|our\s+)?(?:personal\s+|private\s+)?(?:notes?|{KB_NOUN})\b"
+    r"\s*[:,.\-–—]*\s*", re.I)
+RU_PHRASE_ANY = re.compile(
+    r"(?:сохрани\w*|запиши\w*|добавь)\s+(?:это\s+|эту\s+)?(?:в\s+)?(?:мои\s+|моих\s+)?"
+    r"(?:личны\w+\s+|приватны\w+\s+)?(?:заметк\w+|базу?\s?знаний)"
+    r"\s*[:,.\-–—]*\s*", re.I)
+ANY_VERB = re.compile(rf"\b{_SAVE_VERB}\b", re.I)
+ANY_NOUN = re.compile(r"\b(?:notes?|kb|knowledge\s?base|заметк\w*|базу?\s?знаний)\b", re.I)
 
 
 def text_of(text):
@@ -181,9 +197,19 @@ def _body_after_the_ask(t):
     """Understanding said SAVE; the patterns did not recognise the wording.
 
     "keep this for me: parking spot B4" is a save in any language, and no
-    regex here matches it. The content is what follows the colon, or the
-    sentence after the one that asked — take that rather than dropping a
-    request we already understood."""
+    regex here matches it. First try cutting the ask out wherever it sits —
+    the anchored patterns above miss an instruction spoken between two facts,
+    and taking only what follows a colon then loses the fact in front of it
+    (2026-08-16, business side, same code). Colon and next-sentence stay as
+    the last resort: better a partial note than dropping a request we already
+    understood."""
+    body = note_body.without(t, TEXT_PHRASE, RU_PHRASE_ANY)
+    if body is None:
+        body = note_body.without_instruction_sentences(t, ANY_VERB, ANY_NOUN)
+    if body:
+        body = body.strip().strip("\"'“”")
+        if len(body) >= 3 and not body.endswith("?"):
+            return body
     if ":" in t:
         body = t.split(":", 1)[1].strip().strip("\"'“”")
         if len(body) >= 3 and not body.endswith("?"):
@@ -253,11 +279,24 @@ RU_EN = {"пароль": "password", "пин": "pin", "код": "code", "лог�
          "гаража": "garage", "сейф": "safe", "сейфа": "safe",
          "почта": "email", "почты": "email", "банк": "bank", "банка": "bank",
          "карта": "card", "карты": "card", "большой": "big", "большого": "big"}
+ABBREV = {"no": "number", "num": "number", "nr": "number", "#": "number",
+          "acct": "account", "pw": "password", "pwd": "password",
+          "tel": "phone", "номер": "number", "тел": "phone"}
 
 
 def _query_terms(text):
-    toks = [w for w in re.split(r"[^\w']+", (text or "").lower()) if w]
-    return [RU_EN.get(w, w) for w in toks if w not in STOP and len(w) > 1]
+    """Tokens to match a note by — abbreviations spelled out.
+
+    Same fix as the business side (2026-08-16): he asks "membership no?" and
+    the note says "membership number", so an all-tokens-must-match search found
+    nothing."""
+    toks = [w.rstrip(".") for w in re.split(r"[^\w'#]+", (text or "").lower()) if w]
+    out = []
+    for w in toks:
+        w = ABBREV.get(w, RU_EN.get(w, w))
+        if w not in STOP and len(w) > 1:
+            out.append(w)
+    return out
 
 
 def lookup(text, chat_id, viewer=None):
