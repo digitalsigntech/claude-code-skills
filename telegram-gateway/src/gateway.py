@@ -408,7 +408,8 @@ def handle_album(msgs, chat_id):
                 log(f"personal note save FAILED for {p}: {e}")
         log(f"personal notes saved from album: {ids}")
         TG.send_message(chat_id,
-                        f"📝 Saved {len(ids)} personal notes (#{ids[0]}–#{ids[-1]})." if ids
+                        f"📝 Saved {len(ids)} entries to your personal knowledge base "
+                        f"(#{ids[0]}–#{ids[-1]})." if ids
                         else "⚠️ Couldn't save that album as personal notes.",
                         reply_to=msgs[0]["message_id"])
         return
@@ -542,7 +543,7 @@ def handle_file(msg, chat_id):
             nid, dest = personal_notes.add(path, orig_name=os.path.basename(path),
                                            owner=(msg.get("from") or {}).get("id"))
             log(f"personal note #{nid} saved: {os.path.basename(dest)}")
-            TG.send_message(chat_id, f"📝 Saved as personal note #{nid} (private — "
+            TG.send_message(chat_id, f"📝 Saved to your personal knowledge base, #{nid} (private — "
                             f"only ever shared back to you).", reply_to=msg["message_id"])
         except Exception as e:
             log(f"personal note save FAILED: {e}")
