@@ -236,6 +236,14 @@ baseline: a watchdog that cries about last week's log is one that gets muted.
   dictation puts the body in the NEXT sentence, so `.` counts as a separator —
   and "what's the room code" reads it back, both in ~0.1ms. Gated like the
   personal store. See `src/business_notes.py`, `src/business_note_reflex.py`.
+- **Notes as a table.** "Show me the business notes" renders two columns (Date,
+  Note); "show me all notes" renders three (Date, Type, Note) across both
+  stores; bare "show my notes" still means the personal ones. Plain GFM, which
+  the gateway renders natively in Telegram. A photo or PDF note lists its
+  `label`, a filed document its first heading, a text note its text. Email
+  boilerplate (logos, spacers, tracking pixels — each saved as its own note) is
+  hidden from the LIST only, never from the store or from search. Newest 25
+  with the total named below the cut. See `src/notes_table_reflex.py`.
 - **Voice conversation mode (optional, fully on-box).** In chats listed in
   `VOICE_CHATS`, a voice note becomes a spoken turn: ogg/opus → ffmpeg 16k wav →
   whisper.cpp (language autodetected; a Vulkan build runs the model on an
