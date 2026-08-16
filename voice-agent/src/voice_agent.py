@@ -1485,10 +1485,20 @@ class Handler(BaseHTTPRequestHandler):
                 st = load(STATE, {})
                 st.setdefault("sessions", {}).pop(account, None)
                 save(STATE, st)
+            # THE CHAT IS TOLD, VISIBLY. Vladimir, 2026-08-16: "The clear
+            # button must clear context window. There should be a small text in
+            # the chat confirming it. A context clear command should be sent to
+            # the current telegram chat." Clearing the agent's thread without
+            # saying so in the chat leaves the person reading that chat with a
+            # conversation that has silently lost its memory — and the next
+            # answer looks like forgetfulness rather than a fresh start.
             archive("[cleared context — new conversation]", "in",
-                    sender=name or "you")
-            self.log_message("reset: session cleared for %s", account)
-            return self._send(200, {"ok": True})
+                    sender=name or "you", mirror=False)
+            told = tg_text("🧹 Context cleared from the voice app — fresh "
+                           "conversation from here.") if not is_guest() else False
+            self.log_message("reset: session cleared for %s%s", account,
+                             " (chat told)" if told else "")
+            return self._send(200, {"ok": True, "chat_notified": bool(told)})
         if kind == "attachments":
             try:
                 since = float(d.get("since") or 0)
