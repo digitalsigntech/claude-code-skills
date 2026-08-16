@@ -93,7 +93,7 @@ def _newest_upload(max_age=FRESH_S):
     return path if time.time() - ts <= max_age else None
 
 
-def save_it(path=None, chat_id=None):
+def save_it(path=None, chat_id=None, viewer=None):
     """(answer, note_id). Stores and answers; labels behind the answer."""
     src = path or _newest_upload()
     if not src or not os.path.exists(src):
@@ -103,7 +103,8 @@ def save_it(path=None, chat_id=None):
     # sent, so hand over a copy rather than emptying that folder.
     tmp = os.path.join("/tmp", os.path.basename(src))
     shutil.copy2(src, tmp)
-    note_id, dest = personal_notes.add(tmp, orig_name=os.path.basename(src))
+    note_id, dest = personal_notes.add(tmp, orig_name=os.path.basename(src),
+                                       owner=viewer)
     threading.Thread(target=_label_later, args=(note_id, dest, chat_id),
                      daemon=True).start()
     return ("Saved to your personal notes. I am looking at it now and will "
@@ -161,12 +162,16 @@ def text_of(text):
     return None
 
 
-def save_text(body, chat_id=None):
-    """(answer, note_id). Writes the note and answers in the same breath."""
+def save_text(body, chat_id=None, viewer=None):
+    """(answer, note_id). Writes the note and answers in the same breath.
+
+    The note is filed under the person who dictated it (2026-08-15): a store
+    that is "only accessible to the User who created them" has to record who
+    that was at the moment of writing, not infer it later."""
     import personal_notes
-    if chat_id is not None and not personal_notes.allowed_chat(chat_id):
-        return None, None                # never write into his store from
-    note_id, _ = personal_notes.add_text(body)   # someone else's chat
+    if chat_id is not None and not personal_notes.allowed_chat(chat_id, viewer=viewer):
+        return None, None                # never write into a store from
+    note_id, _ = personal_notes.add_text(body, owner=viewer)   # someone else's chat
     if not note_id:
         return None, None
     return "Saved to your private notes.", note_id
@@ -216,18 +221,19 @@ def _query_terms(text):
     return [RU_EN.get(w, w) for w in toks if w not in STOP and len(w) > 1]
 
 
-def lookup(text, chat_id):
+def lookup(text, chat_id, viewer=None):
     """The note's text, or None to let the model answer. Private-store read —
     refuses outside the same chats personal_notes.send() will deliver to."""
     if not detect_lookup(text):
         return None
     import personal_notes
-    if chat_id is None or not personal_notes.allowed_chat(chat_id):
+    if chat_id is None or not personal_notes.allowed_chat(chat_id, viewer=viewer):
         return None
     terms = _query_terms(text)
     if len(terms) < 2:                   # one word is not a name, it is a topic
         return None
-    hits = personal_notes.search_text(" ".join(terms), limit=4, spoken=True)
+    hits = personal_notes.search_text(" ".join(terms), limit=4, spoken=True,
+                                      viewer=viewer)
     if not hits or len(hits) > 2:        # ambiguous: let the model disambiguate
         return None
     body = hits[0][4]
@@ -236,21 +242,21 @@ def lookup(text, chat_id):
     return body
 
 
-def try_handle(chat_id, text, send):
+def try_handle(chat_id, text, send, viewer=None):
     body = text_of(text)
     if body:
-        answer, note_id = save_text(body, chat_id=chat_id)
+        answer, note_id = save_text(body, chat_id=chat_id, viewer=viewer)
         if not answer:
             return None
         send(chat_id, answer)
         return f"personal note reflex: text note {note_id}"
-    found = lookup(text, chat_id)
+    found = lookup(text, chat_id, viewer=viewer)
     if found:
         send(chat_id, found)
         return "personal note reflex: read back a note"
     if not detect(text):
         return None
-    answer, note_id = save_it(chat_id=chat_id)
+    answer, note_id = save_it(chat_id=chat_id, viewer=viewer)
     send(chat_id, answer)
     return f"personal note reflex: note {note_id}" if note_id else \
         "personal note reflex: nothing to save"
