@@ -1,7 +1,7 @@
 """Business notes — dictated company facts, in one dated markdown file.
 
 the owner, 2026-08-15, on a call: "save this note in the business notes. The code
-for the room is 9815." There was no such store — his private note store on one
+for the room is 1234." There was no such store — his private note store on one
 side, the customer-facing knowledge base on the other, and nothing in between
 for company information that simply isn't for customers.
 
