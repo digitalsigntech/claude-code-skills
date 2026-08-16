@@ -20,7 +20,7 @@ this module's search(), gated by allowed_chat().
 
 CLI: python3 personal_notes.py list | search <words> | check <chat_id>
 """
-import os, re, json, time, shutil, sqlite3, threading
+import os, re, json, time, shutil, sqlite3, threading, subprocess
 
 import tgconf as C
 import tg_api as TG
@@ -57,6 +57,22 @@ def _db():
     return con
 
 
+NK = os.path.join(C.WORKSPACE_ROOT, "nk")
+
+
+def _reindex():
+    """Refresh the personal semantic index behind the answer (the owner 2026-08-15:
+    "The personal knowledge base should be indexed too"). Incremental and ~0.1s,
+    but it is still work the saver should not wait on, and a failed index must
+    never turn a successful save into an error."""
+    def run():
+        try:
+            subprocess.run([NK, "personal", "index"], capture_output=True, timeout=300)
+        except Exception:
+            pass
+    threading.Thread(target=run, daemon=True).start()
+
+
 # ---- capture --------------------------------------------------------------------
 def add(path, orig_name=None, tg_file_id=None, label=None, keywords=None):
     """Move a downloaded file into the personal store and record it. Returns note id.
@@ -84,6 +100,7 @@ def add(path, orig_name=None, tg_file_id=None, label=None, keywords=None):
                  os.path.splitext(orig)[1].lstrip(".").lower() or "file",
                  os.path.getsize(dest), tg_file_id, label, keywords))
         con.close()
+    _reindex()
     return cur.lastrowid, dest
 
 
