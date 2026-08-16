@@ -1485,10 +1485,10 @@ class Handler(BaseHTTPRequestHandler):
                 st = load(STATE, {})
                 st.setdefault("sessions", {}).pop(account, None)
                 save(STATE, st)
-            # THE CHAT IS TOLD, VISIBLY. Vladimir, 2026-08-16: "The clear
-            # button must clear context window. There should be a small text in
-            # the chat confirming it. A context clear command should be sent to
-            # the current telegram chat." Clearing the agent's thread without
+            # THE CHAT IS TOLD, VISIBLY (2026-08-16, an owner's requirement:
+            # the clear button must clear the context window, leave a short
+            # line in the chat confirming it, and send the clear to the chat
+            # the agent is reading). Clearing the agent's thread without
             # saying so in the chat leaves the person reading that chat with a
             # conversation that has silently lost its memory — and the next
             # answer looks like forgetfulness rather than a fresh start.
