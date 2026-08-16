@@ -107,11 +107,15 @@ def save_it(path=None, chat_id=None, viewer=None):
                                        owner=viewer)
     threading.Thread(target=_label_later, args=(note_id, dest, chat_id),
                      daemon=True).start()
-    return ("Saved to your personal notes. I am looking at it now and will "
+    return ("Saved to your personal knowledge base. I am looking at it now and will "
             "tag it so you can find it by what it shows."), note_id
 
 
-NOTE_NOUN = re.compile(r"\b(personal notes?|my notes?|private notes?)\b", re.I)
+# His words, not ours: "notes" and "knowledge base" name the same thing, so
+# both phrasings reach the same store.
+KB_NOUN = r"(?:knowledge\s?base|kb|база\s?знаний)"
+NOTE_NOUN = re.compile(rf"\b(personal notes?|my notes?|private notes?|"
+                      rf"(?:personal|private|my)\s+{KB_NOUN})\b", re.I)
 SAVE_ISH = re.compile(r"\b(save|store|keep|add|put|file)\b", re.I)
 NOT_SAVE = re.compile(r"\b(search|find|look up|show|list|send|read|what|"
                       r"remove|delete)\b", re.I)
@@ -139,12 +143,13 @@ _SAVE_VERB = r"(?:save|store|keep|add|put|write|note|remember|record)"
 TEXT_SAVE = re.compile(
     r"^\s*(?:please\s+|can you\s+|could you\s+)*"
     rf"(?:{_SAVE_VERB}\s+)?(?:this\s+|that\s+|it\s+)?(?:in|to|into)?\s*"
-    r"(?:my\s+)?(?:personal\s+|private\s+)?notes?\b\s*[:,\-–—]+\s*(?P<body>.+)$",
-    re.I)
+    rf"(?:my\s+)?(?:personal\s+|private\s+)?(?:notes?|{KB_NOUN})\b"
+    r"\s*[:,\-–—]+\s*(?P<body>.+)$", re.I)
 NOTE_TO_SELF = re.compile(r"^\s*note to self\s*[:,\-–—]*\s*(?P<body>.+)$", re.I)
 RU_SAVE = re.compile(
     r"^\s*(?:сохрани\w*\s+|запиши\w*\s+)?(?:в\s+)?(?:мои\s+|моих\s+)?"
-    r"(?:личны\w+\s+|приватны\w+\s+)?заметк\w+\s*[:,\-–—]+\s*(?P<body>.+)$", re.I)
+    r"(?:личны\w+\s+|приватны\w+\s+)?(?:заметк\w+|база\s?знаний)"
+    r"\s*[:,\-–—]+\s*(?P<body>.+)$", re.I)
 
 
 def text_of(text):
@@ -174,7 +179,7 @@ def save_text(body, chat_id=None, viewer=None):
     note_id, _ = personal_notes.add_text(body, owner=viewer)   # someone else's chat
     if not note_id:
         return None, None
-    return "Saved to your private notes.", note_id
+    return "Saved to your personal knowledge base.", note_id
 
 
 # Read-back. Two gates before a private note is ever spoken: the chat must pass
