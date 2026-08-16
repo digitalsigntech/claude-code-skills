@@ -1,8 +1,8 @@
 """Dictating a business note, and asking for it back, without a model turn.
 
-Asked for right after the personal-note reflex shipped: "save this note in
-the business notes. The code for the room is 9815." — a phrasing the personal
-fast path did not know.
+the owner, 2026-08-15, immediately after the personal-note reflex shipped: "save
+this note in the business notes. The code for the room is 9815." — then, told
+that phrasing missed the new fast path, "yes, please" to teaching it.
 
 Two things the personal reflex did not have to handle:
 
@@ -21,23 +21,29 @@ verified bot+owner-only group. Company-private is not public.
 import re
 
 import business_notes
+import note_body
 
-NOUN = r"business\s+notes?"
+# "business notes", "business knowledge base", "biz KB" are one drawer — his
+# vocabulary is the knowledge bases, and every wording must reach it.
+NOUN = (r"(?:business|biz|company|corporate|private|work)\s*"
+        r"(?:notes?|knowledge\s?base|kb)")
 SAVE_VERB = r"(?:save|store|keep|add|put|write|note|record|file)"
-BIZ_SAVE = re.compile(
-    r"^\s*(?:please\s+|can you\s+|could you\s+)*"
-    rf"(?:{SAVE_VERB}\s+)?(?:this\s+|that\s+|it\s+)?(?:note\s+)?"
-    rf"(?:in|to|into|for)?\s*(?:the\s+|my\s+|our\s+)?{NOUN}\b"
-    r"\s*[:,.\-–—]*\s*(?P<body>.*)$", re.I)
-# The other order, spoken just as often: "add to business notes" reversed —
-# "the room code is 9815, put that in the business notes."
-BIZ_TRAILING = re.compile(
-    rf"^\s*(?P<body>.+?)[,.;]?\s*(?:{SAVE_VERB})\s+(?:this|that|it)?\s*"
-    rf"(?:in|to|into)\s*(?:the\s+|my\s+|our\s+)?{NOUN}\.?\s*$", re.I)
-RU_SAVE = re.compile(
-    r"^\s*(?:сохрани\w*\s+|запиши\w*\s+|добавь\s+)?(?:в\s+)?(?:наши\s+|мои\s+)?"
-    r"(?:рабочи\w+|бизнес|деловы\w+)[\s-]*заметк\w+\s*[:,.\-–—]*\s*(?P<body>.*)$",
-    re.I)
+_LEAD = r"(?:please\s+|can\s+you\s+|could\s+you\s+)*"
+_OBJ = r"(?:this\s+|that\s+|it\s+)?(?:note\s+)?"
+_PREP = r"(?:in|to|into|for)\s+"
+_DET = r"(?:the\s+|my\s+|our\s+)?"
+# Unanchored: the ask can lead, trail, or sit between two facts (2026-08-16).
+# Whatever it matches gets cut out; the rest of the message is the note.
+BIZ_PHRASE = re.compile(
+    rf"{_LEAD}(?:{SAVE_VERB}\s+{_OBJ}(?:{_PREP})?|{_PREP}{_OBJ})"
+    rf"{_DET}{NOUN}\b\s*[:,.\-–—]*\s*", re.I)
+RU_PHRASE = re.compile(
+    r"(?:сохрани\w*\s+|запиши\w*\s+|добавь\s+)?(?:в\s+)?(?:наши\s+|мои\s+)?"
+    r"(?:рабочи\w+|бизнес|деловы\w+)[\s-]*(?:заметк\w+|базу?\s?знаний)"
+    r"\s*[:,.\-–—]*\s*", re.I)
+# For the coarse fallback: a sentence with both of these is the ask, not a fact.
+ANY_VERB = re.compile(rf"\b{SAVE_VERB}\b", re.I)
+ANY_NOUN = re.compile(r"\b(?:notes?|kb|knowledge\s?base|заметк\w*|базу?\s?знаний)\b", re.I)
 ASKING = re.compile(r"\b(what|what's|whats|which|where|remind|tell|give|say|"
                     r"какой|какая|что|где|напомни|скажи)\b", re.I)
 LISTING = re.compile(r"\b(list|show|all|everything|read out|open|search|find)\b", re.I)
@@ -54,14 +60,30 @@ def text_of(text):
     t = " ".join((text or "").split())
     if not t or len(t) > 600 or t.startswith("/"):
         return None
-    if LISTING.search(t):
+    try:
+        import intent as _intent
+        if _intent.classify(t)[0] != "kb.save.business":
+            return None
+    except Exception:
         return None
-    for pat in (BIZ_TRAILING, BIZ_SAVE, RU_SAVE):
-        m = pat.match(t)
-        if m:
-            body = m.group("body").strip().strip("\"'“”")
-            if len(body) >= 3 and not body.endswith("?"):
-                return body
+    body = note_body.without(t, BIZ_PHRASE, RU_PHRASE)
+    if body is None:
+        body = note_body.without_instruction_sentences(t, ANY_VERB, ANY_NOUN)
+    if body:
+        body = body.strip().strip("\"'“”")
+        if len(body) >= 3 and not body.endswith("?"):
+            return body
+    # Understood as a save, worded in a way neither rule above recognises: the
+    # content is after the colon, or in the sentence after the asking one.
+    if ":" in t:
+        body = t.split(":", 1)[1].strip().strip("\"'“”")
+        if len(body) >= 3 and not body.endswith("?"):
+            return body
+    parts = re.split(r"(?<=[.!])\s+", t)
+    if len(parts) > 1:
+        body = " ".join(parts[1:]).strip()
+        if len(body) >= 3 and not body.endswith("?"):
+            return body
     return None
 
 
@@ -70,10 +92,10 @@ def save(body):
     line = business_notes.add(body)
     if not line:
         return None, None
-    return "Saved to the business notes.", line
+    return "Saved to the private business knowledge base.", line
 
 
-# The owner dictates in English and asks in Russian. Same trick as the personal
+# He dictates in English and asks in Russian. Same trick as the personal
 # reflex: a short map of the words that actually end up in a business note.
 RU_EN = {"код": "code", "комната": "room", "комнаты": "room", "кабинет": "office",
          "офис": "office", "офиса": "office", "склад": "warehouse",
@@ -83,9 +105,23 @@ RU_EN = {"код": "code", "комната": "room", "комнаты": "room", "
          "счёт": "account", "счет": "account", "телефон": "phone"}
 
 
+# He asks in abbreviations and the note is written out in full. "membership
+# no?" found nothing against "membership number" (2026-08-16) because search
+# requires every token to appear.
+ABBREV = {"no": "number", "num": "number", "nr": "number", "#": "number",
+          "acct": "account", "pw": "password", "pwd": "password",
+          "tel": "phone", "номер": "number", "тел": "phone"}
+
+
 def _query_terms(text):
-    toks = [w for w in re.split(r"[^\w']+", (text or "").lower()) if w]
-    return [RU_EN.get(w, w) for w in toks if w not in STOP and len(w) > 1]
+    toks = [w for w in re.split(r"[^\w'#]+", (text or "").lower()) if w]
+    toks = [t.rstrip(".") for t in toks]
+    out = []
+    for w in toks:
+        w = ABBREV.get(w, RU_EN.get(w, w))
+        if w not in STOP and len(w) > 1:
+            out.append(w)
+    return out
 
 
 def _spoken(text):
@@ -94,10 +130,15 @@ def _spoken(text):
 
 
 def detect_lookup(text):
+    """Asking for a company-private fact he saved — decided by meaning."""
     t = " ".join((text or "").split())
-    if not t or len(t) > 160 or t.startswith("/"):
+    if not t or len(t) > 200 or t.startswith("/"):
         return False
-    return bool(ASKING.search(t)) and not bool(text_of(t))
+    try:
+        import intent as _intent
+        return _intent.classify(t)[0] == "kb.recall"
+    except Exception:
+        return False
 
 
 def lookup(text):
