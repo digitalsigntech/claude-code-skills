@@ -222,16 +222,39 @@ def caller():
     return getattr(_WHO, "account", None)
 
 
+def owner_accounts():
+    """Every account that is THIS person. Usually one; more when the same human
+    reaches the agent under a second id — a demo account they own, a second
+    phone. Unset means single-user, which is what every existing install
+    expects.
+
+    2026-08-17: the demo account was a guest because guests must not read the
+    owner's conversation. When the only user of the demo IS the owner, that
+    protection costs a chat, a delivery tick and a persistent thread and buys
+    nothing — so the demo is named here and treated as what it is.
+    """
+    cfg = config()
+    named = cfg.get("owner_accounts")
+    if isinstance(named, list):
+        out = [str(a) for a in named if a]
+    else:
+        out = []
+    one = str(cfg.get("owner_account") or "").strip()
+    if one and one not in out:
+        out.insert(0, one)
+    return out
+
+
 def owner_account():
-    """The account this install belongs to. Unset means single-user: every
-    caller is the owner, which is what every existing install expects."""
-    return str(config().get("owner_account") or "") or None
+    """The primary one, for anything that needs a single name."""
+    a = owner_accounts()
+    return a[0] if a else None
 
 
 def is_guest():
-    own = owner_account()
+    own = owner_accounts()
     who = caller()
-    return bool(own and who and who != own)
+    return bool(own and who and who not in own)
 
 
 def guest_chat_id(account=None):
