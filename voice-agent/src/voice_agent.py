@@ -1523,9 +1523,9 @@ class Handler(BaseHTTPRequestHandler):
             # behind it by design, so it gets a reason rather than a tick.
             body = {"ok": True, "mirrored": outcome is True}
             if outcome == "queued":
-                # `mirrored` stays a BOOLEAN (Maclaude, 2026-08-18: a string
-                # there reads as nil on every build in the field and silently
-                # degrades). `queued` is an unknown key to an old build —
+                # `mirrored` stays a BOOLEAN: a string there reads as nil on
+                # every build already in the field and degrades silently.
+                # `queued` is an unknown key to an old build —
                 # ignored, tick absent, reconciled later, which is exactly
                 # today's behaviour — and an honest pending state to a new one.
                 body["queued"] = True
