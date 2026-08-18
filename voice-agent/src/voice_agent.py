@@ -381,6 +381,23 @@ def tg_file(path, caption=None):
         return False
 
 
+
+def person_name(fallback=""):
+    """WHOSE line this is — the human, not the account.
+
+    2026-08-17: a mirrored line in his own Telegram read "🎙 Summit Label &
+    Packaging: Do you have prices for all materials?" The app sends no name at
+    all, so the prefix was composed here from the ACCOUNT name, which is a
+    company. Branding already knows the person; that is what attribution means.
+
+    Company at most alongside, never instead: a chat is between people.
+    """
+    try:
+        who = str(branding().get("user_name") or "").strip()
+    except Exception:
+        who = ""
+    return who or str(fallback or "").strip() or "you"
+
 def archive(text, direction, sender, account_name="", mirror=True):
     """Record a voice turn in the machine's archive, and mirror it to Telegram.
 
@@ -834,7 +851,7 @@ def ask(account, question, account_name="", archive_question=True,
         INFLIGHT[turn_id] = {"started": time.time(), "question": question}
     if archive_question:
         if archive_turn:
-            archive(question, "in", sender=account_name or "you")
+            archive(question, "in", sender=person_name(account_name))
 
     sid = session_id(account)
     if sid:
@@ -1483,7 +1500,7 @@ class Handler(BaseHTTPRequestHandler):
                                         "suppressed": "already_archived"})
             nm = branding().get("bot_name") or "agent"
             outcome = archive(text, "out" if who != "you" else "in",
-                              sender=nm if who != "you" else (name or "you"))
+                              sender=nm if who != "you" else person_name(name))
             # `ok` means recorded — it is in the conversation the app shows.
             # `mirrored` means it reached the user's OTHER chat, and it is only
             # true when a send actually succeeded. A demo account has no chat
@@ -1516,7 +1533,7 @@ class Handler(BaseHTTPRequestHandler):
             # conversation that has silently lost its memory — and the next
             # answer looks like forgetfulness rather than a fresh start.
             archive("[cleared context — new conversation]", "in",
-                    sender=name or "you", mirror=False)
+                    sender=person_name(name), mirror=False)
             told = tg_text("🧹 Context cleared from the voice app — fresh "
                            "conversation from here.") if not is_guest() else False
             self.log_message("reset: session cleared for %s%s", account,
@@ -1559,7 +1576,7 @@ class Handler(BaseHTTPRequestHandler):
             # attachments feed. Stored-but-unrecorded is a file nobody can
             # reach, and reporting that as delivered is the exact lie the app
             # spent this afternoon drawing on his screen.
-            posted = archive_file(paths, cap, name or "you")
+            posted = archive_file(paths, cap, person_name(name))
             self.log_message("%s: %d file(s) %s", kind, len(paths),
                              "archived" if posted else "STORED BUT NOT ARCHIVED")
             answer = None
@@ -1607,7 +1624,7 @@ class Handler(BaseHTTPRequestHandler):
             if quick:
                 self.log_message("reflex answered: %.40s", q)
                 if d.get("archive") is not False:
-                    archive(q, "in", sender=name or "you")
+                    archive(q, "in", sender=person_name(name))
                     archive(quick, "out",
                             sender=branding().get("bot_name") or "agent",
                             mirror=False)   # the table is for the app's grid
