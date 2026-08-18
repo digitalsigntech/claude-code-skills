@@ -382,6 +382,17 @@ def tg_file(path, caption=None):
 
 
 
+# How long the app is asked to wait for a mirror before it is told the send is
+# still in flight. Long enough that the normal case answers plainly, short
+# enough that a stuck send never holds a checkmark hostage.
+#
+# 2026-08-18: this constant was added by a replace whose anchor no longer
+# matched, so it silently did not land — and my own probe set it by hand,
+# which is why the test passed and the server raised NameError on the first
+# real call. A test that supplies the missing thing proves nothing.
+MIRROR_DEADLINE_S = 2.5
+
+
 def person_name(fallback=""):
     """WHOSE line this is — the human, not the account.
 
