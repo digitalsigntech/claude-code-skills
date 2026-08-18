@@ -434,9 +434,24 @@ def archive(text, direction, sender, account_name="", mirror=True):
         return "guest_no_chat"
     if not telegram_chat():
         return "no_chat"
-    return True if tg_text(text,
-                           who=(sender if direction == "in" else None)) \
-        else "send_failed"
+    # A SLOW MIRROR SHOULD NOT BE A SLOW TICK. The app waits on this call to
+    # decide the checkmark, so a Telegram send that takes ten seconds — a
+    # retry, a rate limit — held the answer for ten seconds and then drew a
+    # tick nobody was watching for any more. The send runs on its own thread
+    # and gets a short deadline: normally it finishes well inside it and the
+    # answer is a plain yes, and when it does not, the honest answer is
+    # "queued" rather than a boolean pretending to know (2026-08-18).
+    box = {}
+
+    def _send():
+        box["ok"] = tg_text(text, who=(sender if direction == "in" else None))
+
+    t = threading.Thread(target=_send, daemon=True)
+    t.start()
+    t.join(MIRROR_DEADLINE_S)
+    if "ok" not in box:
+        return "queued"
+    return True if box["ok"] else "send_failed"
 
 
 # ------------------------------------------------------------- attachments
@@ -1507,6 +1522,13 @@ class Handler(BaseHTTPRequestHandler):
             # true when a send actually succeeded. A demo account has no chat
             # behind it by design, so it gets a reason rather than a tick.
             body = {"ok": True, "mirrored": outcome is True}
+            if outcome == "queued":
+                # `mirrored` stays a BOOLEAN (Maclaude, 2026-08-18: a string
+                # there reads as nil on every build in the field and silently
+                # degrades). `queued` is an unknown key to an old build —
+                # ignored, tick absent, reconciled later, which is exactly
+                # today's behaviour — and an honest pending state to a new one.
+                body["queued"] = True
             if isinstance(outcome, str):
                 body["suppressed"] = outcome
                 body["reason"] = {
@@ -1516,6 +1538,7 @@ class Handler(BaseHTTPRequestHandler):
                     "send_failed": "the chat refused the message",
                     "archived_only": "recorded, not mirrored by design",
                     "duplicate": "the same line was already recorded",
+                    "queued": "the send is still in flight — it will appear",
                 }.get(outcome, outcome)
             return self._send(200, body)
         if kind == "reset":
