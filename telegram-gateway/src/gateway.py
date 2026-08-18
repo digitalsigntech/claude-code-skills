@@ -254,6 +254,38 @@ def _save_incoming(msg, chat_id):
     return (got, caption)
 
 
+def _describe(md_path, src_path, caption):
+    """Write the sender's caption into the indexed text as the DESCRIPTION.
+
+    the owner, 2026-08-18, after sending a PDF captioned "This is our air cylinder
+    holder used on many Pro adapters such as StarFire and Kyocera" and then
+    failing to find it: "I am trying to send a pdf to our KB with the
+    description, and then I ask agent to retrieve it, and it has no clue."
+
+    A drawing's own text is part numbers and dimensions — nothing in it says
+    "air cylinder holder". The caption is the only place those words exist, so
+    if it is not in the indexed chunk, the document is unfindable by the name
+    its owner calls it. This puts the description first, where both the
+    semantic index and a human skim will see it."""
+    if not caption or not caption.strip():
+        return
+    try:
+        head = (f"# {os.path.basename(src_path)}\n\n"
+                f"**What this is:** {caption.strip()}\n\n"
+                f"_Filed from Telegram on {time.strftime('%Y-%m-%d')}; "
+                f"original at {src_path}._\n\n")
+        body = ""
+        if os.path.exists(md_path):
+            body = open(md_path, errors="ignore").read()
+            if caption.strip() in body:
+                return                      # already described (re-send)
+        os.makedirs(os.path.dirname(md_path), exist_ok=True)
+        with open(md_path, "w") as fh:
+            fh.write(head + body)
+    except Exception as e:
+        log(f"describe failed for {md_path}: {e}")
+
+
 def _ingest(path, caption):
     ext = os.path.splitext(path)[1].lower()
     try:
@@ -282,6 +314,7 @@ def _ingest(path, caption):
             m = re.search(r"->\s+(\S+\.md)\s*$", (r.stdout or "").strip())
             if r.returncode != 0 or not (m and os.path.exists(m.group(1))):
                 return f"⚠️ Ingest FAILED (pdf→md): {(r.stderr or r.stdout).strip()[:400]}"
+            _describe(m.group(1), path, caption)     # caption -> searchable text
             kb = subprocess.run([C.KB, "index"], capture_output=True, text=True, timeout=600)
             if kb.returncode != 0:
                 return (f"⚠️ Converted to {os.path.basename(m.group(1))} but the KB index "
@@ -636,9 +669,31 @@ def handle_file(msg, chat_id):
             else:
                 note += " — you cannot view it, but their message refers to it"
             turn_text = f"{note}] {caption.strip()}"
+            # A CAPTIONED document must be filed too (2026-08-18). Until today a
+            # bare document was ingested and a captioned one was not — the
+            # caption was read as an instruction and the file stayed in
+            # telegram/inbox, unindexed. That is backwards: a caption is the
+            # best description the document will ever get. the owner, in this group:
+            # "save this pdf to our private memory and do the same with any
+            # document that we send in this group... We should be able to find
+            # the doc by the description or by the content."
+            # It runs behind the answer — filing must never make him wait, and a
+            # failed ingest must not eat his question.
+            filing = None
+            if path.lower().endswith(C.DOC_EXTS):
+                filing = {}
+                threading.Thread(
+                    target=lambda: filing.update(r=_ingest(path, caption.strip())),
+                    daemon=True).start()
             with Typing(chat_id):
                 answer, files = private_turn(turn_text, chat_id, sender=_sender_first(msg))
                 reply = "🔒 Local Agent:\n\n" + answer
+            if filing is not None:
+                r = filing.get("r", "")
+                reply += ("\n\n📚 Filed in the knowledge base with your caption as "
+                          "its description — searchable by both."
+                          if str(r).startswith("📚") else
+                          f"\n\n⚠️ KB filing: {str(r)[:200] or 'still running'}")
             TG.send_message(chat_id, reply, reply_to=msg["message_id"])
             _arc_out(chat_id, reply)
             _send_private_files(chat_id, files)
