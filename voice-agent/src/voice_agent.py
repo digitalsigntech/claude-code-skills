@@ -385,10 +385,11 @@ def tg_file(path, caption=None):
 def person_name(fallback=""):
     """WHOSE line this is — the human, not the account.
 
-    2026-08-17: a mirrored line in his own Telegram read "🎙 Summit Label &
-    Packaging: Do you have prices for all materials?" The app sends no name at
-    all, so the prefix was composed here from the ACCOUNT name, which is a
-    company. Branding already knows the person; that is what attribution means.
+    2026-08-17: a mirrored line arrived in an owner's own chat prefixed with
+    his COMPANY's name instead of his own. The app sends no name at all, so the
+    prefix was composed here from the account name — and an account is named
+    after a company. Branding already knows the person; that is what
+    attribution means.
 
     Company at most alongside, never instead: a chat is between people.
     """
