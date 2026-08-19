@@ -1595,8 +1595,16 @@ class Handler(BaseHTTPRequestHandler):
             if not text:
                 return self._send(200, {"ok": True, "mirrored": False})
             if _already_archived(text):
-                return self._send(200, {"ok": True, "mirrored": False,
-                                        "suppressed": "already_archived"})
+                # ALREADY IN THE CHAT IS DELIVERED. 2026-08-19: the agent posts
+                # its own answer, the app mirrors the same words a second
+                # later, and this refused the copy — correctly — but answered
+                # `mirrored: false`, so a line sitting in his Telegram was
+                # drawn with no tick. The duplicate is the strongest possible
+                # confirmation that the words are there: it is why we refused.
+                return self._send(200, {"ok": True, "mirrored": True,
+                                        "suppressed": "already_archived",
+                                        "reason": "these words are already in "
+                                                  "the chat — not sent twice"})
             nm = branding().get("bot_name") or "agent"
             outcome = archive(text, "out" if who != "you" else "in",
                               sender=nm if who != "you" else person_name(name))
