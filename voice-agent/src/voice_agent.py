@@ -839,6 +839,65 @@ def remember_session(account, sid):
         save(STATE, st)
 
 
+
+# "that picture" means the NEWEST one, not the last one discussed.
+#
+# 2026-08-19: a photo arrived at 00:57:35, he typed "ignore that picture" at
+# 00:57:53, and the agent confidently disregarded an app icon from four hours
+# earlier — the last image it had actually LOOKED at, rather than the last one
+# received. It was not a race: the photo was in the archive eighteen seconds
+# before the question. The model simply reached for the image it knew.
+#
+# A demonstrative has one honest referent — the most recent image — and if that
+# image has not been examined yet, the answer is to open it or to ask, never to
+# name a different one with confidence.
+_THAT_PICTURE = re.compile(
+    r"\b(that|this|the|it|last|latest|previous)\b[^.?!]{0,20}"
+    r"\b(picture|photo|photograph|image|screenshot|scan|shot)\b|"
+    r"\b(picture|photo|photograph|image|screenshot)\b\s*$", re.I)
+_IMAGE_WINDOW_S = 6 * 3600
+
+
+def newest_image(within=_IMAGE_WINDOW_S):
+    """(path, when) of the most recent image in this chat, or None."""
+    d = archive_dir()
+    if not d:
+        return None
+    try:
+        import sqlite3
+        cx = sqlite3.connect(f"file:{d / 'chat.db'}?mode=ro", uri=True, timeout=3)
+        rows = cx.execute(
+            "SELECT epoch, text FROM messages WHERE epoch > ? AND "
+            "text LIKE '[camera photo%' ORDER BY epoch DESC LIMIT 1",
+            (time.time() - within,)).fetchall()
+        cx.close()
+    except Exception:
+        return None
+    for ep, text in rows:
+        m = _MARKER.match(str(text).strip())
+        if not m:
+            continue
+        for nm in m.group(2).split(","):
+            p = _resolve_upload(nm.strip())
+            if p:
+                return p, ep
+    return None
+
+
+def picture_context(question):
+    """A line naming the picture a demonstrative refers to, or ''."""
+    if not question or not _THAT_PICTURE.search(question):
+        return ""
+    hit = newest_image()
+    if not hit:
+        return ("\n\n[The user refers to a picture, and there is no recent "
+                "image in this chat. Ask which one rather than guessing.]")
+    path, ep = hit
+    when = time.strftime("%H:%M", time.localtime(ep))
+    return (f"\n\n[\"That picture\" is the MOST RECENT image in this chat: "
+            f"{path}, received at {when}. It is the one meant — not any image "
+            f"discussed earlier. Open it if you need to see it.]")
+
 def ask(account, question, account_name="", archive_question=True,
         archive_turn=True):
     """`archive_turn=False` for a LOOKUP: answer and drop.
@@ -887,7 +946,11 @@ def ask(account, question, account_name="", archive_question=True,
         INFLIGHT[turn_id] = {"started": time.time(), "question": question}
     if archive_question:
         if archive_turn:
-            archive(question, "in", sender=person_name(account_name))
+            # The USER'S words only. The picture context is instruction for the
+            # model, and putting it in the archive would show him a sentence he
+            # never typed — the mistake the caption path already made once.
+            archive(question.split("\n\n[", 1)[0], "in",
+                    sender=person_name(account_name))
 
     sid = session_id(account)
     if sid:
@@ -1679,7 +1742,11 @@ class Handler(BaseHTTPRequestHandler):
             # behalf. Answer it and leave no trace: no row, no mirror, nothing
             # for history restore to replay.
             keep = d.get("archive")
-            res = ask(account, q, name, archive_turn=(keep is not False))
+            # A demonstrative about a picture is resolved before the turn, so
+            # the model is told WHICH image rather than picking the one it
+            # happens to remember.
+            res = ask(account, q + picture_context(q), name,
+                      archive_turn=(keep is not False))
             self.log_message("answered in %.1fs (%s)", time.time() - t0,
                              res.get("agent_error") or "ok")
             if before is not None and reminders_snapshot() == before:
