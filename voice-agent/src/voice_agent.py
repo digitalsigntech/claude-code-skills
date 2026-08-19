@@ -898,6 +898,40 @@ def picture_context(question):
             f"{path}, received at {when}. It is the one meant — not any image "
             f"discussed earlier. Open it if you need to see it.]")
 
+
+# An agent cannot reach the app's switches (2026-08-19, an owner's rule: "if a
+# user asks to change some setting in the app via TEXT INPUT, the agent must
+# respond that those are VOICE COMMANDS ONLY").
+#
+# The manual states the reason; this states the reflex. A manual section only
+# helps if the agent goes looking, and the phrasings people use for this are
+# endless — so the turn carries the rule whenever the question smells like one,
+# and the agent answers in its own words rather than from a script.
+_SETTING_VERB = re.compile(
+    r"\b(change|switch|set|turn|make|enable|disable|use|put|activate|"
+    r"increase|decrease|raise|lower|mute|unmute)\b", re.I)
+_SETTING_NOUN = re.compile(
+    r"\b(dark|light) mode\b|\bappearance\b|\bfont\b|\btext size\b|"
+    r"\bbigger text\b|\bvoice\b|\blanguage\b|\bquality\b|\bhq\b|"
+    r"\bstandard\b|\bnotification\w*\b|\bkeyboard\b|\bauto[- ]?connect\b|"
+    r"\bconnect automatically\b|\breplies\b|\bverbosity\b|\bshorter\b|"
+    r"\blonger\b|\bbubbles?\b|\btranspar\w+\b|\bsetting\w*\b", re.I)
+
+
+def app_setting_context(question):
+    """A line telling the agent it cannot change an app setting, or ''."""
+    q = question or ""
+    if not (_SETTING_VERB.search(q) and _SETTING_NOUN.search(q)):
+        return ""
+    return ("\n\n[This asks to change a SETTING IN THE APP. You cannot: the "
+            "app's switches are not reachable from here, any more than the "
+            "phone's brightness is. Say so plainly, in one or two sentences, "
+            "and name the two ways that DO work — say it out loud to the app "
+            "(e.g. \"switch to dark mode\"), or open Settings. Do not "
+            "apologise at length, do not offer to try, and never imply it is "
+            "done. The one exception is /clear, which the app acts on itself "
+            "before the message reaches you.]")
+
 def ask(account, question, account_name="", archive_question=True,
         archive_turn=True):
     """`archive_turn=False` for a LOOKUP: answer and drop.
@@ -1753,8 +1787,8 @@ class Handler(BaseHTTPRequestHandler):
             # A demonstrative about a picture is resolved before the turn, so
             # the model is told WHICH image rather than picking the one it
             # happens to remember.
-            res = ask(account, q + picture_context(q), name,
-                      archive_turn=(keep is not False))
+            res = ask(account, q + picture_context(q) + app_setting_context(q),
+                      name, archive_turn=(keep is not False))
             self.log_message("answered in %.1fs (%s)", time.time() - t0,
                              res.get("agent_error") or "ok")
             if before is not None and reminders_snapshot() == before:
