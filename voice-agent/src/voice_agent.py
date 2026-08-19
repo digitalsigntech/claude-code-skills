@@ -420,18 +420,26 @@ def archive(text, direction, sender, account_name="", mirror=True):
     to one agent should read back as one conversation, whichever way the words
     arrived."""
     chat = telegram_chat()
-    if direction == "in" and _already_archived(text, within=15, direction="in"):
-        print(f"[voice-agent] duplicate line not archived: {str(text)[:40]!r}",
-              file=sys.stderr)
-        return "duplicate"
     db = _chatdb()
     if db and text:
-        try:
-            db.record(text[:4000], direction,
-                      sender=sender, chat_id=archive_chat_id(),
-                      chat_title=_chat_title(), kind="text")
-        except Exception:
-            pass
+        # CHECK AND WRITE UNDER ONE LOCK. 2026-08-19: a typed message arrives on
+        # two paths at once — the line is logged and the same words are asked —
+        # and both threads checked for a duplicate before either had written.
+        # The rows were 180 MICROSECONDS apart, so the check was correct and
+        # simply too early. A dedupe that is not atomic is a dedupe that works
+        # in testing and fails on the one case it exists for.
+        with _lock:
+            if direction == "in" and _already_archived(text, within=15,
+                                                       direction="in"):
+                print(f"[voice-agent] duplicate line not archived: "
+                      f"{str(text)[:40]!r}", file=sys.stderr)
+                return "duplicate"
+            try:
+                db.record(text[:4000], direction,
+                          sender=sender, chat_id=archive_chat_id(),
+                          chat_title=_chat_title(), kind="text")
+            except Exception:
+                pass
     # A guest's words go nowhere near the owner's Telegram.
     #
     # AND THE CALLER IS TOLD WHICH HAPPENED. 2026-08-14: this returned nothing,
