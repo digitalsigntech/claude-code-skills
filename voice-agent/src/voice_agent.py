@@ -411,6 +411,42 @@ def person_name(fallback=""):
         who = ""
     return who or str(fallback or "").strip() or "you"
 
+
+def _mirror_state_db():
+    d = archive_dir()
+    if not d:
+        return None
+    import sqlite3
+    cx = sqlite3.connect(f"{d / 'chat.db'}", timeout=5)
+    cx.execute("CREATE TABLE IF NOT EXISTS mirror_state("
+               "epoch REAL, chat_id INTEGER, mirrored INTEGER, "
+               "PRIMARY KEY(epoch, chat_id))")
+    return cx
+
+
+def _record_mirror(chat_id, mirrored):
+    """Remember whether the line just archived actually reached the chat.
+
+    2026-08-19: the app ticks whatever history hands back, and history could
+    not say which lines were only WRITTEN DOWN. Two lines he could see ticked
+    were never in Telegram at all. A sidecar table rather than a column,
+    because the gateway writes this database too and a schema it does not know
+    about is a schema it cannot break.
+    """
+    try:
+        cx = _mirror_state_db()
+        if not cx:
+            return
+        row = cx.execute("SELECT epoch FROM messages WHERE chat_id=? "
+                         "ORDER BY epoch DESC LIMIT 1", (chat_id,)).fetchone()
+        if row:
+            cx.execute("INSERT OR REPLACE INTO mirror_state VALUES(?,?,?)",
+                       (row[0], chat_id, 1 if mirrored else 0))
+            cx.commit()
+        cx.close()
+    except Exception:
+        pass
+
 def archive(text, direction, sender, account_name="", mirror=True):
     """Record a voice turn in the machine's archive, and mirror it to Telegram.
 
@@ -449,10 +485,13 @@ def archive(text, direction, sender, account_name="", mirror=True):
     if not text:
         return "empty"
     if not mirror:
+        _record_mirror(archive_chat_id(), False)
         return "archived_only"
     if is_guest():
+        _record_mirror(archive_chat_id(), False)
         return "guest_no_chat"
     if not telegram_chat():
+        _record_mirror(archive_chat_id(), False)
         return "no_chat"
     # A SLOW MIRROR SHOULD NOT BE A SLOW TICK. The app waits on this call to
     # decide the checkmark, so a Telegram send that takes ten seconds — a
@@ -470,7 +509,10 @@ def archive(text, direction, sender, account_name="", mirror=True):
     t.start()
     t.join(MIRROR_DEADLINE_S)
     if "ok" not in box:
+        # Still in flight: not yet a delivery, and the echo will settle it.
+        _record_mirror(archive_chat_id(), False)
         return "queued"
+    _record_mirror(archive_chat_id(), bool(box["ok"]))
     return True if box["ok"] else "send_failed"
 
 
@@ -691,6 +733,19 @@ def _archive_history(limit, since):
     except Exception:
         return None
     name = branding().get("bot_name") or "agent"
+    # What we KNOW about delivery, per row. Absent means unknown — an older
+    # line from before this was recorded — and the app keeps its own behaviour
+    # there rather than being told a guess.
+    state = {}
+    try:
+        import sqlite3
+        cx2 = sqlite3.connect(f"file:{d / 'chat.db'}?mode=ro", uri=True,
+                              timeout=3)
+        state = {float(e): bool(m) for e, m in cx2.execute(
+            "SELECT epoch, mirrored FROM mirror_state")}
+        cx2.close()
+    except Exception:
+        state = {}
     msgs = []
     for ep, sender, text, direction in reversed(rows):
         if not isinstance(ep, (int, float)) or ep <= 0 or not text:
@@ -703,6 +758,8 @@ def _archive_history(limit, since):
              "sender": name if role == "agent" else (sender or "you"),
              "text": _strip_injected_prefix(str(text))[:2000],
              "ts": float(ep)}
+        if float(ep) in state:
+            m["mirrored"] = state[float(ep)]
         # A row that names files carries their tokens, so a restored chat shows
         # the picture instead of the words "[camera photo: …]". Same fields the
         # box sends: `token` flat for one file, `tokens` for an album.
@@ -917,6 +974,30 @@ _SETTING_NOUN = re.compile(
     r"\bconnect automatically\b|\breplies\b|\bverbosity\b|\bshorter\b|"
     r"\blonger\b|\bbubbles?\b|\btranspar\w+\b|\bsetting\w*\b", re.I)
 
+
+
+def time_context(tz):
+    """The caller's clock, stated for the turn.
+
+    2026-08-19: he said "4pm" and got 5:00 PM, in the table and spoken aloud.
+    The reminder was CREATED in the machine's timezone and DISPLAYED in the
+    caller's — two different clocks, one hour apart, each correct on its own
+    terms. A time somebody says belongs to the zone they are standing in, and
+    the app tells us which that is on every ask.
+    """
+    if not tz:
+        return ""
+    try:
+        from zoneinfo import ZoneInfo
+        from datetime import datetime
+        now = datetime.now(ZoneInfo(str(tz)))
+    except Exception:
+        return ""
+    return (f"\n\n[The person you are answering is in {tz}, where it is now "
+            f"{now.strftime('%H:%M on %a %d %b')}. Any time they name — "
+            f"\"4pm\", \"tomorrow morning\" — is in THAT zone, and anything "
+            f"you schedule or read back must be too. This machine's own clock "
+            f"is not theirs.]")
 
 def app_setting_context(question):
     """A line telling the agent it cannot change an app setting, or ''."""
@@ -1787,7 +1868,9 @@ class Handler(BaseHTTPRequestHandler):
             # A demonstrative about a picture is resolved before the turn, so
             # the model is told WHICH image rather than picking the one it
             # happens to remember.
-            res = ask(account, q + picture_context(q) + app_setting_context(q),
+            res = ask(account,
+                      q + picture_context(q) + app_setting_context(q)
+                      + time_context(d.get("tz")),
                       name, archive_turn=(keep is not False))
             self.log_message("answered in %.1fs (%s)", time.time() - t0,
                              res.get("agent_error") or "ok")
