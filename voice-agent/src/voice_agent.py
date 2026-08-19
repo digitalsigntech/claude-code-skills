@@ -36,6 +36,7 @@ conversation over voice keeps its thread.
 """
 import argparse, base64, calendar, hashlib, json, mimetypes, os, pathlib, re, secrets, \
     shutil, subprocess, sys, threading, time
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -1688,6 +1689,78 @@ class Handler(BaseHTTPRequestHandler):
         self._send(400, {"error": f"unsupported type: {kind}"})
 
 
+
+# ---------------------------------------------------- new-message notifier
+# An owner asked for a push when a message arrives in the chat while the app is
+# not in front of them (2026-08-18), OFF unless they turn it on. The app owns
+# the switch and the foreground case; this owns "something arrived".
+#
+# It watches the ARCHIVE rather than hooking a send path, because a message can
+# reach that chat from several directions — somebody typing in the chat, a
+# reminder firing, a scheduled job posting — and the archive is the one place
+# all of them land. What it must NOT do is announce the person's own words back
+# to them, so lines the app itself just produced are skipped.
+NOTIFY_POLL_S = 20
+NOTIFY_KIND = "message"
+
+
+def _notify_plane(account, kind=NOTIFY_KIND, **extra):
+    """Ask the plane to nudge this account's phones. Authenticated with this
+    agent's own secret, which the plane scopes to this account alone."""
+    try:
+        cfg = config()
+        body = json.dumps({"kind": kind, "account": account, **extra}).encode()
+        rq = urllib.request.Request(
+            (os.environ.get("VOICE_PLANE", "https://app.agentvoicemode.ai")
+             + "/api/notify"),
+            data=body,
+            headers={"Authorization": f"Bearer {cfg['secret']}",
+                     "Content-Type": "application/json"})
+        with urllib.request.urlopen(rq, timeout=15) as rp:
+            return json.loads(rp.read() or b"{}")
+    except Exception as e:
+        return {"error": str(e)[:120]}
+
+
+def _message_watcher():
+    """Poll the archive; nudge the phone when a line it has not seen appears."""
+    d = archive_dir()
+    accounts = owner_accounts()
+    if not d or not accounts:
+        return
+    st = load(STATE, {})
+    last = float(st.get("notify_seen_epoch") or 0)
+    if not last:                      # first run: start from now, never a flood
+        last = time.time()
+    while True:
+        time.sleep(NOTIFY_POLL_S)
+        try:
+            import sqlite3
+            cx = sqlite3.connect(f"file:{d / 'chat.db'}?mode=ro", uri=True,
+                                 timeout=3)
+            rows = cx.execute(
+                "SELECT epoch, kind, direction FROM messages WHERE epoch > ? "
+                "ORDER BY epoch", (last,)).fetchall()
+            cx.close()
+        except Exception:
+            continue
+        if not rows:
+            continue
+        newest = max(r[0] for r in rows)
+        # The app's own voice lines are already on his screen; announcing them
+        # would be the notification equivalent of the duplicate bubble.
+        worth = [r for r in rows if (r[1] or "") != "voice"]
+        last = newest
+        st = load(STATE, {})
+        st["notify_seen_epoch"] = newest
+        save(STATE, st)
+        if not worth:
+            continue
+        for acct in accounts:
+            res = _notify_plane(acct, count=len(worth))
+            print(f"[voice-agent] new-message push for {acct}: "
+                  f"{len(worth)} line(s) -> {res}", file=sys.stderr)
+
 def _identity_worker():
     """Keep the panel current in the background. It costs a model turn, so it
     never runs while the plane is waiting on a request — the panel is always
@@ -1734,6 +1807,7 @@ def serve():
     if not h["ok"]:
         print(f"[voice-agent] WARNING: {h.get('detail')}", flush=True)
     threading.Thread(target=_identity_worker, daemon=True).start()
+    threading.Thread(target=_message_watcher, daemon=True).start()
     threading.Thread(target=_qr_sweeper, daemon=True).start()
     srv.serve_forever()
 
