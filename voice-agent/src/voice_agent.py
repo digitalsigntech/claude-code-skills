@@ -1860,7 +1860,7 @@ def _message_watcher():
 # knowledge, refreshed in the background. A file the agent can read beats a
 # fetch it has to remember to make, and it keeps working when the plane does
 # not.
-DOCS_REFRESH_S = 3600
+DOCS_REFRESH_S = 900        # a version check, not a download
 DOCS_DIRNAME = "agent-voice-mode"
 
 
@@ -1880,10 +1880,31 @@ def _plane(path):
         return rp.read()
 
 
-def sync_app_docs():
-    """Manual + release notes to disk. Returns what changed."""
+def sync_app_docs(force=False):
+    """Manual + release notes to disk. Returns what changed.
+
+    The manual is fetched only when its VERSION changes: `/api/manual/version`
+    returns an opaque string to compare for equality, so the usual case costs a
+    few hundred bytes instead of a document. A stale copy is worse than none —
+    an agent confidently describing last week's app is a wrong answer nobody
+    can tell from a right one — so the version is what the cache is keyed on,
+    never a timer.
+    """
     changed = []
     d = _docs_dir()
+    stamp = os.path.join(d, ".manual-version")
+    try:
+        seen = open(stamp).read().strip()
+    except OSError:
+        seen = ""
+    try:
+        now_v = str(json.loads(_plane("/manual/version") or b"{}")
+                    .get("version") or "")
+    except Exception:
+        now_v = ""
+    if now_v and now_v == seen and not force and \
+            os.path.exists(os.path.join(d, "manual.md")):
+        return []                       # unchanged: nothing to fetch
     try:
         man = _plane("/manual")
         p = os.path.join(d, "manual.md")
@@ -1891,6 +1912,9 @@ def sync_app_docs():
             with open(p, "wb") as f:
                 f.write(man)
             changed.append("manual.md")
+        if now_v:
+            with open(stamp, "w") as f:
+                f.write(now_v)
     except Exception as e:
         print(f"[voice-agent] manual sync failed: {e}", file=sys.stderr)
     try:
