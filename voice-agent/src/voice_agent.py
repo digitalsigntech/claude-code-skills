@@ -1844,6 +1844,85 @@ def _message_watcher():
             print(f"[voice-agent] new-message push for {acct}: "
                   f"{len(worth)} line(s) -> {res}", file=sys.stderr)
 
+
+# ------------------------------------------------------ the app's own docs
+# 2026-08-19, an owner: "our agents, wherever they are, should have access to
+# this app's documentation and release notes. So if a user asks the agent
+# anything about this app, the agent should be able to answer it."
+#
+# What prompted it: he asked how the keyboard behaves after sending, the
+# question reached the agent, and the agent said — correctly and uselessly —
+# that it could not see the app's UI. An agent that cannot answer a question
+# about the thing it is speaking through is a gap the user experiences as
+# ignorance, not as a boundary.
+#
+# So the manual and the release notes are kept ON DISK beside the agent's own
+# knowledge, refreshed in the background. A file the agent can read beats a
+# fetch it has to remember to make, and it keeps working when the plane does
+# not.
+DOCS_REFRESH_S = 3600
+DOCS_DIRNAME = "agent-voice-mode"
+
+
+def _docs_dir():
+    base = os.path.expanduser(config()["workdir"])
+    kb = os.path.join(base, "knowledge-base")
+    root = kb if os.path.isdir(kb) else base
+    d = os.path.join(root, DOCS_DIRNAME)
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _plane(path):
+    url = (os.environ.get("VOICE_PLANE", "https://app.agentvoicemode.ai")
+           + "/api" + path)
+    with urllib.request.urlopen(url, timeout=20) as rp:
+        return rp.read()
+
+
+def sync_app_docs():
+    """Manual + release notes to disk. Returns what changed."""
+    changed = []
+    d = _docs_dir()
+    try:
+        man = _plane("/manual")
+        p = os.path.join(d, "manual.md")
+        if not os.path.exists(p) or open(p, "rb").read() != man:
+            with open(p, "wb") as f:
+                f.write(man)
+            changed.append("manual.md")
+    except Exception as e:
+        print(f"[voice-agent] manual sync failed: {e}", file=sys.stderr)
+    try:
+        rel = json.loads(_plane("/releases") or b"{}").get("builds", {})
+        lines = ["# Agent Voice Mode — release notes",
+                 "",
+                 "Newest first. Each heading is the build number the app "
+                 "reports in Settings.", ""]
+        for b in sorted(rel, key=lambda x: int(x), reverse=True):
+            lines += [f"## Build {b}", "", str(rel[b]).strip(), ""]
+        body = "\n".join(lines).encode()
+        p = os.path.join(d, "release-notes.md")
+        if not os.path.exists(p) or open(p, "rb").read() != body:
+            with open(p, "wb") as f:
+                f.write(body)
+            changed.append("release-notes.md")
+    except Exception as e:
+        print(f"[voice-agent] release-note sync failed: {e}", file=sys.stderr)
+    if changed:
+        print(f"[voice-agent] app docs updated: {', '.join(changed)} in {d}",
+              file=sys.stderr)
+    return changed
+
+
+def _docs_worker():
+    while True:
+        try:
+            sync_app_docs()
+        except Exception:
+            pass
+        time.sleep(DOCS_REFRESH_S)
+
 def _identity_worker():
     """Keep the panel current in the background. It costs a model turn, so it
     never runs while the plane is waiting on a request — the panel is always
@@ -1891,6 +1970,7 @@ def serve():
         print(f"[voice-agent] WARNING: {h.get('detail')}", flush=True)
     threading.Thread(target=_identity_worker, daemon=True).start()
     threading.Thread(target=_message_watcher, daemon=True).start()
+    threading.Thread(target=_docs_worker, daemon=True).start()
     threading.Thread(target=_qr_sweeper, daemon=True).start()
     srv.serve_forever()
 
