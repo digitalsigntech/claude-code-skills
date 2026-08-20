@@ -1622,6 +1622,50 @@ def _key_path():
     return os.path.join(str(HERE), KEY_FILE)
 
 
+RETIRED_KEYS_FILE = "agent-x25519.retired"
+
+
+def rotate_agent_key():
+    """New key for sealing; the old one KEPT for opening.
+
+    A rotation that destroys the previous private key destroys the archive
+    sealed to it — the failure is silent and total, and it arrives weeks later
+    when somebody scrolls back. Retired keys are appended, never dropped, and
+    `key_id` in an envelope says which one to reach for.
+    """
+    from cryptography.hazmat.primitives import serialization
+    p = _key_path()
+    if os.path.exists(p):
+        with open(p, "rb") as f:
+            old_raw = f.read()
+        with open(os.path.join(str(HERE), RETIRED_KEYS_FILE), "ab") as f:
+            f.write(old_raw)                      # 32 bytes per retired key
+        os.chmod(os.path.join(str(HERE), RETIRED_KEYS_FILE), 0o600)
+        os.remove(p)
+    priv, pub = agent_keys()
+    print(f"[voice-agent] key rotated; fingerprint now {key_fingerprint(pub)}",
+          file=sys.stderr)
+    return pub
+
+
+def retired_keys():
+    """Every private key this agent has retired, oldest first."""
+    from cryptography.hazmat.primitives.asymmetric.x25519 import (
+        X25519PrivateKey)
+    p = os.path.join(str(HERE), RETIRED_KEYS_FILE)
+    out = []
+    try:
+        raw = open(p, "rb").read()
+    except OSError:
+        return out
+    for i in range(0, len(raw) - 31, 32):
+        try:
+            out.append(X25519PrivateKey.from_private_bytes(raw[i:i + 32]))
+        except Exception:
+            continue
+    return out
+
+
 def agent_keys():
     """(private, public) X25519 keys, generated once and kept."""
     from cryptography.hazmat.primitives.asymmetric.x25519 import (

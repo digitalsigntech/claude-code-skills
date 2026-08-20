@@ -218,8 +218,23 @@ def show_qr(api, token, name=None, payload_only=False):
                 "PERMANENT account credential. Show it only to the person pairing and "
                 "delete it immediately after scanning.")
 
+    # THE AGENT'S PUBLIC KEY RIDES THE CODE (2026-08-19). This file runs on the
+    # agent host, so the key in the QR is chosen here and the plane only passes
+    # the image along — which is the whole reason end-to-end encryption is not
+    # theatre. The fingerprint travels too, but ONLY as a convenience for the
+    # person reading it: the app must compute its own from the key, because a
+    # substituting party would send a matching pair.
+    pub, fp = "", ""
+    try:
+        sys.path.insert(0, str(HERE))
+        import voice_agent
+        pub, fp = voice_agent.public_key_b64(), voice_agent.key_fingerprint()
+    except Exception as e:
+        print(f"[pair] no encryption key in this QR: {e}", file=sys.stderr)
     blob = json.dumps({"v": 1, "type": "account", "token": qr_token,
-                       "name": name or "", "api": api}, separators=(",", ":"))
+                       "name": name or "", "api": api,
+                       **({"agent_pubkey": pub, "fingerprint": fp}
+                          if pub else {})}, separators=(",", ":"))
     digest = hashlib.sha256(qr_token.encode()).hexdigest()
     if payload_only:
         print(blob)
