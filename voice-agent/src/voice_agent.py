@@ -284,9 +284,6 @@ def telegram():
     if "mod" in _TG_CACHE:
         return _TG_CACHE["mod"]
     _TG_CACHE["mod"] = None
-    fp = fingerprint_answer(question)
-    if fp:
-        return fp
     d = os.path.join(os.path.expanduser(config()["workdir"]), "telegram")
     if os.path.isfile(os.path.join(d, "tg_api.py")):
         if d not in sys.path:
@@ -1561,6 +1558,12 @@ def reflex_answer(question, tz=None):
     to be byte-shaped: a `<!--id:N-->` marker inside the When cell is what makes
     a row tappable, and no model reproduces that reliably turn after turn.
     """
+    # The safety number is answered from the key, before anything else: it is
+    # the one question where a plausible neighbouring answer is worse than no
+    # answer at all.
+    fp = fingerprint_answer(question)
+    if fp:
+        return fp
     d = os.path.join(os.path.expanduser(config()["workdir"]), "telegram")
     if not os.path.isfile(os.path.join(d, "reminders_reflex.py")):
         return None
