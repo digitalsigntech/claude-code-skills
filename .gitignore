@@ -30,3 +30,11 @@ venv/
 .identity-guard
 *.key
 voice-agent/src/agent-x25519.*
+
+# A test run that imports the adapter WRITES these into the source tree:
+# config.json is generated with a fresh bearer, and a key pair appears on
+# first use. Neither belongs in a published skill, and the push guard caught
+# the config before it left the machine (2026-08-19).
+voice-agent/src/config.json
+voice-agent/src/state.json
+voice-agent/src/agent-x25519.*
