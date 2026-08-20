@@ -2402,6 +2402,36 @@ class Handler(BaseHTTPRequestHandler):
             except (TypeError, ValueError):
                 since = 0.0
             items = list_attachments(since)
+            # #261: the FILE is stage 3, but the CAPTION is the sentence a
+            # person typed beside it and the filename is often just as telling
+            # (`invoice-<customer>.pdf`). Both are text, and stage 2 claims to
+            # seal text. `token`/`ts`/`kind` stay readable because the app
+            # needs them to fetch and render; the words go in an envelope.
+            #
+            # WITHHOLDING WOULD BE WRONG HERE, unlike progress (#260): an
+            # attachment can originate on the agent side — a file posted into
+            # the chat, an upload that arrived through Telegram — so the app
+            # has no local copy to fall back on.
+            #
+            # OFF BY DEFAULT AND GATED SEPARATELY, because sending an envelope
+            # to a build that cannot open it blanks captions on a live phone:
+            # exactly the regression this fix exists to avoid. The flag goes on
+            # when the app side confirms the opening build is installed.
+            if items and config().get("e2ee_attachments") and e2ee_locked(account):
+                try:
+                    priv, mine = agent_keys()
+                    theirs = peer_key(account)
+                    for it in items:
+                        meta = json.dumps({"filename": it.get("filename", ""),
+                                           "caption": it.get("caption", "")})
+                        it["meta_sealed"] = e2ee_seal(meta, priv, mine, theirs,
+                                                      direction=DIR_TO_PHONE)
+                        it.pop("filename", None)
+                        it.pop("caption", None)
+                except Exception as e:
+                    self.log_message("ATTACHMENT META SEAL FAILED: %s", e)
+                    return self._send(500, {"error": "seal_failed",
+                                            "detail": str(e)[:300]})
             self.log_message("attachments -> %d item(s)", len(items))
             return self._send(200, {"items": items})
         if kind in ("photo", "photos"):
