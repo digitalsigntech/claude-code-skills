@@ -2389,6 +2389,13 @@ class Handler(BaseHTTPRequestHandler):
             # saying so in the chat leaves the person reading that chat with a
             # conversation that has silently lost its memory — and the next
             # answer looks like forgetfulness rather than a fresh start.
+            # #272: CLEAR IS AN APP ACTION, so the line it writes must not
+            # push back at the app that made it. He tapped Clear and got a
+            # banner while the app was open — the agent posted "context
+            # cleared" to the chat, the notifier saw a new line, and the phone
+            # was notified about its own tap. Same quiet window as an answered
+            # turn, for the same reason: the app already knows.
+            LAST_APP_TURN[account] = time.time()
             archive("[cleared context — new conversation]", "in",
                     sender=person_name(name), mirror=False)
             told = tg_text("🧹 Context cleared from the voice app — fresh "
