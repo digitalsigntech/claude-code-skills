@@ -2018,6 +2018,39 @@ def public_key_b64():
 PEERS_FILE = "peer-keys.json"
 
 
+class PeerKeyChanged(ValueError):
+    """A different device key for an account that already pinned one.
+
+    Its own type because it is the one refusal with a REMEDY: everything else
+    that fails to open is a bug or an attack, and this one is usually a person
+    holding a new phone. The app needs to tell those apart to know whether to
+    show "re-pair" or "something is wrong", so it gets its own error code on
+    the wire rather than a prose detail nobody can branch on.
+    """
+
+
+def unpin_peer(account):
+    """Forget the pinned device key, so the next one is accepted.
+
+    THE PIN MUST HAVE A WAY OUT, and one a person can reach (2026-08-20).
+    Restore a phone from a backup that excluded the Keychain — a failure mode
+    the design document lists — and the device generates a new key that this
+    agent then refuses forever. Without this, the remedy is an operator with
+    ssh, which is not a remedy for anybody who does not have one. Clearing on
+    a fresh pairing scan makes re-pairing the act that authorises it: a person
+    holding the agent's own QR code is the same evidence the first pin had.
+    """
+    with _lock:
+        store = load(_peers_path(), {})
+        if account in store:
+            store.pop(account, None)
+            save(_peers_path(), store)
+            print(f"[voice-agent] device key unpinned for {account} — the "
+                  f"next sealed message will pin a new one", file=sys.stderr)
+            return True
+    return False
+
+
 def _peers_path():
     # A pathlib.Path: load()/save() call .read_text()/.write_text() on it, and
     # a str here fails only at the moment a sealed message arrives — which is
@@ -2039,9 +2072,10 @@ def peer_key(account, offered_b64=None):
             if len(raw) != 32:
                 raise ValueError(f"peer key is {len(raw)} bytes, expected 32")
             if cur and cur != offered_b64:
-                raise ValueError(
+                raise PeerKeyChanged(
                     "this account is pinned to a different device key — "
-                    "re-pair deliberately rather than accepting a new one "
+                    "scan a fresh pairing code to re-pair, which clears the "
+                    "old pin deliberately instead of accepting a new key "
                     "mid-conversation")
             if not cur:
                 store[account] = offered_b64
@@ -2244,6 +2278,10 @@ class Handler(BaseHTTPRequestHandler):
                         raise ValueError("no device key for this account")
                     text = e2ee_open(sealed_log, priv, mine, theirs,
                                      direction=DIR_TO_AGENT).strip()
+                except PeerKeyChanged as e:
+                    self.log_message("DEVICE KEY CHANGED for %s", account)
+                    return self._send(400, {"error": "device_key_changed",
+                                            "detail": str(e)[:300]})
                 except Exception as e:
                     self.log_message("SEALED LOG REFUSED: %s", e)
                     return self._send(400, {"error": "sealed_open_failed",
@@ -2422,6 +2460,10 @@ class Handler(BaseHTTPRequestHandler):
                     q = e2ee_open(sealed_in, priv, mine, theirs,
                                   direction=DIR_TO_AGENT).strip()
                     seal_reply = True
+                except PeerKeyChanged as e:
+                    self.log_message("DEVICE KEY CHANGED for %s", account)
+                    return self._send(400, {"error": "device_key_changed",
+                                            "detail": str(e)[:300]})
                 except Exception as e:
                     # LOUD, never a fallback to plaintext: a message that
                     # cannot be opened has not been received.
@@ -2759,6 +2801,12 @@ if __name__ == "__main__":
     # performs twice (2026-08-19).
     ap.add_argument("--fingerprint", action="store_true",
                     help="print this agent's encryption fingerprint and exit")
+    ap.add_argument("--pins", action="store_true",
+                    help="list the device keys pinned to this agent")
+    ap.add_argument("--unpin", metavar="ACCOUNT",
+                    help="forget an account's pinned device key, so a new "
+                         "phone can pair (use after a restore that lost the "
+                         "old key)")
     a = ap.parse_args()
     if a.check:
         print(json.dumps({**health(), "claude": claude_bin(),
@@ -2776,6 +2824,23 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"no encryption key on this agent: {e}", file=sys.stderr)
             raise SystemExit(1)
+    elif a.pins:
+        import base64 as _b64
+        pins = load(_peers_path(), {})
+        if not pins:
+            print("no device keys pinned")
+        for acct, k in pins.items():
+            try:
+                fp = key_fingerprint(_b64.b64decode(k))
+            except Exception:
+                fp = "(unreadable)"
+            print(f"{acct}\n  {fp}")
+    elif a.unpin:
+        if unpin_peer(a.unpin):
+            print(f"unpinned {a.unpin} — the next sealed message from that "
+                  f"account pins a new device key")
+        else:
+            print(f"{a.unpin} had no pinned device key")
     elif a.identity:
         print(json.dumps(ensure_identity(force=True), indent=2))
     else:
