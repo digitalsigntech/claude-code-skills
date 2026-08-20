@@ -2258,11 +2258,29 @@ if __name__ == "__main__":
     ap.add_argument("--check", action="store_true", help="print health and exit")
     ap.add_argument("--identity", action="store_true",
                     help="derive the identity panel now and print it")
+    # The safety number, from the machine the agent actually runs on. The app
+    # tells people this is the strongest check available to them, and a check
+    # that requires decoding base64 and hashing it by hand is a check nobody
+    # performs twice (2026-08-19).
+    ap.add_argument("--fingerprint", action="store_true",
+                    help="print this agent's encryption fingerprint and exit")
     a = ap.parse_args()
     if a.check:
         print(json.dumps({**health(), "claude": claude_bin(),
                           "workdir": os.path.expanduser(config()["workdir"]),
                           "branding": branding()}, indent=2))
+    elif a.fingerprint:
+        try:
+            _priv, _pub = agent_keys()
+            print(key_fingerprint(_pub))
+            print(f"\npublic key : {public_key_b64()}", file=sys.stderr)
+            print(f"retired    : {len(retired_keys())} older key(s) kept for "
+                  f"reading old messages", file=sys.stderr)
+            print("Read the twenty digits aloud and compare them with the app. "
+                  "They must match exactly.", file=sys.stderr)
+        except Exception as e:
+            print(f"no encryption key on this agent: {e}", file=sys.stderr)
+            raise SystemExit(1)
     elif a.identity:
         print(json.dumps(ensure_identity(force=True), indent=2))
     else:
