@@ -1773,6 +1773,10 @@ def capabilities():
     # and the honest answer to "can you take a photo" is then no.
     if _chatdb():
         caps += ["photo", "photos", "attachments", "log", "reset"]
+    # The app starts sealing the moment it sees this, so it is claimed only
+    # when a key exists, the library imports, and the operator turned it on.
+    if e2ee_ready(caller()):
+        caps.append("e2ee-v1")
     return caps
 
 
@@ -1893,10 +1897,176 @@ def key_fingerprint(pub=None):
     return " ".join(digits[i:i + 5] for i in range(0, 20, 5))
 
 
+# ------------------------------------------------------- e2ee (wire v1)
+# The agent half of docs/feature-e2e-encryption.md, matching
+# MessageCrypto.swift byte for byte. Every constant here is load-bearing: a
+# derivation that differs by one byte produces a key that decrypts nothing,
+# and the failure looks like a corrupted message rather than a mismatch.
+#
+#   key   = HKDF-SHA256(ikm=X25519(priv, their_pub),
+#                       salt="voicebridge-e2ee-v1",
+#                       info=b"voicebridge/v1/" + direction + 0x00
+#                            + sorted([my_pub, their_pub])[0]
+#                            + sorted([my_pub, their_pub])[1],
+#                       length=32)
+#   ct    = AES-256-GCM(key, nonce=12 random bytes, plaintext); the envelope's
+#           `ct` carries ciphertext||tag, `nonce` carries the 12 bytes, because
+#           CryptoKit splits its combined box exactly there.
+#   key_id = sha256(recipient_public_key)[:8] as hex — WHICH KEY this was
+#           sealed to, so a rotated key is a readable failure, not a mystery.
+#   dedupe = HMAC-SHA256(normalised_text) with a key derived under the
+#           direction string "dedupe", first 16 bytes as hex. Separate key, so
+#           a tag can never leak anything about the one that hides the words.
+E2EE_ALG = "x25519-hkdf-sha256-aes256gcm"
+E2EE_SALT = b"voicebridge-e2ee-v1"
+DIR_TO_AGENT = "phone->agent"
+DIR_TO_PHONE = "agent->phone"
+
+
+def _hkdf(shared, direction, my_pub, their_pub):
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+    pair = sorted([my_pub, their_pub])
+    info = (b"voicebridge/v1/" + direction.encode() + b"\x00"
+            + pair[0] + pair[1])
+    return HKDF(algorithm=hashes.SHA256(), length=32,
+                salt=E2EE_SALT, info=info).derive(shared)
+
+
+def _shared(priv, their_pub):
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
+    return priv.exchange(X25519PublicKey.from_public_bytes(their_pub))
+
+
+def e2ee_key(direction, priv, my_pub, their_pub):
+    return _hkdf(_shared(priv, their_pub), direction, my_pub, their_pub)
+
+
+def e2ee_normalised(text):
+    """Whitespace-collapsed, exactly as the app normalises before its HMAC."""
+    return " ".join((text or "").split())
+
+
+def e2ee_dedupe_tag(text, priv, my_pub, their_pub):
+    import hmac as _hmac
+    k = _hkdf(_shared(priv, their_pub), "dedupe", my_pub, their_pub)
+    mac = _hmac.new(k, e2ee_normalised(text).encode(), hashlib.sha256).digest()
+    return mac[:16].hex()
+
+
+def e2ee_key_id(pub):
+    return hashlib.sha256(pub).digest()[:8].hex()
+
+
+def e2ee_seal(text, priv, my_pub, their_pub, direction=DIR_TO_PHONE):
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    import base64 as _b64
+    nonce = os.urandom(12)
+    body = AESGCM(e2ee_key(direction, priv, my_pub, their_pub)).encrypt(
+        nonce, (text or "").encode(), None)
+    return {"v": 1, "alg": E2EE_ALG,
+            # Sealed TO the phone, so the phone's key names it.
+            "key_id": e2ee_key_id(their_pub),
+            "nonce": _b64.b64encode(nonce).decode(),
+            "ct": _b64.b64encode(body).decode(),
+            "dedupe": e2ee_dedupe_tag(text, priv, my_pub, their_pub)}
+
+
+def e2ee_open(env, priv, my_pub, their_pub, direction=DIR_TO_AGENT):
+    """Plaintext, or raises. NEVER returns a placeholder on failure: a message
+    that silently becomes empty is indistinguishable from one nobody sent."""
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    import base64 as _b64
+    if not isinstance(env, dict):
+        raise ValueError("no envelope")
+    if str(env.get("alg") or E2EE_ALG) != E2EE_ALG:
+        raise ValueError(f"unknown alg {env.get('alg')!r}")
+    want = e2ee_key_id(my_pub)
+    got = str(env.get("key_id") or "")
+    if got and got != want:
+        # Sealed to a key this agent no longer uses (or never had). Say which,
+        # because "cannot decrypt" and "sealed to yesterday's key" have
+        # different remedies and only one of them is a bug.
+        raise ValueError(f"sealed to key_id {got}, this agent is {want}")
+    nonce = _b64.b64decode(env["nonce"])
+    body = _b64.b64decode(env["ct"])
+    return AESGCM(e2ee_key(direction, priv, my_pub, their_pub)).decrypt(
+        nonce, body, None).decode()
+
+
 def public_key_b64():
     import base64 as _b64
     _priv, pub = agent_keys()
     return _b64.b64encode(pub).decode()
+
+# ---- who the far end is, and whether we are sealing at all
+#
+# THE HOLE THE CONTRACT DOES NOT CLOSE (2026-08-20, #254): X25519 needs the
+# PEER's public key, and nothing on the wire carries the phone's. The app
+# computes `devicePublicKeyBase64` and never sends it, so an agent has no key
+# to derive against and open() cannot even be attempted. Handled two ways, so
+# whichever the app adopts, this side already works:
+#
+#   * `pk` (base64 raw 32 bytes) beside `sealed`, or at the top of the body;
+#   * anything previously pinned for that account.
+#
+# PINNED ON FIRST SIGHT, per account, and a CHANGE IS REFUSED. Trust-on-first-
+# use is not paranoia here: whoever relays the first message could substitute a
+# key of their own and read everything after it. Pinning means that attack has
+# to win the very first message and can never be applied to a live pairing —
+# and a refusal is visible, where a silent re-pin is not.
+PEERS_FILE = "peer-keys.json"
+
+
+def _peers_path():
+    return os.path.join(str(HERE), PEERS_FILE)
+
+
+def peer_key(account, offered_b64=None):
+    """The phone's public key for this account, pinning a new one once."""
+    import base64 as _b64
+    with _lock:
+        store = load(_peers_path(), {})
+        cur = store.get(account)
+        if offered_b64:
+            try:
+                raw = _b64.b64decode(offered_b64, validate=True)
+            except Exception:
+                raise ValueError("peer key is not valid base64")
+            if len(raw) != 32:
+                raise ValueError(f"peer key is {len(raw)} bytes, expected 32")
+            if cur and cur != offered_b64:
+                raise ValueError(
+                    "this account is pinned to a different device key — "
+                    "re-pair deliberately rather than accepting a new one "
+                    "mid-conversation")
+            if not cur:
+                store[account] = offered_b64
+                save(_peers_path(), store)
+                print(f"[voice-agent] pinned device key for {account}: "
+                      f"{key_fingerprint(raw)}", file=sys.stderr)
+            return raw
+        if cur:
+            return _b64.b64decode(cur)
+    return None
+
+
+def e2ee_ready(account=None):
+    """True when this agent can actually open and seal for that account.
+
+    Declared as a capability ONLY when true: the declaration is the app's
+    switch (contract #254), so claiming it before the crypto works would make
+    the phone seal messages nobody can read.
+    """
+    if not config().get("e2ee", False):
+        return False
+    try:
+        import cryptography                      # noqa: F401
+        agent_keys()
+    except Exception:
+        return False
+    return peer_key(account) is not None if account else True
+
 
 # ---------------------------------------------------------------- server
 class Handler(BaseHTTPRequestHandler):
@@ -2015,6 +2185,31 @@ class Handler(BaseHTTPRequestHandler):
             # twice. Compare with the last row before writing.
             who = str(d.get("who") or "you")
             text = str(d.get("text") or "").strip()
+            sealed_log = d.get("sealed")
+            if sealed_log:
+                # THE MIRROR MOVES HERE (contract #254): the plane forwards the
+                # envelope, this end holds both the key and the Telegram
+                # credentials, so it opens the line, posts it, and reports the
+                # outcome the plane passes through as `mirrored`.
+                try:
+                    priv, mine = agent_keys()
+                    theirs = peer_key(account,
+                                      sealed_log.get("pk") or d.get("pk"))
+                    if theirs is None:
+                        raise ValueError("no device key for this account")
+                    text = e2ee_open(sealed_log, priv, mine, theirs,
+                                     direction=DIR_TO_AGENT).strip()
+                except Exception as e:
+                    self.log_message("SEALED LOG REFUSED: %s", e)
+                    return self._send(400, {"error": "sealed_open_failed",
+                                            "detail": str(e)[:300]})
+            elif (text and e2ee_ready(account) and not d.get("diagnostic")
+                  and not _MARKER_ONLY.match(text)):
+                self.log_message("PLAINTEXT LOG REFUSED (e2ee declared)")
+                return self._send(400, {
+                    "error": "e2ee_required",
+                    "detail": "this account is sealed — send a `sealed` "
+                              "envelope, not a plaintext line"})
             if not text:
                 return self._send(200, {"ok": True, "mirrored": False})
             # A DIAGNOSTIC IS NOT A SPOKEN LINE (2026-08-20, #251).
@@ -2165,6 +2360,38 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, body)
         if kind == "ask":
             q = str(d.get("question") or "").strip()
+            # --- sealed request (contract #254). The envelope REPLACES the
+            # plaintext fields; the reply is sealed back the same way.
+            sealed_in = d.get("sealed")
+            seal_reply = False
+            if sealed_in:
+                try:
+                    priv, mine = agent_keys()
+                    theirs = peer_key(account,
+                                      sealed_in.get("pk") or d.get("pk"))
+                    if theirs is None:
+                        raise ValueError(
+                            "no device key for this account — the envelope "
+                            "must carry `pk` (base64 raw X25519 public key) "
+                            "at least once so the agent can derive")
+                    q = e2ee_open(sealed_in, priv, mine, theirs,
+                                  direction=DIR_TO_AGENT).strip()
+                    seal_reply = True
+                except Exception as e:
+                    # LOUD, never a fallback to plaintext: a message that
+                    # cannot be opened has not been received.
+                    self.log_message("SEALED ASK REFUSED: %s", e)
+                    return self._send(400, {"error": "sealed_open_failed",
+                                            "detail": str(e)[:300]})
+            elif e2ee_ready(account) and not d.get("diagnostic"):
+                # Downgrade rule: once declared, plaintext is refused rather
+                # than served. Accepting it "for compatibility" is exactly how
+                # stripping the envelope defeats the whole scheme.
+                self.log_message("PLAINTEXT ASK REFUSED (e2ee declared)")
+                return self._send(400, {
+                    "error": "e2ee_required",
+                    "detail": "this account is sealed — send a `sealed` "
+                              "envelope, not a plaintext question"})
             if not q:
                 return self._send(400, {"error": "no question"})
             # 2026-08-13: "what reminders do I have" came back as a bulleted
@@ -2216,6 +2443,25 @@ class Handler(BaseHTTPRequestHandler):
                         "I could not change that reminder — nothing in the "
                         "store moved, so it is still set as it was. Say the "
                         "new time again and I will try once more.")
+            if seal_reply:
+                # Sealed in, sealed out — and the plaintext `answer` is
+                # REMOVED, not left beside it. The app is specified to ignore
+                # readable text next to an envelope precisely because only the
+                # plane could have written it; sending both would make that
+                # rule fire on our own reply.
+                try:
+                    priv, mine = agent_keys()
+                    theirs = peer_key(account)
+                    out = dict(res)
+                    out["sealed"] = e2ee_seal(str(res.get("answer") or ""),
+                                              priv, mine, theirs,
+                                              direction=DIR_TO_PHONE)
+                    out.pop("answer", None)
+                    return self._send(200, out)
+                except Exception as e:
+                    self.log_message("SEALING THE REPLY FAILED: %s", e)
+                    return self._send(500, {"error": "seal_failed",
+                                            "detail": str(e)[:300]})
             return self._send(200, res)
 
         # Everything else: the plane treats HTTP 400 as "ask-only agent".
