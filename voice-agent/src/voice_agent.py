@@ -491,7 +491,7 @@ def archive(text, direction, sender, account_name="", mirror=True):
                       f"{str(text)[:40]!r}", file=sys.stderr)
                 return "duplicate"
             try:
-                db.record(text[:4000], direction,
+                db.record(text, direction,            # no cap (#275)
                           sender=sender, chat_id=archive_chat_id(),
                           chat_title=_chat_title(), kind="text")
             except Exception:
@@ -616,7 +616,7 @@ def archive_file(paths, caption, sender):
         for i, p in enumerate(paths):
             sent = tg_file(p, caption if i == 0 else None) and sent
     try:
-        db.record(text[:4000] + ("" if sent else " [NOT delivered to the chat]"),
+        db.record(text + ("" if sent else " [NOT delivered to the chat]"),
                   "in", sender=sender or "you", chat_id=archive_chat_id(),
                   chat_title=_chat_title(), kind="photo")
     except Exception:
@@ -776,7 +776,13 @@ def _archive_history(limit, since):
         role = "agent" if direction == "out" else "user"
         m = {"role": role,
              "sender": name if role == "agent" else (sender or "you"),
-             "text": _strip_injected_prefix(str(text))[:2000],
+             # NO CAP (#275): this 2000 cut his answer mid-word at exactly
+             # 2000 characters — "…over a channel the voi" — while the
+             # archive held all 2293. A message the agent wrote in full and
+             # the app shows in part is worse than a failure: it reads as
+             # the whole answer. The owner's rule: no caps on message
+             # content anywhere in the sealed path.
+             "text": _strip_injected_prefix(str(text)),
              "ts": float(ep)}
         if float(ep) in state:
             m["mirrored"] = state[float(ep)]
@@ -896,7 +902,7 @@ def history(limit=50, since=0.0):
             if role == "user":
                 text = _strip_injected_prefix(text)
             msgs.append({"role": role, "sender": "you" if role == "user" else name,
-                         "text": text[:2000], "ts": ts})
+                         "text": text, "ts": ts})       # no cap (#275)
         if len(msgs) >= limit * 3:
             break
     msgs.sort(key=lambda m: m["ts"])
@@ -1268,7 +1274,9 @@ def ask(account, question, account_name="", archive_question=True,
     _finish_turn(turn_id)
     if archive_turn:
         archive(out, "out", sender=branding().get("bot_name") or "agent")
-    return {"answer": out[:8000]}
+    # Whole answers, always (#275). A truncated reply is indistinguishable
+    # from a short one at every point downstream.
+    return {"answer": out}
 
 
 # ---------------------------------------------------------------- identity
