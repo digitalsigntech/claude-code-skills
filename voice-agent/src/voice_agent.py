@@ -2055,11 +2055,12 @@ def peer_key(account, offered_b64=None):
 
 
 def e2ee_ready(account=None):
-    """True when this agent can actually open and seal for that account.
+    """True when this agent can seal AT ALL — the capability declaration.
 
-    Declared as a capability ONLY when true: the declaration is the app's
-    switch (contract #254), so claiming it before the crypto works would make
-    the phone seal messages nobody can read.
+    NOT conditional on knowing the phone's key, and that was a deadlock I built
+    and had to take back out (#255): the phone only sends its key once it
+    starts sealing, and it only starts sealing once it sees this capability.
+    Requiring the key here meant the switch could never be thrown.
     """
     if not config().get("e2ee", False):
         return False
@@ -2068,7 +2069,22 @@ def e2ee_ready(account=None):
         agent_keys()
     except Exception:
         return False
-    return peer_key(account) is not None if account else True
+    return True
+
+
+def e2ee_locked(account):
+    """True once this account has PROVED it can seal, i.e. a pinned key.
+
+    This — not the declaration — is what makes plaintext a refusal. The
+    contract says a declared agent refuses plaintext, and taken literally that
+    bricks any phone on an older build the moment the flag goes on: it cannot
+    seal, so every message it sends is refused and the person is simply cut
+    off with an error they cannot act on. Keyed on evidence instead, the
+    downgrade is still impossible where it matters — once a device has sealed
+    even once, plaintext claiming to be that device is refused forever — and an
+    old build keeps working until its user updates.
+    """
+    return e2ee_ready(account) and peer_key(account) is not None
 
 
 # ---------------------------------------------------------------- server
@@ -2149,7 +2165,33 @@ class Handler(BaseHTTPRequestHandler):
             # `chat` is false when this caller has nowhere for a line to be
             # delivered TO — a guest, or an agent with no chat linked. The app
             # draws its ticks from it: an archived line is not a delivered one.
-            return self._send(200, {"messages": history(limit, since),
+            rows = history(limit, since)
+            # THE WIRE IS THE BOUNDARY, NOT THE DISK (#255, the app side's call).
+            # The agent legitimately reads its own conversation — chat, search,
+            # every reflex — so the archive stays plaintext. But handing the
+            # plane a plaintext history on every sync would give it the whole
+            # conversation anyway, and sealing single messages while shipping
+            # the transcript in clear is theatre. Each row is re-sealed on the
+            # way out, to the key this account has pinned.
+            if e2ee_locked(account):
+                try:
+                    priv, mine = agent_keys()
+                    theirs = peer_key(account)
+                    for row in rows:
+                        if not isinstance(row, dict) or "text" not in row:
+                            continue
+                        row["sealed"] = e2ee_seal(str(row.get("text") or ""),
+                                                  priv, mine, theirs,
+                                                  direction=DIR_TO_PHONE)
+                        row.pop("text", None)
+                except Exception as e:
+                    # A history that cannot be sealed is not served in the
+                    # clear: refuse, and say why. Silent plaintext is the one
+                    # outcome the whole scheme exists to prevent.
+                    self.log_message("HISTORY SEAL FAILED: %s", e)
+                    return self._send(500, {"error": "seal_failed",
+                                            "detail": str(e)[:300]})
+            return self._send(200, {"messages": rows,
                                     "chat": bool(telegram_chat())
                                             and not is_guest()})
         if kind == "health":
@@ -2206,7 +2248,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.log_message("SEALED LOG REFUSED: %s", e)
                     return self._send(400, {"error": "sealed_open_failed",
                                             "detail": str(e)[:300]})
-            elif (text and e2ee_ready(account) and not d.get("diagnostic")
+            elif (text and e2ee_locked(account) and not d.get("diagnostic")
                   and not _MARKER_ONLY.match(text)):
                 self.log_message("PLAINTEXT LOG REFUSED (e2ee declared)")
                 return self._send(400, {
@@ -2386,7 +2428,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.log_message("SEALED ASK REFUSED: %s", e)
                     return self._send(400, {"error": "sealed_open_failed",
                                             "detail": str(e)[:300]})
-            elif e2ee_ready(account) and not d.get("diagnostic"):
+            elif e2ee_locked(account) and not d.get("diagnostic"):
                 # Downgrade rule: once declared, plaintext is refused rather
                 # than served. Accepting it "for compatibility" is exactly how
                 # stripping the envelope defeats the whole scheme.
