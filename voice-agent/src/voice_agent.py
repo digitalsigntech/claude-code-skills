@@ -1583,6 +1583,11 @@ def capabilities():
     # `progress` is unconditional: it costs nothing, and the app treats its absence
     # as an agent that is not there.
     caps = ["ask", "health", "progress", "history"]
+    try:                       # only claimed when a key really exists
+        agent_keys()
+        caps.append("pubkey")
+    except Exception:
+        pass
     b = branding()
     if b:
         caps.append("branding")
@@ -1599,6 +1604,69 @@ def capabilities():
         caps += ["photo", "photos", "attachments", "log", "reset"]
     return caps
 
+
+
+# ------------------------------------------------------------------ keys
+# End-to-end encryption, phone <-> agent (2026-08-19). The agent half of the
+# key exchange lives here so the PLANE never chooses a key: whoever composes
+# the pairing QR chooses the public key in it, and if that were the relay the
+# whole scheme would be theatre it could silently defeat.
+#
+# The private half is written to the agent's own disk, 0600, and never leaves
+# it — not in a relay, not in a QR, not in a log line. What travels is the
+# public key and a fingerprint short enough for two people to read aloud.
+KEY_FILE = "agent-x25519.key"
+
+
+def _key_path():
+    return os.path.join(str(HERE), KEY_FILE)
+
+
+def agent_keys():
+    """(private, public) X25519 keys, generated once and kept."""
+    from cryptography.hazmat.primitives.asymmetric.x25519 import (
+        X25519PrivateKey)
+    from cryptography.hazmat.primitives import serialization
+    p = _key_path()
+    if os.path.exists(p):
+        with open(p, "rb") as f:
+            priv = X25519PrivateKey.from_private_bytes(f.read())
+    else:
+        priv = X25519PrivateKey.generate()
+        raw = priv.private_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PrivateFormat.Raw,
+            encryption_algorithm=serialization.NoEncryption())
+        with open(p, "wb") as f:
+            f.write(raw)
+        os.chmod(p, 0o600)
+        print(f"[voice-agent] generated an X25519 key pair at {p}",
+              file=sys.stderr)
+    pub = priv.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw)
+    return priv, pub
+
+
+def key_fingerprint(pub=None):
+    """A short safety number, said aloud to detect a substituted key.
+
+    Four groups of five digits, from SHA-256 of the public key. The fingerprint
+    is the ONLY defence against a relay that swaps the key in transit, so it
+    has to be short enough that somebody actually reads it out.
+    """
+    if pub is None:
+        _priv, pub = agent_keys()
+    h = hashlib.sha256(pub).digest()
+    n = int.from_bytes(h[:10], "big")
+    digits = str(n).zfill(25)[:20]
+    return " ".join(digits[i:i + 5] for i in range(0, 20, 5))
+
+
+def public_key_b64():
+    import base64 as _b64
+    _priv, pub = agent_keys()
+    return _b64.b64encode(pub).decode()
 
 # ---------------------------------------------------------------- server
 class Handler(BaseHTTPRequestHandler):
@@ -1640,6 +1708,16 @@ class Handler(BaseHTTPRequestHandler):
         set_caller(account)
         name = str(d.get("account_name") or "")
 
+        if kind == "pubkey":
+            # The agent's public key and its fingerprint. The plane relays this
+            # blindly; it cannot substitute a key without the fingerprint the
+            # two humans compare failing to match.
+            try:
+                return self._send(200, {"alg": "x25519",
+                                        "public_key": public_key_b64(),
+                                        "fingerprint": key_fingerprint()})
+            except Exception as e:
+                return self._send(200, {"error": str(e)[:120]})
         if kind == "capabilities":
             return self._send(200, {"capabilities": capabilities()})
         if kind == "progress":
