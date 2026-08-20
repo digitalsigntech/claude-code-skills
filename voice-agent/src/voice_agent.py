@@ -2019,7 +2019,10 @@ PEERS_FILE = "peer-keys.json"
 
 
 def _peers_path():
-    return os.path.join(str(HERE), PEERS_FILE)
+    # A pathlib.Path: load()/save() call .read_text()/.write_text() on it, and
+    # a str here fails only at the moment a sealed message arrives — which is
+    # exactly the moment nothing may quietly fall back to plaintext.
+    return HERE / PEERS_FILE
 
 
 def peer_key(account, offered_b64=None):
