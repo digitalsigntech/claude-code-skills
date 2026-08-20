@@ -284,6 +284,9 @@ def telegram():
     if "mod" in _TG_CACHE:
         return _TG_CACHE["mod"]
     _TG_CACHE["mod"] = None
+    fp = fingerprint_answer(question)
+    if fp:
+        return fp
     d = os.path.join(os.path.expanduser(config()["workdir"]), "telegram")
     if os.path.isfile(os.path.join(d, "tg_api.py")):
         if d not in sys.path:
@@ -1519,6 +1522,36 @@ def reminders_snapshot():
     except Exception:
         return None            # unknown state: never used to accuse the model
 
+
+
+# "Give me the agent key" means the ENCRYPTION fingerprint (2026-08-19). Asked
+# for it, an agent went looking and answered with a signing key it found on
+# disk — plausible, adjacent, and wrong in the one place where a wrong number
+# is worse than no number: the digits exist so a substituted key is caught, and
+# a confident irrelevant answer defeats that as thoroughly as silence.
+#
+# So it is answered from the key itself, with no model in the path.
+_KEY_ASK = re.compile(
+    r"\b(fingerprint|safety number)\b|"
+    r"\b(encryption|agent|public|pairing)\s+key\b|"
+    r"\bkey\b[^.?!]{0,20}\b(verify|verification|compare|encryption)\b|"
+    r"\b(verify|check|compare)\b[^.?!]{0,20}\bkey\b", re.I)
+
+
+def fingerprint_answer(question):
+    """The twenty digits, or None if this is not that question."""
+    if not question or not _KEY_ASK.search(question):
+        return None
+    try:
+        _priv, pub = agent_keys()
+    except Exception as e:
+        return (f"I have no encryption key yet, so there is nothing to "
+                f"compare ({str(e)[:80]}).")
+    return (f"{key_fingerprint(pub)}\n\nThat is this agent's encryption "
+            f"fingerprint. Compare it with the number under Settings → "
+            f"Encryption in the app: they must match exactly, digit for digit. "
+            f"It is not a signing key or a login token — it is the safety "
+            f"number for the key your messages would be sealed to.")
 
 def reflex_answer(question, tz=None):
     """A deterministic answer for questions that never needed a model, or None.
