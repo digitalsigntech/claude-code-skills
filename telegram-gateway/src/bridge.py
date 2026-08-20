@@ -193,10 +193,19 @@ def _augment(chat_id, prompt, sender=None):
     return prompt
 
 
-def _base_cmd(prompt):
+def _base_cmd(prompt, extra_system=""):
+    """`extra_system`: per-turn context the SYSTEM knows (2026-08-20, #252).
+
+    Not in the prompt, deliberately. Context appended to the user's message
+    reads as an instruction embedded in their words — which is the shape of a
+    prompt injection, and an agent that trusts it is one an attacker steers by
+    typing a sentence. It also lands in the archive as something they never
+    said. The system channel is where facts we supply belong; the empty
+    default keeps every existing caller byte-identical."""
     cmd = [C.CLAUDE_BIN, "-p", prompt, "--model", C.CLAUDE_MODEL, "--dangerously-skip-permissions"]
-    if C.APPEND_SYSTEM:
-        cmd += ["--append-system-prompt", C.APPEND_SYSTEM]
+    sysmsg = "\n\n".join(x for x in (C.APPEND_SYSTEM, extra_system) if x)
+    if sysmsg:
+        cmd += ["--append-system-prompt", sysmsg]
     return cmd
 
 
@@ -330,19 +339,19 @@ def _stream_run(cmd, on_event):
     return (full or final), err
 
 
-def ask_stream(chat_id, prompt, on_event, sender=None):
+def ask_stream(chat_id, prompt, on_event, sender=None, extra_system=""):
     prompt = _augment(chat_id, prompt, sender)
     flags = ["--output-format", "stream-json", "--include-partial-messages", "--verbose"]
     with _chat_lock(chat_id):
         sid, inited = _resolve(chat_id)
-        text, err = _stream_run(_base_cmd(prompt) + flags + _sess_args(sid, inited), on_event)
+        text, err = _stream_run(_base_cmd(prompt, extra_system) + flags + _sess_args(sid, inited), on_event)
         if err is not None and not inited and "already in use" in err:
             # Session exists on disk but init was never recorded (first turn died after
             # the CLI created it). Resume it instead of re-creating.
-            text, err = _stream_run(_base_cmd(prompt) + flags + ["--resume", sid], on_event)
+            text, err = _stream_run(_base_cmd(prompt, extra_system) + flags + ["--resume", sid], on_event)
         if err is not None and "timed out" not in err:
             sid = str(uuid.uuid4())
-            text, err = _stream_run(_base_cmd(prompt) + flags + ["--session-id", sid], on_event)
+            text, err = _stream_run(_base_cmd(prompt, extra_system) + flags + ["--session-id", sid], on_event)
         if err is not None:
             return f"⚠️ Claude error: {err}"
         _mark_inited(chat_id, sid)
