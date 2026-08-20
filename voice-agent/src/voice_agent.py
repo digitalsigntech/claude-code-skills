@@ -2571,6 +2571,9 @@ class Handler(BaseHTTPRequestHandler):
                                       time_context(d.get("tz"))) if c))
             self.log_message("answered in %.1fs (%s)", time.time() - t0,
                              res.get("agent_error") or "ok")
+            # The phone has this answer in its hand; the notifier must not
+            # announce the same exchange as news a minute later (#270).
+            LAST_APP_TURN[account] = time.time()
             if before is not None and reminders_snapshot() == before:
                 ans = str(res.get("answer") or "")
                 if _CLAIMS_DONE.search(ans):
@@ -2620,6 +2623,14 @@ NOTIFY_POLL_S = 20
 NOTIFY_KIND = "message"
 
 
+# The app already knows about a turn it just made (#270): it has the answer in
+# its hand and drew it on screen. A "new message" push for the same exchange is
+# the second of two banners for one event, and the person cannot tell which is
+# which. The plane dedupes as a backstop; this stops the second sender.
+LAST_APP_TURN = {}
+APP_TURN_QUIET_S = 120
+
+
 def _notify_plane(account, kind=NOTIFY_KIND, **extra):
     """Ask the plane to nudge this account's phones. Authenticated with this
     agent's own secret, which the plane scopes to this account alone."""
@@ -2655,7 +2666,10 @@ def _message_watcher():
             cx = sqlite3.connect(f"file:{d / 'chat.db'}?mode=ro", uri=True,
                                  timeout=3)
             rows = cx.execute(
-                "SELECT epoch, kind, direction FROM messages WHERE epoch > ? "
+                # `text` joined the projection for #270's sealed preview. It
+                # is read here and sealed to the phone's key before it goes
+                # anywhere — the plane still never sees a word of it.
+                "SELECT epoch, kind, direction, text FROM messages WHERE epoch > ? "
                 "ORDER BY epoch", (last,)).fetchall()
             cx.close()
         except Exception:
@@ -2673,7 +2687,35 @@ def _message_watcher():
         if not worth:
             continue
         for acct in accounts:
-            res = _notify_plane(acct, count=len(worth))
+            quiet = time.time() - LAST_APP_TURN.get(acct, 0)
+            if quiet < APP_TURN_QUIET_S:
+                print(f"[voice-agent] new-message push skipped for {acct}: "
+                      f"an app turn finished {quiet:.0f}s ago — the phone "
+                      f"already has these words", file=sys.stderr)
+                continue
+            # #270 stage 4: the preview travels SEALED. The plane cannot read
+            # it, the notification extension on the phone can, and a phone that
+            # fails to decrypt keeps the generic wording. Capped, because a
+            # banner shows two lines and a whole answer in a push is a copy of
+            # the conversation living in Apple's queue.
+            env = None
+            if e2ee_locked(acct):
+                try:
+                    priv, mine = agent_keys()
+                    theirs = peer_key(acct)
+                    newest_text = str((worth[-1][3] if len(worth[-1]) > 3
+                                       else "") or "")
+                    preview = " ".join(newest_text.split())[:300]
+                    if not preview:
+                        raise ValueError("nothing to preview")
+                    env = e2ee_seal(preview, priv, mine, theirs,
+                                    direction=DIR_TO_PHONE)
+                except Exception as e:
+                    print(f"[voice-agent] preview seal failed for {acct}: {e}",
+                          file=sys.stderr)
+                    env = None
+            res = _notify_plane(acct, count=len(worth),
+                                **({"sealed": env} if env else {}))
             print(f"[voice-agent] new-message push for {acct}: "
                   f"{len(worth)} line(s) -> {res}", file=sys.stderr)
 
