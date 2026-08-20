@@ -1657,9 +1657,24 @@ def key_fingerprint(pub=None):
     """
     if pub is None:
         _priv, pub = agent_keys()
+    # THE DERIVATION, stated so another implementation can reproduce it exactly:
+    #
+    #   1. take the RAW 32-byte X25519 public key (not base64, not hex)
+    #   2. SHA-256 it
+    #   3. take the FIRST 10 bytes of the digest
+    #   4. read them as a BIG-ENDIAN unsigned integer
+    #   5. reduce modulo 10**20
+    #   6. render as decimal, ZERO-PADDED on the left to exactly 20 digits
+    #   7. group in fours of five, separated by single spaces
+    #
+    # 2026-08-19: the first version left-padded to 25 digits and kept the
+    # leading 20 — reproducible only by reading this code, which is the one
+    # thing a safety number must not require. The app must COMPUTE this from
+    # the key it stored; a fingerprint read off the wire verifies nothing,
+    # because a substituting party sends a matching pair.
     h = hashlib.sha256(pub).digest()
-    n = int.from_bytes(h[:10], "big")
-    digits = str(n).zfill(25)[:20]
+    n = int.from_bytes(h[:10], "big") % (10 ** 20)
+    digits = str(n).zfill(20)
     return " ".join(digits[i:i + 5] for i in range(0, 20, 5))
 
 
