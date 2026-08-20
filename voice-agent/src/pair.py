@@ -231,6 +231,24 @@ def show_qr(api, token, name=None, payload_only=False):
         pub, fp = voice_agent.public_key_b64(), voice_agent.key_fingerprint()
     except Exception as e:
         print(f"[pair] no encryption key in this QR: {e}", file=sys.stderr)
+    # A FRESH CODE IS A DELIBERATE RE-PAIR, so it clears the device key this
+    # account had pinned (2026-08-20). The pin exists to stop a substituted key
+    # arriving mid-conversation; it must not stop the person whose phone was
+    # restored without its keychain from ever connecting again. Scanning a code
+    # that this agent printed is the same evidence the first pin relied on, and
+    # it is an act only somebody with access to the agent can start.
+    try:
+        sys.path.insert(0, str(HERE))
+        import voice_agent as _va
+        _acct = (_cfg().get("account") if callable(globals().get("_cfg"))
+                 else json.loads((HERE / "config.json").read_text()).get("account"))
+        if _acct and _va.unpin_peer(_acct):
+            print(f"[pair] cleared the pinned device key for {_acct} — the "
+                  f"phone that scans this code will pin a new one",
+                  file=sys.stderr)
+    except Exception as e:
+        print(f"[pair] could not clear the old device pin: {e}", file=sys.stderr)
+
     blob = json.dumps({"v": 1, "type": "account", "token": qr_token,
                        "name": name or "", "api": api,
                        **({"agent_pubkey": pub, "fingerprint": fp}
