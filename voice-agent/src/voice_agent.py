@@ -2352,17 +2352,25 @@ def sync_app_docs(force=False):
                     .get("version") or "")
     except Exception:
         now_v = ""
-    if now_v and now_v == seen and not force and \
-            os.path.exists(os.path.join(d, "manual.md")):
-        return []                       # unchanged: nothing to fetch
+    # ONE FLAG ANSWERED TWO QUESTIONS (2026-08-20, #253). This early return
+    # used to be `return []` — and it stood in front of the RELEASE NOTES
+    # fetch as well as the manual's. So release notes were only ever refreshed
+    # in a cycle where the manual happened to change too: two builds shipped
+    # this morning and the agent's copy stayed on the older one, while the
+    # sync reported "nothing to fetch" and looked healthy doing it. The
+    # manual's version says nothing about the release notes; it is not their
+    # cache key and never was.
+    fresh = (now_v and now_v == seen and not force
+             and os.path.exists(os.path.join(d, "manual.md")))
     try:
-        man = _plane("/manual")
+        man = None if fresh else _plane("/manual")
         p = os.path.join(d, "manual.md")
-        if not os.path.exists(p) or open(p, "rb").read() != man:
+        if man is not None and (not os.path.exists(p)
+                                or open(p, "rb").read() != man):
             with open(p, "wb") as f:
                 f.write(man)
             changed.append("manual.md")
-        if now_v:
+        if now_v and man is not None:
             with open(stamp, "w") as f:
                 f.write(now_v)
     except Exception as e:
