@@ -908,6 +908,12 @@ def remember_session(account, sid):
 # A demonstrative has one honest referent — the most recent image — and if that
 # image has not been examined yet, the answer is to open it or to ask, never to
 # name a different one with confidence.
+# One bracketed machine marker and nothing else: `[manual-miss q="…" v=abc]`.
+# The whole message must be the marker — a sentence that happens to contain a
+# bracket is a sentence, and belongs in the chat like any other.
+_MARKER_ONLY = re.compile(r"\A\[[a-z][a-z0-9._-]{1,40}(?:\s[^\]]*)?\]\Z", re.S)
+
+
 _THAT_PICTURE = re.compile(
     r"\b(that|this|the|it|last|latest|previous)\b[^.?!]{0,20}"
     r"\b(picture|photo|photograph|image|screenshot|scan|shot)\b|"
@@ -1910,6 +1916,27 @@ class Handler(BaseHTTPRequestHandler):
             text = str(d.get("text") or "").strip()
             if not text:
                 return self._send(200, {"ok": True, "mirrored": False})
+            # A DIAGNOSTIC IS NOT A SPOKEN LINE (2026-08-20, #251).
+            #
+            # The app began sending `[manual-miss q="…" v=…]` through this
+            # channel on the assumption that the agent suppresses markers. It
+            # did not: every one of them would have been archived as the user's
+            # own words and mirrored into his chat, so a bug report about a
+            # failed search would arrive looking like a sentence he had said.
+            # The assumption was reasonable — the box's own code comment claims
+            # markers are "never posted by design" — and it was wrong in both
+            # agents, which is the shape of failure that only shows up in
+            # somebody else's chat.
+            #
+            # Two ways to say it, because a build already in the field cannot
+            # be recalled: an explicit `diagnostic: true`, or a whole message
+            # that is one bracketed marker. Anchored, so a sentence that merely
+            # contains a bracket is still a sentence.
+            if d.get("diagnostic") or _MARKER_ONLY.match(text):
+                self.log_message("DIAGNOSTIC %s", text[:300])
+                return self._send(200, {
+                    "ok": True, "mirrored": False, "suppressed": "diagnostic",
+                    "reason": "recorded in the agent's log, not the chat"})
             if _already_archived(text):
                 # ALREADY IN THE CHAT IS DELIVERED. 2026-08-19: the agent posts
                 # its own answer, the app mirrors the same words a second
