@@ -135,7 +135,7 @@ INFLIGHT = {}
 _inflight_lock = threading.Lock()
 
 
-def progress():
+def progress(account=None):
     """What this agent is working on, answered without a model.
 
     The app probes this to decide whether an agent is there — a 400 here is read
@@ -147,8 +147,28 @@ def progress():
     through the app, and nothing about a cron job or a terminal session on the
     same machine. Claiming otherwise would have the voice say "nothing is
     running" while something is."""
+    # THE QUESTION DOES NOT GO OUT IN THE CLEAR ON A SEALED ACCOUNT (#260).
+    #
+    # The app seals the question so the plane cannot read it, and then polls
+    # this endpoint every few seconds while the turn runs — and this handed
+    # back the first 120 characters of that same question, in plaintext,
+    # through the same relay. Sealing the body and narrating its contents
+    # beside it is not partial protection, it is theatre: the plane would have
+    # learned every question anyway, a few seconds later, from us.
+    #
+    # Omitted rather than sealed, because the app already HAS the plaintext —
+    # it wrote it. The id and the clock are what the progress card needs; the
+    # words were only ever a convenience, and they are not ours to broadcast.
+    hide = False
+    try:
+        hide = e2ee_locked(account) if account else False
+    except Exception:
+        hide = bool(account)          # unsure -> say less, never more
     with _inflight_lock:
-        tasks = [{"id": tid, "question": t["question"][:120], "state": "running",
+        tasks = [{"id": tid,
+                  **({"question_sealed": True} if hide
+                     else {"question": t["question"][:120]}),
+                  "state": "running",
                   "started": t["started"], "elapsed": round(time.time() - t["started"], 1),
                   "waiting": 0, "origin": "app"}
                  for tid, t in INFLIGHT.items()]
@@ -2174,7 +2194,7 @@ class Handler(BaseHTTPRequestHandler):
         if kind == "capabilities":
             return self._send(200, {"capabilities": capabilities()})
         if kind == "progress":
-            return self._send(200, progress())
+            return self._send(200, progress(account))
         if kind == "qr_spent":
             # The plane says a login QR was just redeemed. The picture in the
             # chat is now a code that already worked, so it goes immediately
