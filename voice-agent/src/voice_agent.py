@@ -1005,6 +1005,107 @@ def time_context(tz):
             f"you schedule or read back must be too. This machine's own clock "
             f"is not theirs.")
 
+# THE MANUAL RIDES INTO THE TURN (2026-08-20, #252).
+#
+# Asked about the app's privacy and security, an agent that had the manual on
+# disk — synced 20 minutes earlier, the sync logged, the file 27KB and correct —
+# answered that it "isn't in the company files" and that it has "no visibility
+# into the app's architecture". Both halves false, and the second is the kind of
+# sentence that ends a conversation: it does not invite the user to ask again.
+#
+# The lesson is the one this project keeps relearning in new costumes: a
+# document the model COULD open is not a document the model WILL open. A
+# pointer in a prompt is a step to forget, and the busiest turn is the one that
+# forgets it. So the relevant sections travel with the question, already read.
+#
+# Sections, not the whole file: 27KB of manual in front of every app question
+# buries the answer it contains, and the excerpt keeps the door open for the
+# model to say which section it is quoting.
+_APP_QUESTION = re.compile(
+    r"\b(this|the|your)\s+app\b|\bapp\'?s\b|\bin the app\b|"
+    r"\bagent voice mode\b|\bvoice mode\b|\btestflight\b|\bthis build\b|"
+    r"\bend[- ]to[- ]end\b|\be2ee\b|\bencrypt\w*\b|\bfingerprint\b|"
+    r"\bsafety number\b|\bpairing\b|\bqr code\b|"
+    r"\bprivacy\b|\bsecurity\b|\bsecure\b|\brecord(ed|ing)\b|"
+    r"\bretention\b|\bretained\b|\bwho can (read|see|hear)\b|"
+    r"\btranscript\w*\b|\bdark mode\b|\bbubbles?\b|\bverbosity\b|"
+    r"\bnotification\w*\b|\bminutes? (left|remaining)\b|\bmy balance\b",
+    re.I)
+
+_DOC_WORD = re.compile(r"[a-z][a-z0-9'-]{3,}", re.I)
+
+
+def _manual_sections(text):
+    """(heading, body) pairs, split on markdown headings 1-3 deep."""
+    out, head, cur = [], "", []
+    for line in text.splitlines():
+        if re.match(r"^#{1,3} ", line):
+            if cur:
+                out.append((head, "\n".join(cur)))
+            head, cur = line.lstrip("# ").strip(), [line]
+        else:
+            cur.append(line)
+    if cur:
+        out.append((head, "\n".join(cur)))
+    return out
+
+
+def app_doc_context(question, budget=4000):
+    """The manual sections that answer THIS question, or ''."""
+    q = question or ""
+    if not _APP_QUESTION.search(q):
+        return ""
+    try:
+        d = _docs_dir()
+        with open(os.path.join(d, "manual.md"), encoding="utf-8") as f:
+            manual = f.read()
+        try:
+            with open(os.path.join(d, ".manual-version"), encoding="utf-8") as f:
+                ver = f.read().strip()[:32]
+        except OSError:
+            ver = "unknown"
+    except OSError:
+        return ""
+    if not manual.strip():
+        return ""
+    words = {w.lower() for w in _DOC_WORD.findall(q)}
+    if not words:
+        return ""
+    scored = []
+    for head, body in _manual_sections(manual):
+        low = body.lower()
+        hits = sum(1 for w in words if w in low)
+        hits += 3 * sum(1 for w in words if w in head.lower())
+        if hits:
+            scored.append((hits, len(body), head, body))
+    if not scored:
+        return ""
+    scored.sort(key=lambda r: (-r[0], r[1]))
+    picked, used = [], 0
+    for _hits, _n, _head, body in scored:
+        chunk = body.strip()
+        if used + len(chunk) > budget:
+            chunk = chunk[:max(0, budget - used)]
+        if not chunk:
+            break
+        picked.append(chunk)
+        used += len(chunk)
+        if used >= budget:
+            break
+    return ("The user is asking about the voice app itself. The app ships a "
+            "manual and it is on this machine, current as of version "
+            f"{ver}; these are the parts that bear on the question:\n\n"
+            + "\n\n---\n\n".join(picked)
+            + "\n\nAnswer from that text. It is authoritative and it is "
+              "today's — where it speaks, it outranks anything you remember "
+              "about the app. NEVER say the app is undocumented, that its "
+              "workings are not in your files, or that you have no visibility "
+              "into it: the document is quoted above. If these sections do "
+              "not cover the specific thing asked, say what they DO establish "
+              "and offer to look further — that is a gap in the manual worth "
+              "reporting, not a limit of yours.")
+
+
 def app_setting_context(question):
     """A line telling the agent it cannot change an app setting, or ''."""
     q = question or ""
@@ -2102,6 +2203,7 @@ class Handler(BaseHTTPRequestHandler):
                       context="\n\n".join(
                           c for c in (picture_context(q),
                                       app_setting_context(q),
+                                      app_doc_context(q),
                                       time_context(d.get("tz"))) if c))
             self.log_message("answered in %.1fs (%s)", time.time() - t0,
                              res.get("agent_error") or "ok")
