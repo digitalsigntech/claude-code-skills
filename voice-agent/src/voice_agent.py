@@ -947,13 +947,13 @@ def picture_context(question):
         return ""
     hit = newest_image()
     if not hit:
-        return ("\n\n[The user refers to a picture, and there is no recent "
-                "image in this chat. Ask which one rather than guessing.]")
+        return ("The user refers to a picture, and there is no recent "
+                "image in this chat. Ask which one rather than guessing.")
     path, ep = hit
     when = time.strftime("%H:%M", time.localtime(ep))
-    return (f"\n\n[\"That picture\" is the MOST RECENT image in this chat: "
+    return (f"\"That picture\" is the MOST RECENT image in this chat: "
             f"{path}, received at {when}. It is the one meant — not any image "
-            f"discussed earlier. Open it if you need to see it.]")
+            f"discussed earlier. Open it if you need to see it.")
 
 
 # An agent cannot reach the app's switches (2026-08-19, an owner's rule: "if a
@@ -993,28 +993,28 @@ def time_context(tz):
         now = datetime.now(ZoneInfo(str(tz)))
     except Exception:
         return ""
-    return (f"\n\n[The person you are answering is in {tz}, where it is now "
+    return (f"The person you are answering is in {tz}, where it is now "
             f"{now.strftime('%H:%M on %a %d %b')}. Any time they name — "
             f"\"4pm\", \"tomorrow morning\" — is in THAT zone, and anything "
             f"you schedule or read back must be too. This machine's own clock "
-            f"is not theirs.]")
+            f"is not theirs.")
 
 def app_setting_context(question):
     """A line telling the agent it cannot change an app setting, or ''."""
     q = question or ""
     if not (_SETTING_VERB.search(q) and _SETTING_NOUN.search(q)):
         return ""
-    return ("\n\n[This asks to change a SETTING IN THE APP. You cannot: the "
+    return ("This asks to change a SETTING IN THE APP. You cannot: the "
             "app's switches are not reachable from here, any more than the "
             "phone's brightness is. Say so plainly, in one or two sentences, "
             "and name the two ways that DO work — say it out loud to the app "
             "(e.g. \"switch to dark mode\"), or open Settings. Do not "
             "apologise at length, do not offer to try, and never imply it is "
             "done. The one exception is /clear, which the app acts on itself "
-            "before the message reaches you.]")
+            "before the message reaches you.")
 
 def ask(account, question, account_name="", archive_question=True,
-        archive_turn=True):
+        archive_turn=True, context=""):
     """`archive_turn=False` for a LOOKUP: answer and drop.
 
     2026-08-14: when no table is on screen the app asks the agent
@@ -1038,11 +1038,36 @@ def ask(account, question, account_name="", archive_question=True,
                 "detail": "the claude CLI was not found on this machine"}
 
     workdir = os.path.expanduser(cfg["workdir"])
-    prompt = question
-    if account_name:
-        prompt = f"[Voice turn from {account_name}]\n\n{question}"
 
+    # THE USER'S MESSAGE CONTAINS ONLY THE USER'S WORDS (2026-08-20).
+    #
+    # Everything the app knows and the model needs — which picture is on
+    # screen, which zone the phone is in, who is speaking — used to be appended
+    # to the question as bracketed text. Five turns in a row the agent then
+    # refused it as a prompt injection and said so out loud: "I won't take
+    # instructions on your timezone from bracketed text embedded in the
+    # message." It was right to be suspicious. A sentence arriving inside the
+    # user's own message, telling the model what to believe about the world, is
+    # indistinguishable from an attack no matter who actually wrote it — and a
+    # model that ever learns to trust that shape is a model an attacker can
+    # steer with one sentence typed into the app.
+    #
+    # The channel is what makes it trustworthy, not the wording. Context the
+    # SYSTEM knows goes in the system prompt, where the CLI's own authority
+    # covers it; the user's message stays exactly what they said. The warning
+    # also cost the owner five identical security alerts about his own
+    # infrastructure, which teaches the one habit no warning should ever
+    # teach — that these are noise and can be scrolled past.
+    prompt = question
     cmd = [exe, "-p", prompt, "--dangerously-skip-permissions"]
+    sysbits = []
+    if account_name:
+        sysbits.append(f"This turn comes from {account_name} through the voice "
+                       f"app. It is them speaking, not a system message.")
+    if context:
+        sysbits.append(context.strip())
+    if sysbits:
+        cmd += ["--append-system-prompt", "\n\n".join(sysbits)]
     if cfg.get("model"):
         cmd += ["--model", cfg["model"]]
 
@@ -1107,7 +1132,10 @@ def ask(account, question, account_name="", archive_question=True,
             st.get("sessions", {}).pop(account, None)
             save(STATE, st)
         _finish_turn(turn_id)
-        return ask(account, question, account_name)
+        # The retry is the same turn: it must carry the same context, or the
+        # second attempt answers with less than the first one knew.
+        return ask(account, question, account_name, archive_question=False,
+                   archive_turn=archive_turn, context=context)
 
     remember_session(account, sid)
     _finish_turn(turn_id)
@@ -1990,10 +2018,12 @@ class Handler(BaseHTTPRequestHandler):
                 # open them.
                 try:
                     where = ", ".join(paths)
-                    answer = ask(account, f"{cap}\n\n[The user just sent "
-                                          f"{len(paths)} file(s), saved at: "
-                                          f"{where}]", name,
-                                 archive_question=False).get("answer")
+                    answer = ask(account, cap, name,
+                                 archive_question=False,
+                                 context=f"The user just sent {len(paths)} "
+                                         f"file(s) with this message, saved "
+                                         f"at: {where}. Open them if the "
+                                         f"message refers to them.").get("answer")
                 except Exception as e:
                     self.log_message("caption turn failed: %s", e)
             body = {"ok": True, "posted": posted,
@@ -2041,10 +2071,11 @@ class Handler(BaseHTTPRequestHandler):
             # A demonstrative about a picture is resolved before the turn, so
             # the model is told WHICH image rather than picking the one it
             # happens to remember.
-            res = ask(account,
-                      q + picture_context(q) + app_setting_context(q)
-                      + time_context(d.get("tz")),
-                      name, archive_turn=(keep is not False))
+            res = ask(account, q, name, archive_turn=(keep is not False),
+                      context="\n\n".join(
+                          c for c in (picture_context(q),
+                                      app_setting_context(q),
+                                      time_context(d.get("tz"))) if c))
             self.log_message("answered in %.1fs (%s)", time.time() - t0,
                              res.get("agent_error") or "ok")
             if before is not None and reminders_snapshot() == before:
