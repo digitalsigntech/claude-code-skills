@@ -259,17 +259,46 @@ def show_qr(api, token, name=None, payload_only=False):
         print(f"[pair] {note}", file=sys.stderr)
         return None, exp, digest
     png = HERE / "pairing-qr.png"
+    png_line = ""
+    # THE TERMINAL IS THE PRIMARY SURFACE, not a fallback (2026-08-20). An
+    # agent with no Telegram, on a headless box over ssh, still has to be able
+    # to pair a phone — so the code is drawn in the terminal first and any
+    # delivery to a chat is a convenience on top. Two renderers, because an
+    # install that has neither should get an instruction rather than a wall of
+    # JSON no camera can read.
+    drawn = False
     try:
         subprocess.run(["qrencode", "-o", str(png), "-s", "8", blob], check=True)
         subprocess.run(["qrencode", "-t", "ANSIUTF8", blob], check=True)
         png_line = f"\nPNG copy: {png}"
+        drawn = True
     except (FileNotFoundError, subprocess.CalledProcessError):
-        # No qrencode: the payload is still the whole credential, so the install
-        # is not blocked on a rendering tool. Render it anywhere, or install
-        # qrencode (`apt install qrencode` / `brew install qrencode`).
+        pass
+    if not drawn:
+        try:
+            import qrcode                              # pure python, no binary
+            q = qrcode.QRCode(border=2)
+            q.add_data(blob)
+            q.make(fit=True)
+            q.print_ascii(invert=True)                 # scannable in a terminal
+            drawn = True
+            try:
+                q.make_image().save(str(png))
+                png_line = f"\nPNG copy: {png}"
+            except Exception:
+                pass
+        except Exception:
+            pass
+    if not drawn:
+        # The payload IS the whole credential, so nothing is lost — but say how
+        # to get a scannable code in one line rather than leaving JSON to be
+        # photographed, which cannot work.
         print(blob)
-        png_line = ("\nNo `qrencode` on this machine, so the payload above is printed "
-                    "raw — install qrencode for an actual QR, or encode it yourself.")
+        png_line = ("\nNo QR renderer on this machine. `apt install qrencode` "
+                    "(or `brew install qrencode`, or `pip install qrcode`) and "
+                    "run this again for a code the camera can read — the JSON "
+                    "above is the same credential if you would rather encode it "
+                    "elsewhere.")
     print(f"\nApp → Scan QR. One scan signs the phone in AND connects this agent."
           f"{png_line}\n{note}")
     return (png if png.exists() else None), exp, digest
