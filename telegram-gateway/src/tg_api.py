@@ -215,6 +215,23 @@ def _call(method, _files=None, _timeout=60, **params):
             return {"ok": False, "error": str(e)}
 
 
+def is_chat_member(chat_id, user_id):
+    """Is this user in that chat? True / False / None when Telegram would not
+    say (network error, bot not in the chat any more). None is NOT False — the
+    caller decides, and for a group selector "unknown" must not read as "yours".
+    """
+    j = _call("getChatMember", chat_id=chat_id, user_id=user_id, _timeout=10)
+    if not j.get("ok"):
+        return None
+    m = j.get("result") or {}
+    st = m.get("status")
+    if st in ("creator", "administrator", "member"):
+        return True
+    if st == "restricted":
+        return bool(m.get("is_member"))
+    return False            # left, kicked
+
+
 def get_me():
     return _call("getMe")
 
@@ -344,7 +361,7 @@ def deliver_final(chat_id, msg_id, text):
     message is sent as additional chunks.
 
     For table/task-list replies we do NOT upgrade the streamed placeholder in place
-    (half-streamed / edited-text rich upgrades render inconsistently). Instead
+    (per the friend account: half-streamed / edited-text rich upgrades render inconsistently). Instead
     we send a fresh sendRichMessage with the COMPLETE markdown, then delete the interim
     placeholder — leaving it only if the delete fails."""
     if needs_rich(text) and len(text) <= C.RICH_MAX:

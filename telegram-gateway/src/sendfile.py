@@ -11,6 +11,7 @@ with the bot token. Those sends work, but they bypass tg_api._call — no
 attachment spool (the voice app's GET /attachments feed misses the file), no
 [sent file:] archive marker in chat.db. Going through tg_api gives both.
 """
+import tgconf as C   # identity from config
 import os
 import subprocess
 import sys
@@ -18,13 +19,12 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import tg_api
-import tgconf as C
 
 
 def _pdf_thumb(path):
     """First-page JPEG thumbnail for a PDF (Bot API: <=320px, <=200KB).
     Telegram often shows NO preview for bot-sent PDFs unless the bot attaches
-    one explicitly (owner-reported, 2026-07-29). Returns a temp path or None."""
+    one explicitly (the owner noticed, 2026-07-29). Returns a temp path or None."""
     try:
         out = tempfile.mktemp(suffix=".jpg")
         subprocess.run(["pdftoppm", "-jpeg", "-f", "1", "-l", "1",

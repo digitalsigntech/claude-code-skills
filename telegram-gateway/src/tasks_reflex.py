@@ -1,6 +1,6 @@
 """Tasks reflex — "show me the currently running tasks" answered without an LLM turn.
 
-The owner, 2026-08-07: "when I ask you to show me the currently running tasks, you need
+the owner, 2026-08-07: "when I ask you to show me the currently running tasks, you need
 to present me them in the table, and it should take no time without LLM roundtrips.
 It should be hardcoded in Python."
 
@@ -13,12 +13,10 @@ prints what comes back. One local HTTP call, single-digit milliseconds.
 The table is built THERE, not here, on purpose: two copies of the same wording
 drift the first time a catalogue entry changes.
 """
-import json, os, re, sys, urllib.request
+import tgconf as C   # identity from config
+import json, os, re, urllib.request
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import tgconf as C
-
-REALTIME = os.path.join(C.WORKSPACE_ROOT, "voice", "realtime")
+REALTIME = os.path.join(C.WORKSPACE_ROOT, "voice/realtime")
 SECRET_FILE = os.path.join(REALTIME, ".secret")
 HOOK_SECRET_FILE = os.path.join(REALTIME, ".hook_secret")
 PORT = 8478
@@ -52,6 +50,9 @@ def detect(text):
         return False
     if ABOUT.search(t):
         return False
+    # Same guard as the backup and reminders reflexes: a sentence quoting an
+    # answer, or refusing one, is not a request for another. This reflex has not
+    # been reported yet — it has the same shape as the two that were.
     if guard.talking_about_it(t):
         return False
     if BARE.search(t):

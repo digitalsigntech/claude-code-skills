@@ -1,7 +1,7 @@
 """Audit the fast path: ask the main LLM the same question and show what CLIP missed.
 
-Written after a request for a product manual shipped a wiring diagram instead, and
-the real manual turned out not to be in the media index at all. The owner: "when you
+the owner, 2026-08-16, after "show me the epson s3200 meteor manual" shipped a wiring
+diagram and the real manual turned out not to be in the media index at all: "when you
 fire the CLIP media index search on 'show me', it must be followed by a call to the
 main LLM with the same prompt. If it returns more items, or different items, we must
 show what was missing from the CLIP search."
