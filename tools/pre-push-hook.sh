@@ -31,11 +31,27 @@ if [ -z "$GUARD" ]; then
   exit 0
 fi
 
-# Comments and blank lines out; everything else is a pattern.
-PATTERNS=$(grep -vE '^\s*(#|$)' "$GUARD" | paste -sd'|' -)
+# Comments and blank lines out; everything else is a pattern. A line starting
+# with `!` is an ALLOWANCE — a string that would otherwise match but is meant to
+# be published, the canonical example being this project's own repository URL.
+#
+# 2026-08-20: the skills moved to a branded org, so every install instruction
+# now names the company on purpose. Without allowances the guard blocked the
+# rebranding it was asked to protect, and the only ways out were disabling it or
+# weakening the pattern — both worse than teaching it the one string that is
+# deliberate. The allowance is SUBTRACTED FROM THE LINE, not applied to the
+# whole line: a real identifier sharing a line with the allowed URL still stops
+# the push.
+PATTERNS=$(grep -vE '^\s*(#|!|$)' "$GUARD" | paste -sd'|' -)
+ALLOW=$(grep -E '^!' "$GUARD" | sed -E 's/^!//' | paste -sd'|' -)
 [ -z "$PATTERNS" ] && exit 0
 
-HITS=$(grep -rIn -E "$PATTERNS" --exclude-dir=.git .)
+if [ -n "$ALLOW" ]; then
+  HITS=$(grep -rIn -E "$PATTERNS" --exclude-dir=.git . \
+         | sed -E "s#($ALLOW)##g" | grep -E "$PATTERNS")
+else
+  HITS=$(grep -rIn -E "$PATTERNS" --exclude-dir=.git .)
+fi
 if [ -n "$HITS" ]; then
   echo "PUSH BLOCKED — this tree names something that must not be published:" >&2
   echo "$HITS" | head -20 >&2

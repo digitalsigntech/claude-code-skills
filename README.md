@@ -4,13 +4,13 @@
 >
 > ```
 > Install the Telegram gateway from
-> https://github.com/vladeasytag/claude-code-skills — clone it, then read and
+> https://github.com/digitalsigntech/claude-code-skills — clone it, then read and
 > follow telegram-gateway/AGENT-INSTALL.md.
 > ```
 >
 > ```
 > Install the voice agent adapter from
-> https://github.com/vladeasytag/claude-code-skills — clone it, then read and
+> https://github.com/digitalsigntech/claude-code-skills — clone it, then read and
 > follow voice-agent/AGENT-INSTALL.md.
 > ```
 
