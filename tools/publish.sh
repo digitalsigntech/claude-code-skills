@@ -17,6 +17,9 @@ set -u
 cd "$(git rev-parse --show-toplevel)" || exit 1
 
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
+# Read AFTER the pushes: a post-commit hook in this tree can add a commit
+# while the script runs, and comparing against a stale local hash reported
+# "stale" for two repositories that were both perfectly in sync.
 LOCAL=$(git rev-parse HEAD)
 rc=0
 
@@ -26,9 +29,9 @@ for remote in origin org; do
     rc=1
     continue
   }
-  GIT_TERMINAL_PROMPT=0 timeout 90 git push "$remote" "HEAD:$BRANCH" 2>&1 \
+  GIT_TERMINAL_PROMPT=0 timeout 45 git push "$remote" "HEAD:$BRANCH" 2>&1 \
     | sed "s|^|[$remote] |"
-  got=$(GIT_TERMINAL_PROMPT=0 timeout 45 git ls-remote "$url" \
+  got=$(GIT_TERMINAL_PROMPT=0 timeout 20 git ls-remote "$url" \
         -h "refs/heads/$BRANCH" 2>/dev/null | cut -f1)
   if [ "$got" = "$LOCAL" ]; then
     echo "[$remote] holds $(git rev-parse --short HEAD) — in sync"
