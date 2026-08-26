@@ -4,7 +4,7 @@
 
 ```
 Install the Telegram gateway from
-https://github.com/vladeasytag/claude-code-skills — clone it, then read and
+https://github.com/digitalsigntech/claude-code-skills — clone it, then read and
 follow telegram-gateway/AGENT-INSTALL.md.
 ```
 
@@ -14,7 +14,7 @@ That is the whole install.
 
 ```
 Update the Telegram gateway: pull the latest
-https://github.com/vladeasytag/claude-code-skills and follow
+https://github.com/digitalsigntech/claude-code-skills and follow
 telegram-gateway/AGENT-UPDATE.md.
 ```
 
