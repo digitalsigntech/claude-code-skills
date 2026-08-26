@@ -23,7 +23,7 @@ BRANCH=$(git rev-parse --abbrev-ref HEAD)
 LOCAL=$(git rev-parse HEAD)
 rc=0
 
-for remote in origin org; do
+for remote in origin mirror; do
   url=$(git remote get-url --push "$remote" 2>/dev/null) || {
     echo "[$remote] NO SUCH REMOTE — nothing published there" >&2
     rc=1
@@ -37,6 +37,9 @@ for remote in origin org; do
     echo "[$remote] holds $(git rev-parse --short HEAD) — in sync"
   else
     echo "[$remote] STALE: holds ${got:-unreachable}, expected $LOCAL" >&2
+    # A mirror that refuses a push has DIVERGED — somebody committed to the
+    # copy. That is a decision for a person, not something to force away:
+    # whichever side lost the coin toss would lose its work silently.
     rc=1
   fi
 done
