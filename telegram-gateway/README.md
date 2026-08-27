@@ -79,6 +79,17 @@ workspace root (`agent-system-prompt.md` by default) — where your facts live,
 what needs whose approval, what is private. With no file you get a generic
 instruction that runs fine and says nothing about you.
 
+**One rule worth copying into yours if any turns arrive by voice.** Speech
+reaches the agent as transcription, and transcription sometimes produces
+nonsense — a misheard name, half a phrase. Tell your agent that a garbled
+question is not a question: ask one short "say that again?" and stop, rather
+than matching the fragment to the nearest thing it can look up. The failure this
+prevents is specific and it happened here — a garbled voice question became a
+notes table on the owner's phone screen with a stored password in it. Pair it
+with a rule about secret values: name the item and where it lives, print the
+value only when asked for that one item by name. A wrong guess is not free when
+the answer lands on a screen someone else may be looking at.
+
 Overrides, in order: `AGENT_<SECTION>_<KEY>` env → the profile → the built-in
 default. A missing profile is never an error.
 
