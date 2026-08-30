@@ -189,6 +189,18 @@ baseline: a watchdog that cries about last week's log is one that gets muted.
   API 10.1 `sendRichMessage` for native rendering (with a clean text fallback).
 - **Commands:** `/help`, `/whoami` (show chat/user IDs), `/clear` (a.k.a. `/new`,
   `/reset` — forget this chat's session), plus optional `/cloud` and `/topic`.
+- **Reflexes are OFF by default (`TG_REFLEX_INTERCEPT=0`).** Every reflex listed
+  below is a keyword/pattern gate that answers a message *instead of* the model.
+  On the origin install all of them were switched off on 2026-08-30 — the owner:
+  "I want every message to be ran through LLM, do not invoke anything by
+  keywords. There were too many false reactions." A pattern cannot tell a
+  request from a complaint ("your reminders thing is broken" listed his
+  reminders) and cannot read a language nobody wrote a branch for. Ship them off;
+  set `TG_REFLEX_INTERCEPT=1` only if milliseconds genuinely matter more than
+  being right, and expect false fires. The modules stay useful either way — the
+  agent calls them as tools (e.g. run `reminders_reflex.py --owner <key>` and
+  post its table verbatim). Exempt, because they do not match keywords: the Q&A
+  cache, the KB reflex, and inbound-file handling (`scan_reflex`).
 - **Photo reflex (optional, sub-second).** An image request ("show me the qs256
   heads", `/pic voxeljet`) is answered deterministically — no LLM turn: query a warm
   CLIP search server, send the hits with cached Telegram `file_id`s (no re-upload).
