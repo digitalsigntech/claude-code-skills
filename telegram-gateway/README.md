@@ -490,3 +490,4 @@ Telegram  ──getUpdates(long-poll)──▶  gateway.py
 
 State lives in `state/sessions.json` (`chat_id → {sid, init, held, title, ctype}`)
 and `state/offset` (the getUpdates cursor).
+
