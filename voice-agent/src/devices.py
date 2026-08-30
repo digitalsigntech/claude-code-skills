@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 """The agent's own list of devices allowed to read this account's sealed mail.
 
-Ported from the box adapter unchanged, because both agents must decide the
-same way: the relay records and asks, this end grants.
-
     ./devices.py list
     ./devices.py approve <device_id|label>
     ./devices.py revoke  <device_id|label>
@@ -94,6 +91,29 @@ def _find(d, key):
         if key and key in (row.get("label") or "").lower():
             return dev
     return None
+
+
+def share_history(key):
+    """Mark that the owner has agreed this device may read what came before.
+
+    Veto 2 from the contract, made concrete: approving a device lets it read
+    what happens NEXT, and this — a separate, announced act — lets it read what
+    came before. History is sealed at serve time, so this is a flag rather than
+    a rewrite: with it set the agent seals past messages to this device on
+    request, without it the device sees the placeholder wall it started with.
+    """
+    d = _load()
+    hit = _find(d, key)
+    if not hit:
+        return None
+    d[hit]["history_shared"] = time.time()
+    _save(d)
+    return hit
+
+
+def history_shared(device_id):
+    row = _load().get(device_id) or {}
+    return bool(row.get("history_shared")) and not row.get("revoked")
 
 
 def accepted_ids():
