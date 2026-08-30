@@ -62,8 +62,8 @@ def register(device_id, pubkey, label="", kind="", os_name="", location=""):
 def approve(key, with_history=True):
     """Approve a device — and, by default, share what came before.
 
-    2026-08-30, Vladimir, overriding the contract's veto 2 and he is right
-    about why. That veto existed so history could not be inherited as a SIDE
+    2026-08-30, the product owner's decision, overriding this contract's
+    second veto — and the argument is right. That veto existed so history could not be inherited as a SIDE
     EFFECT of pairing — but pairing is no longer the consent gate. Approval is,
     and approval is a deliberate act on a NAMED device after an announcement
     saying what asked and from where. Two prompts for one intention trains
