@@ -17,6 +17,20 @@ v2 is the standard multi-recipient shape and nothing cleverer:
                            salt="voicebridge-e2ee-v2",
                            info="voicebridge/v2/" || dir || 0 || key_id || 0 || epk)
 
+WHICH BYTES, EXACTLY — the one thing this spec left ambiguous, and it cost a
+port an evening of sweeping combinations (a second implementation, #353). In the HKDF info:
+
+    "voicebridge/v2/"  ASCII, no trailing slash beyond the one shown
+    dir                ASCII, "phone->agent" or "agent->phone"
+    0                  a single zero byte, twice, as separators
+    key_id             the 16 ASCII hex characters, NOT the 8 raw bytes
+    epk                the ephemeral public key's RAW 32 BYTES, NOT its base64
+
+The AAD is the header JSON as bytes: compact separators, keys sorted, key_ids
+sorted — `{"dir":…,"epk":<base64>,"key_ids":[…],"v":2}`. Note the asymmetry
+and do not smooth it over: base64 inside the JSON because JSON has no bytes,
+raw in the HKDF because the KDF has no text.
+
 Three properties worth naming, because each is a decision rather than a detail:
 
   * THE SENDER KEY IS EPHEMERAL, one per message. v1 was static-static, so a
