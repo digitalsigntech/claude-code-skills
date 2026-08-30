@@ -2240,7 +2240,9 @@ class Handler(BaseHTTPRequestHandler):
                             f"({d.get('type_') or '?'}, {d.get('os') or '?'}) "
                             f"from {d.get('location') or 'an unknown place'} — "
                             f"id {_id}. It can read NOTHING until you approve "
-                            f"it: reply \"approve device "
+                            f"it — and approving lets it read this "
+                            f"conversation's HISTORY as well as new messages. "
+                            f"To allow that: reply \"approve device "
                             f"{d.get('label') or _id}\"]", "in",
                             sender=person_name(name))
                 except Exception as e:
