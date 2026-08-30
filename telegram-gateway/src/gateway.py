@@ -1011,13 +1011,14 @@ def _reminder_owner(msg):
         return None
 
 
-# Reflex interception, off since 2026-08-14. A keyword gate cannot tell a
-# request from a complaint, and cannot read a language nobody wrote a branch
-# for. Since 2026-08-30 the same gate covers EVERY reflex below, on the owner's
-# call: "I want every message to be ran through LLM, do not invoke anything by
-# keywords. There were too many false reactions." Each module stays a TOOL the
-# turn calls; only its power to INTERCEPT a message is gone.
-# Set TG_REFLEX_INTERCEPT=1 to restore the instant paths with those limits.
+# Reflex interception, off since 2026-08-14 for reminders and since 2026-08-30
+# for every other keyword reflex (the owner: "I want every message to be ran
+# through LLM, do not invoke anything by keywords. There were too many false
+# reactions."). A keyword gate cannot tell a request from a complaint, and
+# cannot read a language nobody wrote a branch for; the model reads the
+# sentence. Each module below stays alive as a TOOL the turn calls — only its
+# power to INTERCEPT the message is gone. Set TG_REFLEX_INTERCEPT=1 to restore
+# the instant paths with those limits.
 REFLEX_INTERCEPT = os.environ.get("TG_REFLEX_INTERCEPT", "0") == "1"
 
 
