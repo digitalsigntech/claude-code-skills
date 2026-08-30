@@ -5,8 +5,8 @@
 
 v1 sealed to ONE device: static-static X25519 between the agent key and that
 device's key. A second device could only be served by sealing twice, and a
-device added later could read nothing at all — which is the wall Vladimir keeps
-photographing.
+device added later could read nothing at all — which is the placeholder wall a
+newly paired device shows for every message that predates it.
 
 v2 is the standard multi-recipient shape and nothing cleverer:
 
