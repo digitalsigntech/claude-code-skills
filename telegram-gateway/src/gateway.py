@@ -1013,7 +1013,11 @@ def _reminder_owner(msg):
 
 # Reflex interception, off since 2026-08-14. A keyword gate cannot tell a
 # request from a complaint, and cannot read a language nobody wrote a branch
-# for. Set TG_REFLEX_INTERCEPT=1 to restore the instant path with those limits.
+# for. Since 2026-08-30 the same gate covers EVERY reflex below, on the owner's
+# call: "I want every message to be ran through LLM, do not invoke anything by
+# keywords. There were too many false reactions." Each module stays a TOOL the
+# turn calls; only its power to INTERCEPT a message is gone.
+# Set TG_REFLEX_INTERCEPT=1 to restore the instant paths with those limits.
 REFLEX_INTERCEPT = os.environ.get("TG_REFLEX_INTERCEPT", "0") == "1"
 
 
@@ -1113,7 +1117,7 @@ def handle_text(msg, chat_id, text):
     # for an Agent Voice Mode login QR runs make_account_qr.py directly (~3s, no LLM
     # turn). Owner-only, DM + Voice Claude group only — the QR is a live credential.
     # Before doc/file reflexes so a stale QR PNG in the workspace can never win.
-    if C.QR_REFLEX:
+    if REFLEX_INTERCEPT and C.QR_REFLEX:
         try:
             summary = qr_reflex.try_handle(chat_id, text,
                                            (msg.get("from") or {}).get("id"))
@@ -1128,7 +1132,7 @@ def handle_text(msg, chat_id, text):
     # Tasks reflex (2026-08-07, the owner: "show me the currently running tasks ... should
     # take no time without LLM roundtrips. It should be hardcoded in Python"): a
     # registry lookup + the table the voice server already renders. ~50ms, no turn.
-    if C.TASKS_REFLEX:
+    if REFLEX_INTERCEPT and C.TASKS_REFLEX:
         try:
             summary = tasks_reflex.try_handle(chat_id, text, TG.send_message)
         except Exception as e:
@@ -1146,7 +1150,8 @@ def handle_text(msg, chat_id, text):
     # person who created them, so the gate takes the sender's id and the store
     # only ever returns that person's rows.
     asker = (msg.get("from") or {}).get("id")
-    if C.PERSONAL_NOTE_REFLEX and personal_notes.allowed_chat(chat_id, viewer=asker):
+    if REFLEX_INTERCEPT and C.PERSONAL_NOTE_REFLEX and \
+            personal_notes.allowed_chat(chat_id, viewer=asker):
         try:
             summary = personal_note_reflex.try_handle(chat_id, text,
                                                       TG.send_message, viewer=asker)
@@ -1162,8 +1167,8 @@ def handle_text(msg, chat_id, text):
     # form of table"). Listing was the one case both note reflexes handed to
     # Claude — right while the answer had to be composed, wrong once its shape
     # is fixed. Owner-gated: the personal rows are his private store.
-    if personal_notes.allowed_chat(chat_id, viewer=asker) or \
-            business_notes.allowed_chat(chat_id, viewer=asker):
+    if REFLEX_INTERCEPT and (personal_notes.allowed_chat(chat_id, viewer=asker) or
+                             business_notes.allowed_chat(chat_id, viewer=asker)):
         try:
             summary = notes_table_reflex.try_handle(chat_id, text,
                                                     TG.send_message, viewer=asker)
@@ -1179,7 +1184,7 @@ def handle_text(msg, chat_id, text):
     # this note in the business notes"). Company-private facts — a room code, a
     # shop wifi password — that belong neither in his private store nor in the
     # customer KB. Same owner gate as above: company-private is not public.
-    if business_notes.allowed_chat(chat_id, viewer=asker):
+    if REFLEX_INTERCEPT and business_notes.allowed_chat(chat_id, viewer=asker):
         try:
             summary = business_note_reflex.try_handle(chat_id, text,
                                                       TG.send_message)
@@ -1194,7 +1199,7 @@ def handle_text(msg, chat_id, text):
     # KB filing reflex (2026-08-07, the owner: "the round trip of saving the PDF in
     # knowledge base was too long"). Answers on the copy; extraction and
     # indexing run behind it.
-    if C.KB_FILE_REFLEX:
+    if REFLEX_INTERCEPT and C.KB_FILE_REFLEX:
         try:
             summary = kb_file_reflex.try_handle(chat_id, text, TG.send_message)
         except Exception as e:
@@ -1248,7 +1253,7 @@ def handle_text(msg, chat_id, text):
     # Backup reflex (2026-08-07, the owner: "when I ask to show the status of our
     # backups the backend should have a very quick answer"). Same shape as the
     # tasks reflex — file checks, no model turn. ~2ms.
-    if C.BACKUP_REFLEX:
+    if REFLEX_INTERCEPT and C.BACKUP_REFLEX:
         try:
             summary = backup_reflex.try_handle(chat_id, text, TG.send_message)
         except Exception as e:
@@ -1262,21 +1267,22 @@ def handle_text(msg, chat_id, text):
     # Urgent-email reflex (#130, 2026-08-10, the owner: "the answer should be on the
     # box instant, cached… regenerated upon checking emails"). The digest builds
     # the cache when it checks the mail; this only reads it. ~0.1ms.
-    try:
-        summary = urgent_reflex.try_handle(chat_id, text, TG.send_message)
-    except Exception as e:
-        summary = None
-        log(f"urgent reflex error: {e}")
-    if summary:
-        _arc_out(chat_id, summary)
-        log(f"urgent reflex chat={chat_id} {summary}")
-        return
+    if REFLEX_INTERCEPT:
+        try:
+            summary = urgent_reflex.try_handle(chat_id, text, TG.send_message)
+        except Exception as e:
+            summary = None
+            log(f"urgent reflex error: {e}")
+        if summary:
+            _arc_out(chat_id, summary)
+            log(f"urgent reflex chat={chat_id} {summary}")
+            return
 
     # Doc reflex (2026-07-10, the owner: "make the labelexpo pass instant"): requests for a
     # CURATED registered document ("fetch my labelexpo pass") are answered by a direct
     # sendDocument with a cached file_id — no LLM turn. Registry: doc_registry.json,
     # re-read every message so new docs need no restart. Anything unmatched falls through.
-    if C.DOC_REFLEX:
+    if REFLEX_INTERCEPT and C.DOC_REFLEX:
         try:
             summary = doc_reflex.try_handle(chat_id, text)
         except Exception as e:
@@ -1292,7 +1298,7 @@ def handle_text(msg, chat_id, text):
     # the warm CLIP index + cached Telegram file_ids — no LLM turn at all. Fires only
     # on an exact keyword match against curated tags/annotations; anything fuzzy costs
     # ~10ms and falls through to the normal paths below.
-    if C.PHOTO_REFLEX:
+    if REFLEX_INTERCEPT and C.PHOTO_REFLEX:
         sent_paths = []
         try:
             summary = photo_reflex.try_handle(chat_id, text, sent_paths)
@@ -1313,7 +1319,7 @@ def handle_text(msg, chat_id, text):
     # resolved deterministically against the KB image index and (DMs + the private
     # group only) a cached walk of the workspace. Only a candidate covering EVERY distinctive
     # query token is sent; ambiguous/partial/question-shaped asks fall through.
-    if C.FILE_REFLEX:
+    if REFLEX_INTERCEPT and C.FILE_REFLEX:
         sent_paths = []
         try:
             summary = file_reflex.try_handle(chat_id, text, sent_paths)
