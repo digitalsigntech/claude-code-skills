@@ -2226,6 +2226,12 @@ class Handler(BaseHTTPRequestHandler):
             ok = _id in _dev.accepted_ids()
             if not ok:
                 try:                       # tell the owner, in his own chat
+                    # AND IN TELEGRAM, not only the transcript (#355). A device
+                    # asking to read everything is what someone must see when
+                    # they are not holding the app, and if a registration is
+                    # ever hostile the announcement IS the alarm. An install
+                    # with no chat behind it (a demo account) still gets the
+                    # transcript line, which is all it has.
                     # archive() here takes (text, direction, sender=…) — the
                     # box's takes (who, text). Same job, different signature,
                     # and the first port called the box's shape into this file.
