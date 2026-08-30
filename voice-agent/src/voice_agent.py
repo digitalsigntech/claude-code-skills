@@ -2199,6 +2199,51 @@ class Handler(BaseHTTPRequestHandler):
                                         "fingerprint": key_fingerprint()})
             except Exception as e:
                 return self._send(200, {"error": str(e)[:120]})
+        if kind in ("device_register", "device_revoke", "devices"):
+            # MULTI-DEVICE E2EE (#347 veto 1, ported from the box). A device in
+            # the registry is a new pair of eyes on everything sealed, so the
+            # relay may record and ask but never grant: this end keeps its own
+            # list, tells the owner what asked to link, and answers pending
+            # until a human approves. Without these three the plane's device
+            # screen shows a permanent "pending" — which is what it did.
+            sys.path.insert(0, str(HERE))
+            try:
+                import devices as _dev
+            except Exception as e:
+                return self._send(200, {"accepted": False,
+                                        "error": f"device store unavailable: {str(e)[:80]}"})
+            if kind == "devices":
+                return self._send(200, {"accepted": _dev.accepted_ids(),
+                                        "rows": _dev.rows()})
+            _id = str(d.get("device_id") or "")[:32]
+            if kind == "device_revoke":
+                return self._send(200, {"revoked": bool(_dev.revoke(_id))})
+            _dev.register(_id, str(d.get("pubkey") or "")[:200],
+                          str(d.get("label") or "")[:60],
+                          str(d.get("type_") or "")[:24],
+                          str(d.get("os") or "")[:40],
+                          str(d.get("location") or "")[:60])
+            ok = _id in _dev.accepted_ids()
+            if not ok:
+                try:                       # tell the owner, in his own chat
+                    # archive() here takes (text, direction, sender=…) — the
+                    # box's takes (who, text). Same job, different signature,
+                    # and the first port called the box's shape into this file.
+                    archive("[a new device asked to link: "
+                            f"{d.get('label') or 'unnamed'} "
+                            f"({d.get('type_') or '?'}, {d.get('os') or '?'}) "
+                            f"from {d.get('location') or 'an unknown place'} — "
+                            f"id {_id}. It can read NOTHING until you approve "
+                            f"it: reply \"approve device "
+                            f"{d.get('label') or _id}\"]", "in",
+                            sender=person_name(name))
+                except Exception as e:
+                    # An un-announced request is still pending, so this is not
+                    # fatal — but a device nobody was told about is a device
+                    # nobody will approve, so say it in the log.
+                    self.log_message("device announce failed: %s", str(e)[:90])
+            return self._send(200, {"accepted": ok,
+                                    "state": "linked" if ok else "pending"})
         if kind == "capabilities":
             return self._send(200, {"capabilities": capabilities()})
         if kind == "progress":

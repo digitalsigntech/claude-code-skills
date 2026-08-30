@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+"""The agent's own list of devices allowed to read this account's sealed mail.
+
+Ported from the box adapter unchanged, because both agents must decide the
+same way: the relay records and asks, this end grants.
+
+    ./devices.py list
+    ./devices.py approve <device_id|label>
+    ./devices.py revoke  <device_id|label>
+
+WHY THIS FILE EXISTS AND NOT A COLUMN ON THE PLANE (#347, veto 1). A device in
+the registry is a new pair of eyes on everything the user has ever said. That
+makes registration a key-distribution decision, and the relay is the one party
+the sealing exists to exclude — so the plane records requests and asks, and
+THIS list is what actually gets wrapped for. If the two ever disagree, this one
+wins, and the mismatch is worth saying out loud rather than resolving quietly.
+
+Nothing is approved automatically. A registration arrives, the owner is told,
+and the device stays pending until a human says otherwise — which is the whole
+point: an attacker who can reach the relay still cannot add a reader.
+"""
+import json
+import os
+import sys
+import time
+
+# e2ee_devices.json, NOT devices.json: that name was already taken by an older
+# account-device store with a different schema (created/name/sha256), and my
+# first run wrote a row into it. Two systems sharing a file is how one of them
+# eventually eats the other's state.
+STORE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                     "e2ee_devices.json")
+
+
+def _load():
+    try:
+        with open(STORE) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def _save(d):
+    tmp = STORE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(d, f, indent=1, sort_keys=True)
+    os.replace(tmp, STORE)
+
+
+def register(device_id, pubkey, label="", kind="", os_name="", location=""):
+    """Record a request. Returns the row; `accepted` stays False."""
+    d = _load()
+    row = d.get(device_id) or {}
+    row.update({"pubkey": pubkey, "label": label, "type": kind,
+                "os": os_name, "location": location,
+                "first_seen": row.get("first_seen") or time.time(),
+                "last_seen": time.time(),
+                "accepted": bool(row.get("accepted")),
+                "revoked": None})
+    d[device_id] = row
+    _save(d)
+    return row
+
+
+def approve(key):
+    d = _load()
+    hit = _find(d, key)
+    if not hit:
+        return None
+    d[hit]["accepted"] = True
+    d[hit]["revoked"] = None
+    d[hit]["approved_at"] = time.time()
+    _save(d)
+    return hit
+
+
+def revoke(key):
+    d = _load()
+    hit = _find(d, key)
+    if not hit:
+        return None
+    d[hit]["accepted"] = False
+    d[hit]["revoked"] = time.time()
+    _save(d)
+    return hit
+
+
+def _find(d, key):
+    """By id, or by label — the owner says "the iPad", not a hex string."""
+    if key in d:
+        return key
+    key = (key or "").strip().lower()
+    for dev, row in d.items():
+        if key and key in (row.get("label") or "").lower():
+            return dev
+    return None
+
+
+def accepted_ids():
+    """The only devices anything may be wrapped for."""
+    return [k for k, v in _load().items()
+            if v.get("accepted") and not v.get("revoked")]
+
+
+def rows():
+    return _load()
+
+
+def main():
+    args = sys.argv[1:]
+    if not args or args[0] == "list":
+        d = _load()
+        if not d:
+            print("no devices have asked yet")
+            return 0
+        for dev, r in sorted(d.items(), key=lambda kv: kv[1].get("first_seen", 0)):
+            state = ("revoked" if r.get("revoked") else
+                     "LINKED" if r.get("accepted") else "pending")
+            print(f"{dev}  {state:<8} {r.get('label') or '?':<22} "
+                  f"{r.get('type') or '':<8} {r.get('location') or ''}")
+        return 0
+    if args[0] in ("approve", "revoke") and len(args) > 1:
+        fn = approve if args[0] == "approve" else revoke
+        hit = fn(" ".join(args[1:]))
+        print(f"{args[0]}d {hit}" if hit else "no device matched that")
+        return 0 if hit else 1
+    sys.exit(__doc__.strip())
+
+
+if __name__ == "__main__":
+    sys.exit(main())
