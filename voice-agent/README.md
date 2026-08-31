@@ -277,6 +277,28 @@ with a command-not-found for `claude` — invisible unless you read the logs.
 - `config.json` holds your account token and the webhook secret: `chmod 600`, never
   commit it.
 
+## More than one device
+
+A phone that signs in registers its public key; the agent records the request, announces it, and
+seals nothing to it until it is approved:
+
+```
+python3 src/devices.py list                    # asked / LINKED / revoked
+python3 src/devices.py approve "iPad"          # by label or id
+python3 src/devices.py approve "iPad" --no-history
+python3 src/devices.py revoke  "old phone"
+```
+
+Approving grants history by default — pairing is not the consent gate, approval is, and two prompts
+for one intention train people to click through. `--no-history` keeps a device to what happens next.
+Revoking cuts past and future together, from the very next message.
+
+**Approval is the gate in both directions.** Answers are wrapped for every approved device (envelope
+v2), and a sealed question is opened only if its key belongs to an approved, non-revoked device. Any
+other key is refused rather than accepted mid-conversation — including one substituted by the relay,
+which is the party the sealing exists to exclude. Set `auto_approve_devices` in `config.json` only
+for a shared demo install, where there is no owner to ask.
+
 ## Files
 
 | File | What it is |
@@ -286,5 +308,7 @@ with a command-not-found for `claude` — invisible unless you read the logs.
 | `src/tunnel.py` | Public URL for machines behind NAT; signs up on first run, re-pairs on URL change. |
 | `src/qr_send.py` | Posts the QR to Telegram; deletes it when scanned, or at expiry. |
 | `src/conformance.py` | Checks this install against every message the plane can send. |
+| `src/devices.py` | The list of devices allowed to read this account's sealed mail; `list`, `approve`, `revoke`. |
+| `src/e2ee_v2.py` | Envelope v2 — one message wrapped separately for every approved device; `--vectors`, `--selftest`. |
 | `src/config.example.json` | Copy to `config.json`. |
 | `src/*.service.example` | systemd units for the adapter and the tunnel. |
