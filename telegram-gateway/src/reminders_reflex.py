@@ -840,7 +840,19 @@ def interpret(text, now=None):
     # Is this a reminders question at all? A qualifier alone is not enough —
     # "cancelled" appears in plenty of sentences that are not this one.
     if not (NOUN.search(t) or RU_NOUN.search(t)):
-        if not named:
+        # A DATE IS NOT A DOMAIN (2026-08-31, the owner's directive after
+        # "What were our sales last Friday?" came back "No Friday reminders.").
+        # A window used to be enough to claim a sentence that never said
+        # "reminder": every subject on earth has a last Friday in it, so a date
+        # says WHEN someone is asking about, never WHAT. Only this domain's own
+        # vocabulary — a state, overdue, or the due/agenda family — may stand in
+        # for the noun.
+        #
+        # OTHER_TOPIC above is the blacklist that was trying to do this job from
+        # the other side, naming weather and email so they would not be stolen.
+        # A blacklist of everything a question could be about is a list that is
+        # wrong until the next subject comes up; the positive test is the fix.
+        if not (states or overdue or DUE_ISH.search(t)):
             return None
         if not (LIST_ISH.search(t) or DUE_ISH.search(t) or len(t.split()) <= 2):
             return None
