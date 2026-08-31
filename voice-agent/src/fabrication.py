@@ -3,12 +3,12 @@
 
     python3 fabrication.py --selftest     # includes the 16:42 specimen
 
-THE CASE THIS EXISTS FOR (2026-08-31, 16:41-16:42 UTC, acct-vlad). He asked for
-six months of sales; the relay worked, the agent answered 6,294,100 with months
-around a million each, and the real text was on his screen. He then said "full
-details" — that turn was never relayed — and the model narrated a different
-universe: total 475,000, July 95,000, August 60,000. It had the true figures in
-its own context and spoke different ones.
+THE CASE THIS EXISTS FOR (2026-08-31, 16:41-16:42 UTC, one demo account). The
+user asked for six months of sales; the relay worked, the agent answered
+6,294,100 with months around a million each, and the real text was drawn on the
+screen. The follow-up — "full details" — was never relayed, and the model
+narrated a different universe: total 475,000, July 95,000, August 60,000. It had
+the true figures in its own context and spoke different ones.
 
 WHY THIS SHAPE AND NOT THE OTHER ONE. The invariant we first agreed was
 "asserted his-world specifics with no tool call at all", which is the keystone
