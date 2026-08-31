@@ -2121,8 +2121,37 @@ def _peers_path():
     return HERE / PEERS_FILE
 
 
+def approved_device_pubkeys():
+    """Base64 pubkeys of every device the registry has ACCEPTED and not revoked.
+
+    The inbound counterpart to `v2_reader_keys()`: that one decides who may read
+    what this agent sends, this one decides whose sealed asks it will open. Same
+    source of truth, so a device cannot be a legitimate reader and an
+    illegitimate writer at the same time.
+    """
+    try:
+        import devices as _dev
+        return {r.get("pubkey") for r in _dev.rows().values()
+                if r.get("accepted") and not r.get("revoked") and r.get("pubkey")}
+    except Exception:
+        return set()
+
+
 def peer_key(account, offered_b64=None):
-    """The phone's public key for this account, pinning a new one once."""
+    """The phone's public key for this account, pinning a new one once.
+
+    A KEY THE REGISTRY HAS APPROVED IS NOT A CHANGED KEY (2026-08-31, from the
+    ledger). Multi-device landed on the OUTBOUND leg — v2 wraps one answer for
+    every approved device — and this, the inbound leg, stayed pinned to
+    whichever device sealed first. So the second device's every question died
+    here: `PeerKeyChanged` -> HTTP 400 -> the plane's 502, three times per turn,
+    while the phone showed a promise to check that nothing was ever made for.
+
+    The pin defends against an UNKNOWN key substituted by the relay. A key in
+    the registry is not unknown: it is a device this agent accepted, announced,
+    and (outside a sandbox install) a human approved by name. Approval is the
+    gate; the pin stays as the first device's fallback for v1 sealing.
+    """
     import base64 as _b64
     with _lock:
         store = load(_peers_path(), {})
@@ -2135,11 +2164,15 @@ def peer_key(account, offered_b64=None):
             if len(raw) != 32:
                 raise ValueError(f"peer key is {len(raw)} bytes, expected 32")
             if cur and cur != offered_b64:
+                if offered_b64 in approved_device_pubkeys():
+                    print(f"[voice-agent] second approved device sealed to "
+                          f"{account}: {key_fingerprint(raw)}", file=sys.stderr)
+                    return raw
                 raise PeerKeyChanged(
-                    "this account is pinned to a different device key — "
-                    "scan a fresh pairing code to re-pair, which clears the "
-                    "old pin deliberately instead of accepting a new key "
-                    "mid-conversation")
+                    "this account is pinned to a different device key and that "
+                    "key is not an approved device — scan a fresh pairing code "
+                    "to re-pair, which clears the old pin deliberately instead "
+                    "of accepting a new key mid-conversation")
             if not cur:
                 store[account] = offered_b64
                 save(_peers_path(), store)
