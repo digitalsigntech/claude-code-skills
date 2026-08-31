@@ -2137,6 +2137,32 @@ def approved_device_pubkeys():
         return set()
 
 
+SPOKEN_NO_CALL = "[spoken-no-call]"
+
+
+def _check_fabrication(log_message, text, account):
+    """Run the fabrication invariant over a line the model spoke with no call.
+
+    The app marks such a line `[spoken-no-call] <what was said>`; anything else
+    on the diagnostic channel passes straight through. The verdict is LOGGED,
+    not announced from here — one announcement path, already tested, lives in
+    the watcher, and an agent that talks to Telegram from inside a request
+    handler is an agent that can block a turn on a network call.
+    """
+    text = (text or "").strip()
+    if not text.startswith(SPOKEN_NO_CALL):
+        return
+    try:
+        import fabrication
+        verdict = fabrication.check_spoken(account or "default",
+                                           text[len(SPOKEN_NO_CALL):])
+    except Exception as e:
+        log_message("fabrication check skipped: %.80s", e)
+        return
+    if verdict:
+        log_message("FABRICATION %s", json.dumps(verdict))
+
+
 def peer_key(account, offered_b64=None):
     """The phone's public key for this account, pinning a new one once.
 
@@ -2475,6 +2501,7 @@ class Handler(BaseHTTPRequestHandler):
             # contains a bracket is still a sentence.
             if d.get("diagnostic") or _MARKER_ONLY.match(text):
                 self.log_message("DIAGNOSTIC %s", text[:300])
+                _check_fabrication(self.log_message, text, account)
                 return self._send(200, {
                     "ok": True, "mirrored": False, "suppressed": "diagnostic",
                     "reason": "recorded in the agent's log, not the chat"})
@@ -2720,6 +2747,16 @@ class Handler(BaseHTTPRequestHandler):
                                       time_context(d.get("tz"))) if c))
             self.log_message("answered in %.1fs (%s)", time.time() - t0,
                              res.get("agent_error") or "ok")
+            # GROUND TRUTH FOR THE FABRICATION INVARIANT. The figures in what
+            # this agent actually said are kept so a later turn that speaks
+            # different ones can be told apart from a later turn that rounds
+            # them. Numbers only, never the answer body.
+            try:
+                import fabrication
+                fabrication.record_answer(account, q,
+                                          str(res.get("answer") or ""))
+            except Exception as e:
+                self.log_message("figure ledger skipped: %.80s", e)
             # The phone has this answer in its hand; the notifier must not
             # announce the same exchange as news a minute later (#270).
             LAST_APP_TURN[account] = time.time()
