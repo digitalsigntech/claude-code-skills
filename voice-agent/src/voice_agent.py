@@ -1986,6 +1986,41 @@ def e2ee_key_id(pub):
     return hashlib.sha256(pub).digest()[:8].hex()
 
 
+def v2_reader_keys():
+    """Raw X25519 pubkeys of every device this agent has accepted (#352).
+
+    One accepted device stays on v1 — every phone in the field speaks it. Two
+    or more cannot be served by v1 at all, which is the entire reason v2
+    exists: the second device's history is a wall of placeholders until the
+    message is wrapped for its key as well.
+    """
+    try:
+        import base64 as _b64
+        import devices as _dev
+        rows = _dev.rows()
+        out = []
+        for dev in _dev.accepted_ids():
+            try:
+                raw = _b64.b64decode((rows.get(dev) or {}).get("pubkey") or "")
+            except Exception:
+                continue
+            if len(raw) == 32:
+                out.append(raw)
+        return out
+    except Exception:
+        return []
+
+
+def seal_for_devices(text, direction=None):
+    """v2 when there are two readers, None when there are not — caller falls
+    back to v1 so a single-device account is byte-identical to yesterday."""
+    fleet = v2_reader_keys()
+    if len(fleet) < 2:
+        return None
+    import e2ee_v2
+    return e2ee_v2.seal(text, fleet, direction or e2ee_v2.DIR_TO_PHONE)
+
+
 def e2ee_seal(text, priv, my_pub, their_pub, direction=DIR_TO_PHONE):
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     import base64 as _b64
@@ -2306,9 +2341,11 @@ class Handler(BaseHTTPRequestHandler):
                     for row in rows:
                         if not isinstance(row, dict) or "text" not in row:
                             continue
-                        row["sealed"] = e2ee_seal(str(row.get("text") or ""),
-                                                  priv, mine, theirs,
-                                                  direction=DIR_TO_PHONE)
+                        row["sealed"] = (
+                            seal_for_devices(str(row.get("text") or ""))
+                            or e2ee_seal(str(row.get("text") or ""),
+                                         priv, mine, theirs,
+                                         direction=DIR_TO_PHONE))
                         row.pop("text", None)
                 except Exception as e:
                     # A history that cannot be sealed is not served in the
@@ -2672,9 +2709,13 @@ class Handler(BaseHTTPRequestHandler):
                     priv, mine = agent_keys()
                     theirs = peer_key(account)
                     out = dict(res)
-                    out["sealed"] = e2ee_seal(str(res.get("answer") or ""),
-                                              priv, mine, theirs,
-                                              direction=DIR_TO_PHONE)
+                    _multi = seal_for_devices(str(res.get("answer") or ""))
+                    if _multi:
+                        self.log_message("sealed v2 to %d devices",
+                                         len(_multi.get("wraps") or []))
+                    out["sealed"] = _multi or e2ee_seal(
+                        str(res.get("answer") or ""), priv, mine, theirs,
+                        direction=DIR_TO_PHONE)
                     out.pop("answer", None)
                     return self._send(200, out)
                 except Exception as e:
