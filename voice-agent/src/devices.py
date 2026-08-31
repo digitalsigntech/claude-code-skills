@@ -44,16 +44,33 @@ def _save(d):
     os.replace(tmp, STORE)
 
 
-def register(device_id, pubkey, label="", kind="", os_name="", location=""):
-    """Record a request. Returns the row; `accepted` stays False."""
+def register(device_id, pubkey, label="", kind="", os_name="", location="",
+             auto_approve=False):
+    """Record a request. `accepted` stays False unless this install says
+    otherwise.
+
+    `auto_approve` is the DEMO policy and nothing else (2026-08-30). A shared
+    sandbox anyone can enter has no owner to ask, so an approval gate there
+    strands every visitor in front of an unreadable screen waiting for a
+    message nobody will send. It is a config flag rather than something
+    inferred from the account, because "which installs accept strangers" is
+    exactly the question that must be answerable by reading one line.
+
+    The vetoes are untouched: the relay still never approves anything. This is
+    an AGENT deciding its own policy, which is the shape the contract asks for.
+    """
     d = _load()
     row = d.get(device_id) or {}
     row.update({"pubkey": pubkey, "label": label, "type": kind,
                 "os": os_name, "location": location,
                 "first_seen": row.get("first_seen") or time.time(),
                 "last_seen": time.time(),
-                "accepted": bool(row.get("accepted")),
+                "accepted": bool(row.get("accepted")) or bool(auto_approve),
                 "revoked": None})
+    if auto_approve and not row.get("history_shared"):
+        row["history_shared"] = time.time()
+        row["approved_at"] = row.get("approved_at") or time.time()
+        row["auto"] = True
     d[device_id] = row
     _save(d)
     return row
