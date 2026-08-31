@@ -2218,13 +2218,24 @@ class Handler(BaseHTTPRequestHandler):
             _id = str(d.get("device_id") or "")[:32]
             if kind == "device_revoke":
                 return self._send(200, {"revoked": bool(_dev.revoke(_id))})
+            # A SANDBOX HAS NO OWNER TO ASK. `auto_approve_devices` is off
+            # unless an install sets it, and the demo sets it: long-press the
+            # guide button, type the password, and you are a stranger with no
+            # one to approve you — a gate there is a locked door with nobody
+            # behind it. Real installs are unchanged, and the relay still
+            # approves nothing either way.
+            _auto = bool(config().get("auto_approve_devices"))
             _dev.register(_id, str(d.get("pubkey") or "")[:200],
                           str(d.get("label") or "")[:60],
                           str(d.get("type_") or "")[:24],
                           str(d.get("os") or "")[:40],
-                          str(d.get("location") or "")[:60])
+                          str(d.get("location") or "")[:60],
+                          auto_approve=_auto)
             ok = _id in _dev.accepted_ids()
-            if not ok:
+            if _auto:
+                self.log_message("device %s auto-approved (sandbox install): "
+                                 "%s", _id, d.get("label") or "unnamed")
+            if not ok and not _auto:
                 try:                       # tell the owner, in his own chat
                     # AND IN TELEGRAM, not only the transcript (#355). A device
                     # asking to read everything is what someone must see when
