@@ -45,13 +45,46 @@ def _save(d):
     STATE.write_text(json.dumps(d, indent=2) + "\n")
 
 
-def unanswered(db_path, quiet_seconds):
-    """The newest message is inbound and has been sitting there. Returns the text
-    of the message nobody answered, or None."""
+def telegram_chats(C):
+    """The chat ids the Telegram gateway itself serves. chatlog/chat.db is shared
+    with the voice app, which archives each app session under a synthetic chat id
+    of its own — so "newest row is inbound" over the whole table answers a question
+    this watchdog was not asked: it reports the app's conversations as a broken
+    Telegram bot, and points at logs/gateway.log where there is nothing to find
+    (the owner, 2026-08-15, after an hourly alert about an app message)."""
+    ids = set()
+    for attr in ("OWNER_ID", "SECOND_OWNER_ID"):
+        val = getattr(C, attr, 0)
+        if val:
+            ids.add(int(val))
+    for attr in ("ALWAYS_CLAUDE_CHATS", "ALWAYS_NEMOTRON_CHATS", "VOICE_CHATS", "QR_CHATS"):
+        ids.update(int(x) for x in (getattr(C, attr, None) or ()))
+    ids.update(int(x) for x in (getattr(C, "PROJECT_CHATS", None) or {}))
+    allow = getattr(C, "allowlist", None)
+    if callable(allow):
+        try:
+            ids.update(int(x) for x in (allow() or ()))
+        except Exception:
+            pass
+    return ids
+
+
+def unanswered(db_path, quiet_seconds, chat_ids=()):
+    """The newest message in a chat the gateway serves is inbound and has been
+    sitting there. Returns the text of the message nobody answered, or None.
+
+    chat_ids scopes the question to the Telegram channel; an empty set means we
+    could not work out which chats those are, and we say nothing rather than
+    blame the gateway for another channel's silence."""
+    chat_ids = [int(c) for c in chat_ids]
+    if not chat_ids:
+        return None
     try:
         cx = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=3)
-        row = cx.execute("SELECT epoch, direction, text FROM messages "
-                         "ORDER BY epoch DESC LIMIT 1").fetchone()
+        row = cx.execute(
+            "SELECT epoch, direction, text FROM messages "
+            f"WHERE chat_id IN ({','.join('?' * len(chat_ids))}) "
+            "ORDER BY epoch DESC LIMIT 1", chat_ids).fetchone()
         cx.close()
     except sqlite3.Error:
         return None
@@ -59,6 +92,14 @@ def unanswered(db_path, quiet_seconds):
         return None
     epoch, direction, text = row
     if direction != "in":
+        return None
+    # A bracketed line is this archive's convention for a state marker, not
+    # something a person said — "[cleared context — new conversation]" is written
+    # inbound when the voice app clears the thread. Nobody is waiting on an answer
+    # to it, so it is not evidence of a bot ignoring anyone (the owner, 2026-08-16:
+    # an hourly alert quoting exactly that line).
+    body = str(text or "").strip()
+    if body.startswith("[") and body.endswith("]"):
         return None
     if time.time() - float(epoch or 0) < quiet_seconds:
         return None                     # still within a plausible thinking time
@@ -142,7 +183,7 @@ def main():
         return 0
 
     problems = []
-    quiet = unanswered(db, QUIET_MINUTES * 60) if db.exists() else None
+    quiet = unanswered(db, QUIET_MINUTES * 60, telegram_chats(C)) if db.exists() else None
     if quiet:
         problems.append(f"a message has gone unanswered for over {QUIET_MINUTES} "
                         f"minutes: _{quiet}_")
