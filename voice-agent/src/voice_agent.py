@@ -2124,7 +2124,7 @@ def _peers_path():
 def push_preview_envelope(account, text):
     """The sealed banner preview: {"from": ..., "text": ...}, or None.
 
-    #370 (Maclaude). A push carried a sealed preview only for the MESSAGE
+    A push carried a sealed preview only for the MESSAGE
     family, and only ever as a bare string — so the family he actually sees,
     the answer to his own question, showed "Your agent has replied." forever,
     and even the message banner could not name who was speaking.
