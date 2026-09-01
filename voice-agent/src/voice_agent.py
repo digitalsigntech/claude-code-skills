@@ -2121,6 +2121,39 @@ def _peers_path():
     return HERE / PEERS_FILE
 
 
+def push_preview_envelope(account, text):
+    """The sealed banner preview: {"from": ..., "text": ...}, or None.
+
+    #370 (Maclaude). A push carried a sealed preview only for the MESSAGE
+    family, and only ever as a bare string — so the family he actually sees,
+    the answer to his own question, showed "Your agent has replied." forever,
+    and even the message banner could not name who was speaking.
+
+    THE NAME GOES INSIDE THE SEAL. It is as private as the words: a plaintext
+    `from` beside `aps` hands it to Apple and to anyone reading a plane log,
+    which is the rule #271 set for `account` and this is one level stricter.
+
+    Wrapped for every approved device when there is more than one, so a second
+    phone's banner is not blank for the reason its conversation used to be.
+    """
+    if not e2ee_locked(account):
+        return None
+    body = " ".join(str(text or "").split())[:300]
+    if not body:
+        return None
+    payload = json.dumps(
+        {"from": branding().get("bot_name") or "agent", "text": body},
+        ensure_ascii=False, separators=(",", ":"))
+    multi = seal_for_devices(payload)
+    if multi:
+        return multi
+    priv, mine = agent_keys()
+    theirs = peer_key(account)
+    if theirs is None:
+        return None
+    return e2ee_seal(payload, priv, mine, theirs, direction=DIR_TO_PHONE)
+
+
 def approved_device_pubkeys():
     """Base64 pubkeys of every device the registry has ACCEPTED and not revoked.
 
@@ -2769,6 +2802,20 @@ class Handler(BaseHTTPRequestHandler):
                         "I could not change that reminder — nothing in the "
                         "store moved, so it is still set as it was. Say the "
                         "new time again and I will try once more.")
+            # #370: THE BANNER FOR THE FAMILY HE ACTUALLY SEES. The plane
+            # fires the answer push and cannot read anything; the preview has
+            # to be sealed here and carried through. A separate key from
+            # `sealed`, because that one is the whole reply and this one is two
+            # lines for a lock screen — and because the app is specified to
+            # distrust readable text beside an envelope, so it may not ride
+            # inside it.
+            try:
+                _prev = push_preview_envelope(account,
+                                              str(res.get("answer") or ""))
+                if _prev:
+                    res["push_preview"] = _prev
+            except Exception as e:
+                self.log_message("push preview skipped: %.80s", e)
             if seal_reply:
                 # Sealed in, sealed out — and the plaintext `answer` is
                 # REMOVED, not left beside it. The app is specified to ignore
@@ -2889,21 +2936,14 @@ def _message_watcher():
             # banner shows two lines and a whole answer in a push is a copy of
             # the conversation living in Apple's queue.
             env = None
-            if e2ee_locked(acct):
-                try:
-                    priv, mine = agent_keys()
-                    theirs = peer_key(acct)
-                    newest_text = str((worth[-1][3] if len(worth[-1]) > 3
-                                       else "") or "")
-                    preview = " ".join(newest_text.split())[:300]
-                    if not preview:
-                        raise ValueError("nothing to preview")
-                    env = e2ee_seal(preview, priv, mine, theirs,
-                                    direction=DIR_TO_PHONE)
-                except Exception as e:
-                    print(f"[voice-agent] preview seal failed for {acct}: {e}",
-                          file=sys.stderr)
-                    env = None
+            try:
+                newest_text = str((worth[-1][3] if len(worth[-1]) > 3
+                                   else "") or "")
+                env = push_preview_envelope(acct, newest_text)
+            except Exception as e:
+                print(f"[voice-agent] preview seal failed for {acct}: {e}",
+                      file=sys.stderr)
+                env = None
             res = _notify_plane(acct, count=len(worth),
                                 **({"sealed": env} if env else {}))
             print(f"[voice-agent] new-message push for {acct}: "
