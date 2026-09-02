@@ -60,11 +60,31 @@ MIN_UNSUPPORTED = 2
 _MULT = {"k": 1e3, "thousand": 1e3, "m": 1e6, "million": 1e6, "mm": 1e6,
          "b": 1e9, "billion": 1e9}
 
+# A DATE IS NOT A QUANTITY, and this cost a false positive nobody would have
+# forgiven (2026-09-02, found from the app's own figure detector being stricter
+# than mine). "Comparing 2025 and 2026 quarter by quarter" parsed as two
+# numbers above the floor, neither of them in the baseline, which is exactly
+# the shape this module announces as an invented table — an innocent sentence,
+# accused in the group, by an alarm built to miss rather than invent.
+#
+# So: nothing glued to a date or time separator, and no bare four-digit year.
+# The cost is a real quantity of exactly 2,026 units going unseen, which is the
+# trade this whole module is written to prefer.
 _NUM = re.compile(
     r"(?<![\w.])"
     r"(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)"
     r"\s*(k|m|mm|b|thousand|million|billion)?\b",
     re.I)
+_DATEY = re.compile(r"[-/:]")
+YEAR_LO, YEAR_HI = 1900, 2100
+
+
+def _is_datey(text, start, end):
+    """Is this number glued to a date or time separator on either side?"""
+    before = text[max(0, start - 1):start]
+    after = text[end:end + 1]
+    return bool((before and _DATEY.match(before))
+                or (after and _DATEY.match(after)))
 
 
 def figures(text):
@@ -73,14 +93,21 @@ def figures(text):
     Thousands separators, currency and magnitude words all collapse here so
     that 6,294,100 / $6.29M / "6.29 million" are one number and not three.
     """
+    text = text or ""
     out = []
-    for raw, suffix in _NUM.findall(text or ""):
+    for m in _NUM.finditer(text):
+        raw, suffix = m.group(1), m.group(2)
         try:
             val = float(raw.replace(",", ""))
         except ValueError:
             continue
         if suffix:
             val *= _MULT[suffix.lower()]
+        elif ("," not in raw and "." not in raw
+              and YEAR_LO <= val <= YEAR_HI):
+            continue                       # a bare year, not a quantity
+        if _is_datey(text, m.start(1), m.end(0)):
+            continue                       # 2026-08-15, 14:00, 2026/0042
         if val >= FLOOR:
             out.append(val)
     return out
@@ -191,6 +218,12 @@ def selftest():
         ("no numbers at all", "I will pull that up for you.", False),
         ("small numbers are not quantities",
          "That covers 6 months across 3 regions.", False),
+        ("two years are not two invented figures",
+         "Comparing 2025 and 2026 quarter by quarter.", False),
+        ("a date beside a real figure does not become one",
+         "Total 6,294,100 as of 2026-08-15 at 14:00.", False),
+        ("a reference number in a date shape is not a quantity",
+         "Invoice 2026/0042 was raised on 2026-08-15.", False),
         ("one invented number alone is arithmetic, not invention",
          "That works out to 512,300.", False),
     ]
