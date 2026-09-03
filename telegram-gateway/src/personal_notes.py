@@ -304,6 +304,14 @@ def search_text(query, limit=4, spoken=False, viewer=None):
         pool = [c for c in candidates if any(hit(t, c[5]) for t in qtoks)]
     try:
         import note_search
+        # A credential question must name its system, not just say "password"
+        # (2026-09-03). The description rule above is satisfied by the word
+        # "password" alone, so "what is my wifi password" and "my router
+        # password" both reached the iPad note — the only password in the store.
+        # Same guard as the business notes; one list, in note_search.
+        if note_search.asks_for_credential(qtoks):
+            pool = [c for c in pool
+                    if note_search.names_the_system(qtoks, c[2], " ".join(c[5]))]
         texts = [f"{c[2]} {' '.join(c[5])} {c[4]}" for c in pool]
         ranked = note_search.rank(query, texts, note_search.VectorCache(VECTORS))
         return [pool[i][:5] for _, i in ranked[:limit]]

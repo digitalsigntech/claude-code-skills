@@ -47,6 +47,81 @@ MAX_CHARS = 500
 FLOOR = 0.58
 # How far the best note must be ahead of the runner-up to count as the answer.
 MARGIN = 0.06
+# Words that say a SECRET is wanted without saying WHICH one (2026-09-03).
+# "What is my wifi password" was answered with a web console's admin password:
+# nothing about wifi is saved, but that console note was the only credential in
+# the store, so it matched uniquely and no ambiguity guard could fire — there
+# was no second candidate to be ambiguous with. Meaning cannot separate these:
+# the true hit "my hotel loyalty id" scores 0.608 and that wrong one 0.606,
+# because the embedder hears "a credential question" in both and cannot hear
+# that one names a network and the other a hotel chain.
+#
+# So a credential question carries one extra requirement, and only a credential
+# question: it must NAME the system. Both note stores ask names_the_system()
+# before reading a secret out, which is also why the list lives here rather than
+# in either of them — the recurring failure in this box has been each store
+# growing its own search and learning nothing from the other's bugs.
+CREDENTIAL_WORDS = {"password", "passcode", "pass", "pin", "login", "logon",
+                    "credential", "credentials", "code", "key", "secret",
+                    "username", "user", "пароль", "код", "логин"}
+
+
+def asks_for_credential(qtoks):
+    return any(t in CREDENTIAL_WORDS for t in qtoks)
+
+
+def _edits(a, b, cap=2):
+    """Levenshtein distance, given up on once it passes `cap`.
+
+    Here to bridge a transliteration, not to spell-check: "айпада" comes out of
+    _translit as "aypad" against a note that says "ipad", and the difference is
+    the transliterator's vowels, not the user's meaning. Meaning cannot do this
+    job — measured on this box, the Russian question scores 0.584 against the
+    right note while "what is my wifi password" scores 0.707 against the wrong
+    one, so no threshold exists that keeps one and drops the other.
+    """
+    if abs(len(a) - len(b)) > cap:
+        return cap + 1
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1,
+                           prev[j - 1] + (ca != cb)))
+        if min(cur) > cap:
+            return cap + 1
+        prev = cur
+    return prev[-1]
+
+
+def names_the_system(qtoks, *haystacks):
+    """True if the question names the thing, not merely the kind of secret.
+
+    Strip the words that only say "a secret is wanted"; at least one of what
+    remains must appear in the note. "wifi" is absent from the console note, so
+    that question gets silence and the model answers instead; "room" is present
+    in the room-code note, "ipad" in the ipad note. A question made only of
+    credential words ("what is the password") names nothing and gets nothing.
+    """
+    named = [t for t in qtoks if t not in CREDENTIAL_WORDS]
+    if not named:
+        return False
+    hay_toks = set()
+    for h in haystacks:
+        for w in _toks(str(h or "")):
+            hay_toks |= _forms(w)
+    for t in named:
+        for f in _forms(t):
+            if any(f == h or (len(f) >= 3 and (f in h or h in f))
+                   for h in hay_toks):
+                return True
+            # A transliterated word is allowed to be spelled a little wrong;
+            # a different word is not. Four characters minimum, so short
+            # tokens cannot collide their way into someone else's secret.
+            if len(f) >= 4 and any(len(h) >= 4 and _edits(f, h) <= 2
+                                   for h in hay_toks):
+                return True
+    return False
 _WORD = re.compile(r"[^\w']+", re.U)
 # Words that carry no topic. Without this "what's the weather" scored a hit on
 # a note about the workshop alarm, on the strength of sharing the word "the".
