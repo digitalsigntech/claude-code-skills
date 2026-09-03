@@ -144,6 +144,11 @@ def lookup(text):
     if len(terms) < 2:                   # one word is a topic, not a name
         return None
     hits = business_notes.search(" ".join(terms), limit=4)
+    # A secret is only read out when the question named the system it belongs
+    # to — see note_search.names_the_system for the morning this was learned.
+    import note_search
+    if note_search.asks_for_credential(terms):
+        hits = [h for h in hits if note_search.names_the_system(terms, h[1])]
     if not hits or len(hits) > 2:        # ambiguous: let the model sort it out
         return None
     if len(hits) == 2:
