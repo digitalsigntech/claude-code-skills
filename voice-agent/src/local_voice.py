@@ -3,6 +3,7 @@
 
     python3 local_voice.py --selftest [clip.wav]   # the real pipeline, timed
     python3 local_voice.py --probe                 # is this install capable?
+    python3 local_voice.py --verify-voices         # does every voice SPEAK?
 
 WHAT THIS IS FOR (#390-#393). A turn arrives as a sealed envelope carrying
 `{"voice": {"format": "aac", "b64": …}, "lang": …}`. This module turns that into
@@ -101,19 +102,133 @@ def preferred_model_name():
     return "ggml-large-v3-turbo-q5_0.bin" if has_gpu() else "ggml-small.bin"
 
 
-def _voice_locales():
-    """The languages the installed Piper voices can speak, as ISO codes."""
-    out = set()
+# A SHORT SENTENCE IN EACH, because "does this voice work" cannot be asked in
+# English. Japanese and Chinese route through their own phonemizers, and those
+# are exactly the two that failed.
+_HELLO = {
+    "en": "Hello.", "fr": "Bonjour.", "es": "Hola.", "de": "Hallo.",
+    "it": "Ciao.", "pt": "Ol\u00e1.", "pl": "Cze\u015b\u0107.",
+    "sv": "Hej.", "nl": "Hallo.", "tr": "Merhaba.",
+    "ru": "\u0417\u0434\u0440\u0430\u0432\u0441\u0442\u0432\u0443\u0439\u0442\u0435.",
+    "uk": "\u0412\u0456\u0442\u0430\u044e.",
+    "zh": "\u4f60\u597d\u3002", "ja": "\u3053\u3093\u306b\u3061\u306f\u3002",
+}
+
+
+def _voice_files():
     d = os.path.dirname(PIPER_VOICE)
     try:
-        names = os.listdir(d)
+        names = sorted(n for n in os.listdir(d) if n.endswith(".onnx"))
     except OSError:
         names = [os.path.basename(PIPER_VOICE)]
+    return d, names
+
+
+def _code_of(name):
+    code = name.split("-", 1)[0].split("_", 1)[0].lower()
+    return code if len(code) == 2 else ""
+
+
+def verify_voices(force=False):
+    """{filename: {ok, err}} — proven by SYNTHESISING one word with each.
+
+    WHY A FILE ON DISK IS NOT A LANGUAGE (2026-09-04, the third time this shape
+    has cost a day). The row said fourteen because fourteen `.onnx` files were
+    installed. Two of them could not speak: Japanese needs `pyopenjtalk` and
+    Chinese needs `g2pW`, neither of which ships with piper, and both failed at
+    the phonemizer with the audio file already opened and empty. Nothing in the
+    count could ever have noticed — it was reading filenames.
+
+    So the count is now the result of running each voice once. Cached against
+    each file's size and mtime, because it costs a few seconds and the answer
+    only changes when the files do.
+    """
+    d, names = _voice_files()
+    cache_path = os.path.join(d, ".spoken.json")
+    try:
+        with open(cache_path) as f:
+            cache = json.load(f)
+    except (OSError, ValueError):
+        cache = {}
+    out, changed = {}, False
     for n in names:
-        if n.endswith(".onnx"):
-            code = n.split("-", 1)[0].split("_", 1)[0].lower()
-            if len(code) == 2:
-                out.add(code)
+        full = os.path.join(d, n)
+        try:
+            st = os.stat(full)
+            stamp = [int(st.st_size), int(st.st_mtime)]
+        except OSError:
+            continue
+        old = cache.get(n)
+        if old and not force and old.get("stamp") == stamp:
+            out[n] = old
+            continue
+        changed = True
+        tmp = tempfile.mkdtemp(prefix="lq-verify-")
+        try:
+            wav = os.path.join(tmp, "v.wav")
+            r = subprocess.run(
+                [PIPER_BIN, "-m", full, "-f", wav],
+                input=_HELLO.get(_code_of(n), "Hello."), text=True,
+                capture_output=True, timeout=120)
+            ok = (r.returncode == 0 and os.path.exists(wav)
+                  and os.path.getsize(wav) > 2000)
+            err = ""
+            if not ok:
+                lines = [x for x in r.stderr.strip().splitlines() if x.strip()]
+                for x in lines:
+                    if "Error" in x or "error" in x:
+                        err = x.strip()[:160]
+                # The LAST line is `wave.Error: # channels not specified` every
+                # time — piper opened the output before it failed. The useful
+                # line is the phonemizer's, further up.
+                if not err and lines:
+                    err = lines[-1][:160]
+        except (OSError, subprocess.SubprocessError) as e:
+            ok, err = False, str(e)[:160]
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        out[n] = {"ok": bool(ok), "err": err, "stamp": stamp}
+    if changed:
+        try:
+            with open(cache_path, "w") as f:
+                json.dump(out, f, indent=1, sort_keys=True)
+        except OSError as e:
+            print(f"[lq] voice check not cached: {e}", file=sys.stderr)
+    return out
+
+
+def _spoken_cache():
+    """The cached verdicts, if they cover today's files. Never synthesises."""
+    d, names = _voice_files()
+    try:
+        with open(os.path.join(d, ".spoken.json")) as f:
+            cache = json.load(f)
+    except (OSError, ValueError):
+        return None
+    for n in names:
+        entry = cache.get(n)
+        try:
+            st = os.stat(os.path.join(d, n))
+        except OSError:
+            continue
+        if not entry or entry.get("stamp") != [int(st.st_size),
+                                               int(st.st_mtime)]:
+            return None      # stale: a voice was added or replaced
+    return cache
+
+
+def _voice_locales(verified_only=True):
+    """The languages the installed Piper voices can speak, as ISO codes."""
+    d, names = _voice_files()
+    cache = _spoken_cache() if verified_only else None
+    out = set()
+    for n in names:
+        code = _code_of(n)
+        if not code:
+            continue
+        if cache is not None and not (cache.get(n) or {}).get("ok"):
+            continue
+        out.add(code)
     return out
 
 
@@ -143,10 +258,15 @@ def languages():
     # voices can do that. Reporting the 99 alone would be the borrowed-number
     # mistake again, one tier along: true of half the pipeline and false of the
     # thing the user experiences.
+    proven = _spoken_cache() is not None
     why = (f"{os.path.basename(WHISPER_MODEL)} understands up to "
            f"{WHISPER_MULTILINGUAL_LANGS} languages; a turn also needs a voice "
            f"to answer in, and {len(codes)} "
-           f"{'is' if len(codes) == 1 else 'are'} installed")
+           f"{'is' if len(codes) == 1 else 'are'} "
+           # INSTALLED IS NOT SPOKEN. Two of the fourteen were installed and
+           # mute, so the word in the published reason now says which claim
+           # this number is: one that was run, or one that was listed.
+           + ("proven to speak" if proven else "installed but unverified"))
     return len(codes), codes, why
 
 
@@ -229,8 +349,80 @@ def speech_text(raw):
     return t if len(t) >= MIN_SPEECH_CHARS else ""
 
 
-def voice_for(lang):
-    """The installed voice for a language code, or the configured default.
+# THE ROSTER: which named speaker is which file, per language (#417).
+#
+# `anna` is not a file. It is a ROLE the user picked once, and every language
+# fills it with a different model — because Piper's inventory is uneven and the
+# person who chose "anna" in English should not lose their voice by asking a
+# question in German. So the app sends an id, and this map, not the code,
+# decides what speaks.
+#
+# It lives on disk beside the voices for the same reason the language count
+# does: a roster in the source is a second copy of the truth, and the copies
+# drift. Absent the file, behaviour is exactly what it was — one voice per
+# language, picked by prefix.
+ROSTER = os.environ.get("LQ_ROSTER", "")
+
+
+def _roster():
+    """{lang: {speaker_id: {"file", "speaker"?, "gender"?}}} — or {} if none."""
+    path = ROSTER or os.path.join(os.path.dirname(PIPER_VOICE), "roster.json")
+    try:
+        with open(path) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def speakers_for(lang):
+    """The ids offerable in a language, in roster order. [] when unrostered.
+
+    OFFERABLE MEANS INSTALLED. The roster is the catalogue, not the inventory:
+    it names a file for every language, and an install that fetched five voices
+    has five. Listing an id whose file is absent puts a row in the picker that
+    plays the wrong voice — the same shape as advertising fourteen languages
+    and answering all of them in English.
+    """
+    code = (lang or "").strip().lower()[:2]
+    r = _roster().get(code) or {}
+    d = os.path.dirname(PIPER_VOICE)
+    cache = _spoken_cache()
+    out = []
+    for vid, entry in r.items():
+        f = entry.get("file", "")
+        f = f if os.path.isabs(f) else os.path.join(d, f)
+        if not os.path.exists(f):
+            continue
+        # ...and mute is not installed either, which is how Japanese got counted.
+        if cache is not None and not (cache.get(os.path.basename(f))
+                                      or {}).get("ok"):
+            continue
+        out.append(vid)
+    return out
+
+
+def voices():
+    """{"ids": [...], "by_lang": {lang: [ids]}} — what this install can offer.
+
+    The app's picker shows `ids`; `by_lang` is what stops it offering `maria` in
+    Turkish, where Piper's entire inventory is one male voice.
+    """
+    by_lang = {}
+    for code in sorted(_roster()):
+        if code.startswith("_"):
+            continue
+        ids = speakers_for(code)
+        if ids:
+            by_lang[code] = ids
+    order = ["anna", "maria", "tom", "leo"]
+    seen = {v for ids in by_lang.values() for v in ids}
+    ids = [v for v in order if v in seen] + sorted(seen - set(order))
+    return {"ids": ids, "by_lang": by_lang}
+
+
+def voice_for(lang, speaker=None):
+    """(onnx_path, speaker_index) for a language and an optional named speaker.
 
     Fourteen voices on disk and one hard-coded path is a tier that ADVERTISES
     fourteen languages and answers every one of them in English — which is what
@@ -238,21 +430,43 @@ def voice_for(lang):
     read the same directory.
     """
     code = (lang or "").strip().lower()[:2]
+    d = os.path.dirname(PIPER_VOICE)
+    who = (speaker or "").strip().lower()
+    if code and who:
+        entry = (_roster().get(code) or {}).get(who)
+        if entry and entry.get("file"):
+            f = entry["file"]
+            f = f if os.path.isabs(f) else os.path.join(d, f)
+            if os.path.exists(f):
+                return f, entry.get("speaker")
+            # A ROSTERED VOICE THAT IS NOT INSTALLED IS A BROKEN PROMISE, and a
+            # silent fallback to another voice is the same bug as answering
+            # Russian in English. Say so, then fall back audibly in the log.
+            print(f"[lq] rostered voice missing: {who}/{code} -> {f}",
+                  file=sys.stderr)
     if not code:
-        return PIPER_VOICE
+        return PIPER_VOICE, None
     # The configured voice wins for its own language, so installing en_GB
     # alongside en_US does not silently re-cast the English one.
     if os.path.basename(PIPER_VOICE).lower().startswith(code + "_"):
-        return PIPER_VOICE
-    d = os.path.dirname(PIPER_VOICE)
+        return PIPER_VOICE, None
+    # An unnamed turn in a rostered language still gets the roster's first
+    # voice, so the default and the picker's top entry are the same voice.
+    first = (_roster().get(code) or {})
+    for entry in first.values():
+        f = entry.get("file", "")
+        f = f if os.path.isabs(f) else os.path.join(d, f)
+        if os.path.exists(f):
+            return f, entry.get("speaker")
+        break
     try:
         names = sorted(n for n in os.listdir(d) if n.endswith(".onnx"))
     except OSError:
-        return PIPER_VOICE
+        return PIPER_VOICE, None
     for n in names:
         if n.lower().startswith(code + "_"):
-            return os.path.join(d, n)
-    return PIPER_VOICE
+            return os.path.join(d, n), None
+    return PIPER_VOICE, None
 
 
 def transcribe(audio_bytes, suffix=".m4a", lang=None):
@@ -314,12 +528,19 @@ REPLY_FORMAT = os.environ.get("LQ_REPLY_FORMAT", "aac")
 REPLY_BITRATE = os.environ.get("LQ_REPLY_BITRATE", "32k")
 
 
-def speak(text, lang=None):
+def speak(text, lang=None, speaker=None):
     """(audio_bytes, seconds, format) — spoken, then compressed for the wire."""
     d = tempfile.mkdtemp(prefix="lq-")
     try:
         wav = os.path.join(d, "out.wav")
-        subprocess.run([PIPER_BIN, "-m", voice_for(lang), "-f", wav],
+        model, sid = voice_for(lang, speaker)
+        cmd = [PIPER_BIN, "-m", model, "-f", wav]
+        if sid is not None:
+            # A multi-speaker model is ONE file holding several people; without
+            # -s it is always speaker 0, which would make two rostered ids the
+            # same voice and nobody would hear the difference as a bug.
+            cmd += ["-s", str(sid)]
+        subprocess.run(cmd,
                        input=text, capture_output=True, text=True,
                        check=True, timeout=600)
         seconds = _duration(wav)
@@ -409,6 +630,7 @@ def turn(payload, answer_fn, on_transcript=None):
     t0 = time.time()
     ts = time.time()
     lang = str((payload or {}).get("lang") or "").strip().lower()[:5]
+    speaker = str((payload or {}).get("speaker") or "").strip().lower()[:32]
     heard, secs_in, peak, heard_lang = transcribe(
         base64.b64decode(b64), suffix, lang)
     user_text = speech_text(heard)
@@ -438,7 +660,7 @@ def turn(payload, answer_fn, on_transcript=None):
     # voice, and the voice is no longer reading the thing on screen.
     spoken_line = speech_for(answer or "")
     audio, secs_out, out_fmt = speak(spoken_line or answer or "",
-                                     lang or heard_lang)
+                                     lang or heard_lang, speaker)
     return {
         "text": answer,
         **({"speech": spoken_line} if spoken_line else {}),
@@ -448,6 +670,10 @@ def turn(payload, answer_fn, on_transcript=None):
         # which voice you are hearing, and it is how a caller can tell that a
         # language it asked for was not one this install can answer in.
         **({"lang": lang or heard_lang} if (lang or heard_lang) else {}),
+        # The voice that actually spoke, which is not always the one asked for:
+        # an id this install has no file for falls back, and the app should be
+        # able to see that rather than infer it from the sound.
+        **({"speaker": speaker} if speaker else {}),
         "voice": {"format": out_fmt, "b64": base64.b64encode(audio).decode()},
         # Beside the envelope, in the clear, because the meter cannot read the
         # envelope. Rounded to milliseconds: a bill does not need more and a
@@ -497,6 +723,18 @@ def main():
         ok, missing = probe()
         print(json.dumps({"voice_local": ok, "missing": missing}, indent=1))
         return 0 if ok else 1
+    if args and args[0] == "--verify-voices":
+        res = verify_voices(force="--force" in args)
+        bad = 0
+        for n in sorted(res):
+            ok = res[n]["ok"]
+            bad += not ok
+            print(("ok   " if ok else "MUTE "), f"{n:<38}",
+                  "" if ok else res[n]["err"])
+        n_lang, codes, why = languages()
+        print(f"\n{len(res)} voices, {bad} mute -> {n_lang} languages: "
+              f"{' '.join(codes)}")
+        return 1 if bad else 0
     if args and args[0] == "--selftest":
         return selftest(args[1] if len(args) > 1 else None)
     sys.exit(__doc__.strip())

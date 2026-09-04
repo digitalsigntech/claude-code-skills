@@ -2565,7 +2565,14 @@ class Handler(BaseHTTPRequestHandler):
                         # whole turn can be had in. Both are true and they are
                         # not the same number.
                         "understands": local_voice.understands(),
-                        "model": os.path.basename(local_voice.WHISPER_MODEL)}
+                        "model": os.path.basename(local_voice.WHISPER_MODEL),
+                        # THE NAMED VOICES THIS INSTALL HAS, per language.
+                        # `ids` is the picker's list; `by_lang` is what keeps
+                        # it from offering a voice in a language where the
+                        # engine has none — Turkish is one male voice in the
+                        # whole of Piper, and a picker showing four there
+                        # would play three lies.
+                        **local_voice.voices()}
             except Exception as e:
                 self.log_message("local language count skipped: %.80s", e)
             return self._send(200, body)
