@@ -209,7 +209,7 @@ def selftest(clip=None):
         print("  missing:", m)
     if not ok:
         return 1
-    clip = clip or os.path.expanduser("~/DST/voice/test_en.wav")
+    clip = clip or os.path.join(HERE, "test_en.wav")
     if not os.path.exists(clip):
         print("no clip to test with:", clip)
         return 1
