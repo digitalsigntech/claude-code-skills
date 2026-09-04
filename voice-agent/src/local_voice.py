@@ -700,6 +700,13 @@ def transcribe(audio_bytes, suffix=".m4a", lang=None, hint=""):
 # looked at the number. The reply is compressed.
 REPLY_FORMAT = os.environ.get("LQ_REPLY_FORMAT", "aac")
 REPLY_BITRATE = os.environ.get("LQ_REPLY_BITRATE", "32k")
+# EMPTY MEANS PIPER'S OWN RATE, which is what #448 fixed and what should stay.
+# Set LQ_REPLY_RATE=16000 to resample deliberately — asked for as an A/B when
+# the phone's in-session playback was the leading suspect for the gibberish.
+# It stays available because "is it the rate" should be answerable by flipping
+# one variable rather than by argument, even though #484 found the cause
+# elsewhere.
+REPLY_RATE = os.environ.get("LQ_REPLY_RATE", "").strip()
 
 
 # NOBODY SPEAKS FASTER THAN THIS. Above roughly forty characters a second the
@@ -787,7 +794,7 @@ def speak(text, lang=None, speaker=None):
                                 wav], check=True, timeout=120)
         seconds = _duration(wav)
         with wave.open(wav) as _w:
-            rate = _w.getframerate()
+            rate = int(REPLY_RATE) if REPLY_RATE else _w.getframerate()
         # A VOICE THAT READ ALMOST NONE OF IT GETS ONE SECOND CHANCE. This
         # happens when the answer is in a different script from the voice —
         # the agent replying in English to a Ukrainian question — and the user
@@ -818,6 +825,7 @@ def speak(text, lang=None, speaker=None):
         # reported, and it was measurable the moment anyone put the two files
         # side by side (2026-09-04).
         subprocess.run([FFMPEG, "-v", "error", "-y", "-i", wav, "-ac", "1",
+                        *(["-ar", REPLY_RATE] if REPLY_RATE else []),
                         *codec, "-b:a", REPLY_BITRATE, enc],
                        check=True, timeout=120)
         with open(enc, "rb") as f:
