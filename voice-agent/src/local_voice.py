@@ -715,6 +715,9 @@ REPLY_RATE = os.environ.get("LQ_REPLY_RATE", "").strip()
 # produced 2.91s, and the failure is silence rather than an accent. Normal
 # speech, in every language here, sits near twelve to eighteen.
 MAX_CHARS_PER_SECOND = float(os.environ.get("LQ_MAX_CPS", "40"))
+# Above this it is not speech any more, it is a voice hurrying. Ordinary speech
+# in every language here measured 9.6 to 18.9 characters a second.
+RUSHED_CPS = float(os.environ.get("LQ_RUSHED_CPS", "22"))
 
 
 # LONG INPUT IS SPOKEN IN PIECES, because one voice rushes it otherwise.
@@ -795,6 +798,18 @@ def speak(text, lang=None, speaker=None):
         seconds = _duration(wav)
         with wave.open(wav) as _w:
             rate = int(REPLY_RATE) if REPLY_RATE else _w.getframerate()
+        # RUSHED IS NOT MUTE, AND IT HAS ITS OWN NUMBER. The gibberish of
+        # 2026-09-04 was a voice speaking 27 characters a second where ordinary
+        # speech runs 12 to 18 — audible, wrong, and invisible to every check
+        # here because something WAS produced. The rate was the tell in every
+        # experiment that found it, so it is now watched rather than
+        # rediscovered. Logged only: the phrase splitting is the cure, and a
+        # second guess at the voice would be a worse turn than a fast one.
+        if (text.strip() and seconds > 0
+                and MAX_CHARS_PER_SECOND > len(text) / seconds > RUSHED_CPS):
+            print(f"[lq] {os.path.basename(model)} spoke {len(text)} chars in "
+                  f"{seconds:.1f}s — {len(text) / seconds:.0f} a second, which "
+                  f"is faster than speech", file=sys.stderr)
         # A VOICE THAT READ ALMOST NONE OF IT GETS ONE SECOND CHANCE. This
         # happens when the answer is in a different script from the voice —
         # the agent replying in English to a Ukrainian question — and the user
