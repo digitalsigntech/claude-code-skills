@@ -322,6 +322,7 @@ def _duration(wav_path):
         return w.getnframes() / float(w.getframerate())
 
 
+
 # SILENCE DOES NOT COME BACK AS A MARKER. It was supposed to: whisper emits
 # [BLANK_AUDIO] and friends, and filtering those was the whole plan. Then I fed
 # it two seconds of literal digital zero and it returned the word "you" —
@@ -687,7 +688,13 @@ MAX_CHARS_PER_SECOND = float(os.environ.get("LQ_MAX_CPS", "40"))
 
 
 def speak(text, lang=None, speaker=None):
-    """(audio_bytes, seconds, format) — spoken, then compressed for the wire."""
+    """(audio_bytes, seconds, format, sample_rate) — spoken, then compressed.
+
+    THE RATE IS RETURNED because it took a side-by-side ffprobe of two files to
+    discover that replies were resampled to 16 kHz while the greeting clips kept
+    Piper's 22.05 kHz (#448). The parameter was in nobody's log, so "the replies
+    sound worse than the samples" had nothing to check itself against.
+    """
     d = tempfile.mkdtemp(prefix="lq-")
     try:
         wav = os.path.join(d, "out.wav")
@@ -702,6 +709,8 @@ def speak(text, lang=None, speaker=None):
                        input=text, capture_output=True, text=True,
                        check=True, timeout=600)
         seconds = _duration(wav)
+        with wave.open(wav) as _w:
+            rate = _w.getframerate()
         # A VOICE THAT READ ALMOST NONE OF IT GETS ONE SECOND CHANCE. This
         # happens when the answer is in a different script from the voice —
         # the agent replying in English to a Ukrainian question — and the user
@@ -719,7 +728,7 @@ def speak(text, lang=None, speaker=None):
             seconds = _duration(wav)
         if REPLY_FORMAT == "wav":
             with open(wav, "rb") as f:
-                return f.read(), seconds, "wav"
+                return f.read(), seconds, "wav", rate
         ext = {"aac": ".m4a", "opus": ".ogg"}.get(REPLY_FORMAT, ".m4a")
         codec = {"aac": ["-c:a", "aac"],
                  "opus": ["-c:a", "libopus"]}.get(REPLY_FORMAT, ["-c:a", "aac"])
@@ -737,7 +746,7 @@ def speak(text, lang=None, speaker=None):
         with open(enc, "rb") as f:
             # THE DURATION COMES FROM THE WAV, not the encoded file: the meter
             # must not move because someone changed a bitrate.
-            return f.read(), seconds, REPLY_FORMAT
+            return f.read(), seconds, REPLY_FORMAT, rate
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
@@ -881,8 +890,8 @@ def turn(payload, answer_fn, on_transcript=None, account=None):
     # RAW — so "**Total** 226,220" kept its asterisks and the voice read them.
     # The cleaning belongs at the point of speaking, which is the only place
     # every path passes through.
-    audio, secs_out, out_fmt = speak(_speakable(spoken_line or answer or ""),
-                                     lang or heard_lang, speaker)
+    audio, secs_out, out_fmt, out_rate = speak(
+        _speakable(spoken_line or answer or ""), lang or heard_lang, speaker)
     return {
         "text": answer,
         **({"speech": spoken_line} if spoken_line else {}),
@@ -913,6 +922,9 @@ def turn(payload, answer_fn, on_transcript=None, account=None):
         # marker, so no filter here catches it; this at least makes it
         # IDENTIFIABLE in the log the first time someone reports a phantom.
         "peak_dbfs": (None if peak == float("-inf") else round(peak, 1)),
+        # What the reply is, in the clear, so a complaint about how it sounds
+        # has something to check itself against.
+        "reply_format": f"{out_fmt} {out_rate} Hz {REPLY_BITRATE}",
         "timing": {"stt_s": round(t_stt, 2),
                    "think_s": round(t1 - t0 - t_stt, 2),
                    "tts_s": round(time.time() - t1, 2)},
