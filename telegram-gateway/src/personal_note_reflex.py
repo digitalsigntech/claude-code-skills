@@ -229,7 +229,15 @@ def save_text(body, chat_id=None, viewer=None):
     that is "only accessible to the User who created them" has to record who
     that was at the moment of writing, not infer it later."""
     import personal_notes
-    if chat_id is not None and not personal_notes.allowed_chat(chat_id, viewer=viewer):
+    # AN UNKNOWN CALLER WRITES NOTHING (2026-09-04). A hosted account whose
+    # name matched nobody in the registry arrived here with chat_id=None,
+    # skipped the gate below, and add_text() filed its sentence under the
+    # store's default owner — a stranger's words in the owner's private notes.
+    # The read gate in lookup() already refuses chat_id=None; the write gate
+    # now does the same, so the two answer the same question the same way.
+    if chat_id is None:
+        return None, None
+    if not personal_notes.allowed_chat(chat_id, viewer=viewer):
         return None, None                # never write into a store from
     note_id, _ = personal_notes.add_text(body, owner=viewer)   # someone else's chat
     if not note_id:
