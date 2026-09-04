@@ -61,12 +61,29 @@ def register(device_id, pubkey, label="", kind="", os_name="", location="",
     """
     d = _load()
     row = d.get(device_id) or {}
+    # A NEW KEY ON A KNOWN ID IS A NEW DEVICE (2026-09-04). Carrying `accepted` forward
+    # across a CHANGED pubkey would make re-registration a way to launder a
+    # substituted key past the approval gate: present the id of a device the
+    # owner once approved, hand over a different key, inherit the tick. The id
+    # is a label the client chooses; the key is the thing that reads mail.
+    #
+    # So the approval belongs to the KEY. A device that re-generates its own
+    # key — a restore from a backup without the Keychain, which the E2EE doc
+    # names as the case that must be recoverable without support — asks again
+    # and is announced again, which costs one tap and closes the hole.
+    rekeyed = bool(row.get("pubkey")) and row.get("pubkey") != pubkey
     row.update({"pubkey": pubkey, "label": label, "type": kind,
                 "os": os_name, "location": location,
                 "first_seen": row.get("first_seen") or time.time(),
                 "last_seen": time.time(),
-                "accepted": bool(row.get("accepted")) or bool(auto_approve),
+                "accepted": (bool(auto_approve) if rekeyed
+                             else bool(row.get("accepted")) or bool(auto_approve)),
+                **({"rekeyed_at": time.time()} if rekeyed else {}),
                 "revoked": None})
+    if rekeyed and not auto_approve:
+        # History was shared with the OLD key. The new one starts again.
+        row.pop("history_shared", None)
+        row.pop("approved_at", None)
     if auto_approve and not row.get("history_shared"):
         row["history_shared"] = time.time()
         row["approved_at"] = row.get("approved_at") or time.time()
