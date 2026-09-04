@@ -797,7 +797,19 @@ _PER_UNITS = {"h", "hr", "hrs", "hour", "hours", "min", "mins", "minute",
               "days", "week", "weeks", "month", "months", "year", "years",
               "km", "mi", "kg", "lb", "lbs", "ft", "sqft", "unit", "units",
               "page", "pages", "sheet", "sheets"}
-_CODE = re.compile(r"\b([A-Za-z]{2,5})-(\d[\d-]*)\b")
+# TWO OR THREE CAPITALS, not any word with a number after it. The first
+# version took 2-5 letters and turned COVID-19 into "C O V I D, 1 9".
+_CODE = re.compile(r"\b([A-Z]{2,3})-(\d[\d-]*)\b")
+# LEAVE THESE ALONE ENTIRELY. A URL, a path and an address are full of the
+# very characters every rule below claims, and none of them mean what the rule
+# thinks: "spacerigs.io/bavaria/" came out as "spacerigs.io or bavaria or".
+# Masked before the rules run and restored after, which is the only way a rule
+# cannot reach inside them by accident.
+_OPAQUE = re.compile(r"(?:https?://\S+|www\.\S+|\S+@\S+\.\S+"
+                     r"|/[\w.-]+(?:/[\w.-]+)+/?|\b[\w-]+\.[a-z]{2,}/\S*)")
+_FRACTION = {"1/2": "one half", "1/3": "one third", "2/3": "two thirds",
+             "1/4": "one quarter", "3/4": "three quarters"}
+_NUM_SLASH = re.compile(r"(?<![\w/])(\d+)\s*/\s*(\d+)(?![\w/])")
 _ABBR = re.compile(r"\b([A-Za-z]{3,5})\.?(?=\b)")
 _RANGE_WORD = re.compile(r"\b(" + "|".join(sorted(
     set(list(_DAYS.values()) + list(_MONTHS.values())))) +
@@ -826,6 +838,17 @@ def _say_slash(m, text):
 def say_text(text):
     """Turn what is written for the eye into what a voice can read aloud."""
     t = _MD_NOISE.sub(" ", text or "")
+    # Park the things no rule should touch, and put them back at the end.
+    kept = []
+
+    def _park(m):
+        kept.append(m.group(0))
+        return f"\x00{len(kept) - 1}\x00"
+    t = _OPAQUE.sub(_park, t)
+    t = re.sub(r"\b24\s*/\s*7\b", "twenty-four seven", t)
+    t = _NUM_SLASH.sub(
+        lambda m: _FRACTION.get(f"{m.group(1)}/{m.group(2)}",
+                                f"{m.group(1)} over {m.group(2)}"), t)
     # Codes first: they contain hyphens and digits that every later rule would
     # otherwise claim as a range or a quantity.
     t = _CODE.sub(lambda m: _spell(m.group(0)), t)
@@ -871,6 +894,7 @@ def say_text(text):
             return f"{h - 12}:{mi} PM"
         return m.group(0)
     t = _TIME24.sub(_time, t)
+    t = re.sub(r"\x00(\d+)\x00", lambda m: kept[int(m.group(1))], t)
     return " ".join(t.split())
 
 
