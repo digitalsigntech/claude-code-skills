@@ -724,8 +724,15 @@ def speak(text, lang=None, speaker=None):
         codec = {"aac": ["-c:a", "aac"],
                  "opus": ["-c:a", "libopus"]}.get(REPLY_FORMAT, ["-c:a", "aac"])
         enc = os.path.join(d, "out" + ext)
+        # PIPER'S OWN RATE, NOT THE RECOGNISER'S. This resampled every reply
+        # to 16 kHz — the rate whisper wants on the way IN, applied by habit on
+        # the way OUT — while the greeting clips on the plane kept Piper's
+        # native 22.05 kHz. Same voice, same 32 kbps, half the top of the band:
+        # which is exactly the "replies sound worse than the samples" the owner
+        # reported, and it was measurable the moment anyone put the two files
+        # side by side (2026-09-04).
         subprocess.run([FFMPEG, "-v", "error", "-y", "-i", wav, "-ac", "1",
-                        "-ar", "16000", *codec, "-b:a", REPLY_BITRATE, enc],
+                        *codec, "-b:a", REPLY_BITRATE, enc],
                        check=True, timeout=120)
         with open(enc, "rb") as f:
             # THE DURATION COMES FROM THE WAV, not the encoded file: the meter
@@ -869,7 +876,12 @@ def turn(payload, answer_fn, on_transcript=None, account=None):
     # app can mute the karaoke when the two differ — the highlight follows the
     # voice, and the voice is no longer reading the thing on screen.
     spoken_line = speech_for(answer or "")
-    audio, secs_out, out_fmt = speak(spoken_line or answer or "",
+    # STRIPPED WHETHER OR NOT IT WAS SUMMARISED. `speech_for()` cleans the
+    # line it builds, but a short answer returns "" from it and went to Piper
+    # RAW — so "**Total** 226,220" kept its asterisks and the voice read them.
+    # The cleaning belongs at the point of speaking, which is the only place
+    # every path passes through.
+    audio, secs_out, out_fmt = speak(_speakable(spoken_line or answer or ""),
                                      lang or heard_lang, speaker)
     return {
         "text": answer,
