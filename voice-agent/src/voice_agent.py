@@ -1035,6 +1035,22 @@ _SETTING_NOUN = re.compile(
 
 
 
+# SPOKEN ALOUD, AND THE MODEL DECIDES WHEN THAT MEANS ALL OF IT.
+#
+# The owner's rule (2026-09-04): the spoken cap stays for ordinary conversation
+# and lifts when the person asked to HEAR something in full — "read me the
+# email", "read the whole thing". Deliberately not a phrase list: the model has
+# the question in front of it and a list would be wrong the first time somebody
+# said it differently, in any of fourteen languages.
+VOICE_CONTEXT = (
+    "\n\nThis answer will be SPOKEN ALOUD as well as shown. Long answers are "
+    "summarised for the ear by default, with the detail left on the screen. If "
+    "the person asked to HEAR something in full — to read them a message, or "
+    "the whole of something — put `[read-in-full]` on its own first line and "
+    "the whole answer will be spoken. Use it only for that; it is not for "
+    "answers that merely happen to be long.")
+
+
 def time_context(tz):
     """The caller's clock, stated for the turn.
 
@@ -2446,7 +2462,7 @@ class Handler(BaseHTTPRequestHandler):
                 # agent racing itself.
                 res = ask(account, text, name, archive_question=False,
                           archive_turn=keep,
-                          context=time_context(d.get("tz")))
+                          context=time_context(d.get("tz")) + VOICE_CONTEXT)
                 return str(res.get("answer") or "")
 
             out = local_voice.turn(payload, answer_fn,
