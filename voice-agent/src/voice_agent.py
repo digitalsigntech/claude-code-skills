@@ -1207,6 +1207,27 @@ def ask(account, question, account_name="", archive_question=True,
     prompt = question
     cmd = [exe, "-p", prompt, "--dangerously-skip-permissions"]
     sysbits = []
+    # THE INSTALL'S OWN PERSONA, ON THIS PATH TOO (2026-09-04). Asked "how are
+    # you, Max" through a sealed ask, the agent answered "I am your Summit
+    # Label assistant (not sure where Max came from)" — a correct and honest
+    # answer from a model that had never been told the name. It reached the
+    # VOICE model, which is minted with these instructions, and never the AGENT
+    # model, which is the CLI and reads only CLAUDE.md.
+    #
+    # So the file that says who this install is now travels on the ask path as
+    # well. It is the same file `branding()` describes to the app, which is the
+    # point: the name on the screen and the name the answer uses have to come
+    # from one place or they will disagree, and the user meets the disagreement
+    # before either of us does.
+    persona = os.path.join(workdir, "agent-system-prompt.md")
+    try:
+        if os.path.isfile(persona):
+            with open(persona) as f:
+                text = f.read().strip()
+            if text:
+                sysbits.append(text)
+    except OSError as e:
+        print(f"[voice-agent] persona not read: {e}", file=sys.stderr)
     if account_name:
         sysbits.append(f"This turn comes from {account_name} through the voice "
                        f"app. It is them speaking, not a system message.")
