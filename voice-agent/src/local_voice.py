@@ -72,6 +72,15 @@ WHISPER_DETECT_MODEL = os.environ.get(
 # `auto`. Base's worst CORRECT answer was 0.97 and tiny's wrong one was 0.61,
 # so this sits in the gap the measurement left rather than a round number.
 DETECT_MIN_P = float(os.environ.get("LQ_DETECT_MIN_P", "0.85"))
+# ENGLISH GETS THE ENGLISH MODEL, on CPU-only agents (2026-09-04).
+# `small.en` spends its whole vocabulary on one language, so it is both faster
+# and better at it — but ONLY for a turn we already know is English. It is an
+# optimisation hanging off the multilingual model, never a replacement for it:
+# the tier's language count still comes from WHISPER_MODEL, because a machine
+# that also has small.en installed did not become English-only.
+WHISPER_MODEL_EN = os.environ.get(
+    "LQ_WHISPER_MODEL_EN",
+    os.path.join(os.path.dirname(WHISPER_MODEL), "ggml-small.en.bin"))
 FFMPEG = os.environ.get("LQ_FFMPEG", "ffmpeg")
 
 # A turn is one push of a button. Longer than this is not a question, it is an
@@ -117,6 +126,11 @@ def preferred_model_name():
     and the English-only model was never a decision — it was the smallest thing
     that made the first turn work. An agent with an accelerator gets the
     99-language `large-v3-turbo`.
+
+    This is the PRIMARY model, the one the language count is read from. A
+    CPU-only agent also keeps `small.en` beside it and `model_for()` reaches for
+    it on a turn already known to be English — an optimisation for one language,
+    not a change of tier.
     """
     return "ggml-large-v3-turbo-q5_0.bin" if has_gpu() else "ggml-small.bin"
 
@@ -499,6 +513,21 @@ def voice_for(lang, speaker=None):
     return PIPER_VOICE, None
 
 
+def model_for(code):
+    """The recogniser for a turn in this language.
+
+    English on a CPU-only agent gets `small.en`; everything else, and every
+    accelerated agent, gets the model this install was configured with. A GPU
+    agent runs large-v3-turbo, which beats small.en at English too, so swapping
+    there would trade accuracy for nothing.
+    """
+    if (code == "en" and not has_gpu() and WHISPER_MODEL_EN
+            and os.path.exists(WHISPER_MODEL_EN)
+            and not os.path.basename(WHISPER_MODEL).endswith(".en.bin")):
+        return WHISPER_MODEL_EN
+    return WHISPER_MODEL
+
+
 def detect_language(wav):
     """Which language is this, per the small model — or "" if we cannot say.
 
@@ -574,8 +603,9 @@ def transcribe(audio_bytes, suffix=".m4a", lang=None):
             code = "auto"
         if code == "auto":
             code = detect_language(wav) or "auto"
+        model = model_for(code)
         out = subprocess.run(
-            [WHISPER_BIN, "-m", WHISPER_MODEL, "-f", wav, "-nt", "-np",
+            [WHISPER_BIN, "-m", model, "-f", wav, "-nt", "-np",
              "-l", code, "-oj", "-of", os.path.join(d, "res")],
             capture_output=True, text=True, timeout=600)
         heard = code

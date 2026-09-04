@@ -214,7 +214,17 @@ pip install piper-tts
 # 4. the voices — see below
 # 5. optional but worth it: ggml-base.bin beside the main model, used ONLY to
 #    identify the language when the app sends lang:"auto" (see below)
+# 6. on a CPU-only agent, ggml-small.en.bin as well: English turns use it
 ```
+
+**On the extra English model, measured rather than assumed.** `small.en` is the same size as
+`small` — 487.6 MB each, within 12 KB — so it is not a smaller model and there is no less
+arithmetic to do. On a two-core agent the two are a wash (`7.11 / 7.23 s` against `7.53 / 7.14 s`,
+interleaved), and on clean English they produced character-identical transcripts. Its case is
+accuracy on *hard* English — accents, noise, crosstalk — which clean synthesised speech cannot
+demonstrate either way. It is installed because English turns are the common case and the model is
+the one place to spend on them; if the 488 MB matters more on a given box, point
+`LQ_WHISPER_MODEL_EN` at nothing and every turn uses the multilingual model as before.
 
 Point the service at them:
 
