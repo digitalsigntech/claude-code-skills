@@ -2271,10 +2271,13 @@ def peer_key(account, offered_b64=None):
                           f"{account}: {key_fingerprint(raw)}", file=sys.stderr)
                     return raw
                 raise PeerKeyChanged(
-                    "this account is pinned to a different device key and that "
-                    "key is not an approved device — scan a fresh pairing code "
-                    "to re-pair, which clears the old pin deliberately instead "
-                    "of accepting a new key mid-conversation")
+                    "this key belongs to no device this agent has approved. If "
+                    "this device re-generated its key, REGISTER IT AGAIN "
+                    "(POST /devices/register) and it will be accepted the way "
+                    "any second device is; a fresh pairing code also works and "
+                    "clears the pin. What will not happen is a new key being "
+                    "trusted because it turned up — that is the whole point of "
+                    "the pin.")
             if not cur:
                 store[account] = offered_b64
                 save(_peers_path(), store)
