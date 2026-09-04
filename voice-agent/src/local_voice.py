@@ -710,6 +710,43 @@ REPLY_BITRATE = os.environ.get("LQ_REPLY_BITRATE", "32k")
 MAX_CHARS_PER_SECOND = float(os.environ.get("LQ_MAX_CPS", "40"))
 
 
+# LONG INPUT IS SPOKEN IN PIECES, because one voice rushes it otherwise.
+#
+# 2026-09-04, from a real reply he called gibberish: `en_US-ryan-medium` given a
+# 290-character sentence produced 12.1s of audio — 27 characters a second, where
+# ordinary speech runs 12 to 18 — and the recogniser could read back 23% of it.
+# The SAME text through `en_US-lessac-medium` came back 87%, and the same voice
+# on the first sentence alone came back 94%. So it is not the text, not the
+# encode and not the voice in general: it is this model given one very long
+# phrase. Ending the phrase earlier fixed it (86% at 18 ch/s) and the rate is the
+# tell every time.
+#
+# So Piper is called with pieces no longer than this, split where a sentence or
+# a clause already ends, and the audio is joined.
+MAX_PHRASE_CHARS = int(os.environ.get("LQ_MAX_PHRASE_CHARS", "180"))
+
+
+def _phrases(text, limit=None):
+    """Split into speakable pieces at the latest boundary that fits."""
+    limit = limit or MAX_PHRASE_CHARS
+    out, rest = [], " ".join((text or "").split())
+    while len(rest) > limit:
+        window = rest[:limit]
+        cut = max(window.rfind(". "), window.rfind("? "), window.rfind("! "))
+        if cut < limit // 3:
+            cut = max(window.rfind("; "), window.rfind(": "),
+                      window.rfind(", "))
+        if cut < limit // 3:
+            cut = window.rfind(" ")
+        if cut <= 0:
+            break
+        out.append(rest[:cut + 1].strip())
+        rest = rest[cut + 1:].lstrip()
+    if rest:
+        out.append(rest)
+    return out
+
+
 def speak(text, lang=None, speaker=None):
     """(audio_bytes, seconds, format, sample_rate) — spoken, then compressed.
 
@@ -728,10 +765,26 @@ def speak(text, lang=None, speaker=None):
             # -s it is always speaker 0, which would make two rostered ids the
             # same voice and nobody would hear the difference as a bug.
             cmd += ["-s", str(sid)]
+        pieces = _phrases(text)
         with _SPEECH_CPU:
-            subprocess.run(cmd,
-                           input=text, capture_output=True, text=True,
-                           check=True, timeout=600)
+            if len(pieces) == 1:
+                subprocess.run(cmd, input=pieces[0], capture_output=True,
+                               text=True, check=True, timeout=600)
+            else:
+                parts = []
+                for n, piece in enumerate(pieces):
+                    part = os.path.join(d, f"p{n}.wav")
+                    subprocess.run(cmd[:-1] + [part], input=piece,
+                                   capture_output=True, text=True,
+                                   check=True, timeout=600)
+                    parts.append(part)
+                listing = os.path.join(d, "parts.txt")
+                with open(listing, "w") as f:
+                    for part in parts:
+                        f.write(f"file '{part}'\n")
+                subprocess.run([FFMPEG, "-v", "error", "-y", "-f", "concat",
+                                "-safe", "0", "-i", listing, "-c", "copy",
+                                wav], check=True, timeout=120)
         seconds = _duration(wav)
         with wave.open(wav) as _w:
             rate = _w.getframerate()
