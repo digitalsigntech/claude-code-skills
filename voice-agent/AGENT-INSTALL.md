@@ -290,6 +290,36 @@ Below `LQ_DETECT_MIN_P` (0.85) the detector is not believed and the turn falls b
 two-pass `auto` — slower and correct. No `ggml-base.bin`, same fallback. Nothing breaks by skipping
 this; turns in an unknown language just cost four seconds more.
 
+## Sealed attachments (2026-09-04) — stage 3 of end-to-end encryption
+
+Once an account is sealed (`e2ee` on, a device key on disk) and `e2ee_attachments`
+is true in `config.json`, the agent lists the capability **`sealed-attachments`**
+and the app stops sending photos and files in the clear:
+
+- **Up.** The phone seals each file under its own random key (AES-256-GCM, nonce
+  in the reference, tag appended), uploads the ciphertext to the plane's `blob`
+  route, then sends an ordinary sealed `ask` whose plaintext is
+  `{"attachments":[ref…], "caption": "…"}`. The plane relays that ask with the
+  ciphertext beside the envelope as `blobs[]`; the agent opens each blob with the
+  key from the envelope, checks the hash first, and from there it is the `photos`
+  path: `save_upload()`, the archive row, the Telegram mirror. The reply carries
+  `posted`, `posted_to`, `tokens` and `received` (the plane deletes what was
+  received; a blob that fails to open is reported received too, so it never
+  lingers).
+- **Down.** A file the agent holds gets a sealed twin **once**, beside it:
+  `<path>.sealed` and `<path>.sealed.json` (the reference, key included — the
+  agent's disk is the trusted end). The `blob` hook serves the twin; the plane
+  caches and serves ciphertext. The reference rides inside `meta_sealed` on
+  attachments-feed items and history rows (`attachments: [ref…]`, one per token,
+  album order). A token without a reference falls back to the plain `file` route
+  on the phone — which the agent's own renders (charts, reminder thumbnails)
+  still use.
+- **Verify** with the plane, not by reading code: `GET /capabilities` lists
+  `sealed-attachments`; a photo sent from a sealed account produces a `blobs ->
+  1 sent, 1 received` line in the plane log and a `sealed attachments: 1 file(s)
+  opened` line in the agent's; `GET blob/<token>` for a file the agent sent
+  returns bytes whose sha256 matches the `.sealed.json` beside the file.
+
 ## Reminders that actually fire (2026-08-13)
 
 The adapter can list and amend reminders as soon as `telegram-gateway`'s
