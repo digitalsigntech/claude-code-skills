@@ -253,17 +253,32 @@ def _spoken_cache():
 
 
 def _voice_locales(verified_only=True):
-    """The languages the installed Piper voices can speak, as ISO codes."""
+    """The languages this machine can actually answer in, as ISO codes.
+
+    NOT the .onnx files on disk any more. Once a language could be spoken by
+    Kokoro instead of Piper, counting filenames undercounted the box by four —
+    it reported ten languages while offering voices in fourteen, because
+    Japanese, Chinese, Italian and Portuguese have no Piper file there and never
+    will. A language is available when some engine here has a voice for it,
+    which is exactly what speakers_for() answers.
+    """
+    out = set()
+    for code in _roster():
+        if code.startswith("_") or len(code) != 2:
+            continue
+        if speakers_for(code):
+            out.add(code)
+    if out:
+        return out
+    # No roster at all: fall back to the filenames, which is what an install
+    # with voices and no roster.json has always meant.
     d, names = _voice_files()
     cache = _spoken_cache() if verified_only else None
-    out = set()
     for n in names:
         code = _code_of(n)
-        if not code:
-            continue
-        if cache is not None and not (cache.get(n) or {}).get("ok"):
-            continue
-        out.add(code)
+        if code and not (cache is not None
+                         and not (cache.get(n) or {}).get("ok")):
+            out.add(code)
     return out
 
 
