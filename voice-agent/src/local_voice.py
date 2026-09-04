@@ -36,6 +36,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import wave
 
@@ -567,6 +568,24 @@ def recent_lang(account):
     return code if time.time() - ts < RECENT_LANG_S else ""
 
 
+# ONE SPEECH JOB AT A TIME, per agent.
+#
+# The app began overlapping turns (2026-09-04): it keeps listening while a turn
+# is out, and this server is a ThreadingHTTPServer, so two clips arrive and run
+# at once on two cores that ONE whisper pass already saturates. Measured on Max:
+#
+#     1 at once   7.4s
+#     2 at once  18.9s each      (serial would be 7.4 and 14.8)
+#     3 at once  34.1s           (serial would be 22.2)
+#
+# Concurrency is not just no faster here, it is WORSE for everyone in the queue:
+# the person who spoke first waits 18.9s instead of 7.4s so that the second
+# person can also wait 18.9s. The lock covers the CPU-bound work only —
+# recognising and speaking — and never the model call between them, which is
+# somebody else's machine and may overlap freely.
+_SPEECH_CPU = threading.Lock()
+
+
 def detect_language(wav):
     """Which language is this, per the small model — or "" if we cannot say.
 
@@ -579,9 +598,11 @@ def detect_language(wav):
     if not os.path.exists(WHISPER_DETECT_MODEL):
         return ""
     try:
-        r = subprocess.run(
-            [WHISPER_BIN, "-m", WHISPER_DETECT_MODEL, "-f", wav, "-dl", "-nt"],
-            capture_output=True, text=True, timeout=300)
+        with _SPEECH_CPU:
+            r = subprocess.run(
+                [WHISPER_BIN, "-m", WHISPER_DETECT_MODEL, "-f", wav,
+                 "-dl", "-nt"],
+                capture_output=True, text=True, timeout=300)
     except (OSError, subprocess.SubprocessError) as e:
         print(f"[lq] language detection skipped: {e}", file=sys.stderr)
         return ""
@@ -653,10 +674,11 @@ def transcribe(audio_bytes, suffix=".m4a", lang=None, hint=""):
             else:
                 code = detect_language(wav) or "auto"
         model = model_for(code)
-        out = subprocess.run(
-            [WHISPER_BIN, "-m", model, "-f", wav, "-nt", "-np",
-             "-l", code, "-oj", "-of", os.path.join(d, "res")],
-            capture_output=True, text=True, timeout=600)
+        with _SPEECH_CPU:
+            out = subprocess.run(
+                [WHISPER_BIN, "-m", model, "-f", wav, "-nt", "-np",
+                 "-l", code, "-oj", "-of", os.path.join(d, "res")],
+                capture_output=True, text=True, timeout=600)
         heard = code
         if code == "auto":
             try:
@@ -705,9 +727,10 @@ def speak(text, lang=None, speaker=None):
             # -s it is always speaker 0, which would make two rostered ids the
             # same voice and nobody would hear the difference as a bug.
             cmd += ["-s", str(sid)]
-        subprocess.run(cmd,
-                       input=text, capture_output=True, text=True,
-                       check=True, timeout=600)
+        with _SPEECH_CPU:
+            subprocess.run(cmd,
+                           input=text, capture_output=True, text=True,
+                           check=True, timeout=600)
         seconds = _duration(wav)
         with wave.open(wav) as _w:
             rate = _w.getframerate()
@@ -810,7 +833,10 @@ _OPAQUE = re.compile(r"(?:https?://\S+|www\.\S+|\S+@\S+\.\S+"
 _FRACTION = {"1/2": "one half", "1/3": "one third", "2/3": "two thirds",
              "1/4": "one quarter", "3/4": "three quarters"}
 _NUM_SLASH = re.compile(r"(?<![\w/])(\d+)\s*/\s*(\d+)(?![\w/])")
-_ABBR = re.compile(r"\b([A-Za-z]{3,5})\.?(?=\b)")
+# The trailing period goes WITH the abbreviation: "Aug. 18" expanded to
+# "August. 18" and a full stop in the middle of a date is a sentence break to a
+# synthesiser.
+_ABBR = re.compile(r"\b([A-Za-z]{3,5})\.(?=\s|$)|\b([A-Za-z]{3,5})\b")
 _RANGE_WORD = re.compile(r"\b(" + "|".join(sorted(
     set(list(_DAYS.values()) + list(_MONTHS.values())))) +
     r")\s*-\s*(" + "|".join(sorted(
@@ -854,7 +880,7 @@ def say_text(text):
     t = _CODE.sub(lambda m: _spell(m.group(0)), t)
 
     def _abbr(m):
-        w = m.group(1)
+        w = m.group(1) or m.group(2)
         # CAPITALISED ONLY. "Sun" is a day and "sun" is a noun; "Mar" is a month
         # and "mar" is a verb. Expanding either without the capital turns "the
         # sun is out" into "the Sunday is out", which is a worse sentence than
