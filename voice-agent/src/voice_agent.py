@@ -2900,6 +2900,10 @@ class Handler(BaseHTTPRequestHandler):
                                 seal_for_devices(_meta, account=account)
                                 or e2ee_seal(_meta, priv, mine, theirs,
                                              direction=DIR_TO_PHONE))
+                            # The name lives inside the seal now (build 343
+                            # reads meta_sealed.filename first); the clear
+                            # copy stays only on rows that carry no seal.
+                            row.pop("filename", None)
                         row["sealed"] = (
                             seal_for_devices(str(row.get("text") or ""),
                                              account=account)
