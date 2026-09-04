@@ -3,21 +3,25 @@
   "en": {
     "anna": {
       "file": "en_US-lessac-medium.onnx",
+      "path": "en/en_US/lessac/medium/en_US-lessac-medium.onnx",
       "gender": "F",
       "hz": 193.4
     },
     "maria": {
       "file": "en_US-amy-medium.onnx",
+      "path": "en/en_US/amy/medium/en_US-amy-medium.onnx",
       "gender": "F",
       "hz": 202.3
     },
     "tom": {
       "file": "en_US-joe-medium.onnx",
+      "path": "en/en_US/joe/medium/en_US-joe-medium.onnx",
       "gender": "M",
       "hz": 101.6
     },
     "leo": {
       "file": "en_US-ryan-medium.onnx",
+      "path": "en/en_US/ryan/medium/en_US-ryan-medium.onnx",
       "gender": "M",
       "hz": 162.1
     }
@@ -25,22 +29,26 @@
   "fr": {
     "anna": {
       "file": "fr_FR-siwis-medium.onnx",
+      "path": "fr/fr_FR/siwis/medium/fr_FR-siwis-medium.onnx",
       "gender": "F",
       "hz": 216.2
     },
     "maria": {
       "file": "fr_FR-upmc-medium.onnx",
+      "path": "fr/fr_FR/upmc/medium/fr_FR-upmc-medium.onnx",
       "speaker": 0,
       "gender": "F",
       "hz": 227.3
     },
     "tom": {
       "file": "fr_FR-tom-medium.onnx",
+      "path": "fr/fr_FR/tom/medium/fr_FR-tom-medium.onnx",
       "gender": "M",
       "hz": 134.7
     },
     "leo": {
       "file": "fr_FR-upmc-medium.onnx",
+      "path": "fr/fr_FR/upmc/medium/fr_FR-upmc-medium.onnx",
       "speaker": 1,
       "gender": "M",
       "hz": 131.2
@@ -49,22 +57,26 @@
   "es": {
     "anna": {
       "file": "es_ES-sharvard-medium.onnx",
+      "path": "es/es_ES/sharvard/medium/es_ES-sharvard-medium.onnx",
       "speaker": 1,
       "gender": "F",
       "hz": 202.3
     },
     "maria": {
       "file": "es_MX-claude-high.onnx",
+      "path": "es/es_MX/claude/high/es_MX-claude-high.onnx",
       "gender": "F",
       "hz": 186.9
     },
     "tom": {
       "file": "es_ES-davefx-medium.onnx",
+      "path": "es/es_ES/davefx/medium/es_ES-davefx-medium.onnx",
       "gender": "M",
       "hz": 114.8
     },
     "leo": {
       "file": "es_ES-sharvard-medium.onnx",
+      "path": "es/es_ES/sharvard/medium/es_ES-sharvard-medium.onnx",
       "speaker": 0,
       "gender": "M",
       "hz": 121.8
@@ -73,21 +85,25 @@
   "de": {
     "anna": {
       "file": "de_DE-ramona-low.onnx",
+      "path": "de/de_DE/ramona/low/de_DE-ramona-low.onnx",
       "gender": "F",
       "hz": 202.5
     },
     "maria": {
       "file": "de_DE-kerstin-low.onnx",
+      "path": "de/de_DE/kerstin/low/de_DE-kerstin-low.onnx",
       "gender": "F",
       "hz": 166.7
     },
     "tom": {
       "file": "de_DE-thorsten-medium.onnx",
+      "path": "de/de_DE/thorsten/medium/de_DE-thorsten-medium.onnx",
       "gender": "M",
       "hz": 107.6
     },
     "leo": {
       "file": "de_DE-karlsson-low.onnx",
+      "path": "de/de_DE/karlsson/low/de_DE-karlsson-low.onnx",
       "gender": "M",
       "hz": 125.0
     }
@@ -95,16 +111,19 @@
   "it": {
     "anna": {
       "file": "it_IT-paola-medium.onnx",
+      "path": "it/it_IT/paola/medium/it_IT-paola-medium.onnx",
       "gender": "F",
       "hz": 208.0
     },
     "maria": {
       "file": "it_IT-serena-medium.onnx",
+      "path": "it/it_IT/serena/medium/it_IT-serena-medium.onnx",
       "gender": "F",
       "hz": 212.0
     },
     "tom": {
       "file": "it_IT-riccardo-x_low.onnx",
+      "path": "it/it_IT/riccardo/x_low/it_IT-riccardo-x_low.onnx",
       "gender": "M",
       "hz": 150.2
     }
@@ -112,16 +131,19 @@
   "pt": {
     "anna": {
       "file": "pt_PT-tugão-medium.onnx",
+      "path": "pt/pt_PT/tugão/medium/pt_PT-tugão-medium.onnx",
       "gender": "F",
       "hz": 190.1
     },
     "tom": {
       "file": "pt_BR-cadu-medium.onnx",
+      "path": "pt/pt_BR/cadu/medium/pt_BR-cadu-medium.onnx",
       "gender": "M",
       "hz": 125.3
     },
     "leo": {
       "file": "pt_BR-jeff-medium.onnx",
+      "path": "pt/pt_BR/jeff/medium/pt_BR-jeff-medium.onnx",
       "gender": "M",
       "hz": 137.0
     }
@@ -129,16 +151,19 @@
   "pl": {
     "anna": {
       "file": "pl_PL-gosia-medium.onnx",
+      "path": "pl/pl_PL/gosia/medium/pl_PL-gosia-medium.onnx",
       "gender": "F",
       "hz": 216.2
     },
     "tom": {
       "file": "pl_PL-darkman-medium.onnx",
+      "path": "pl/pl_PL/darkman/medium/pl_PL-darkman-medium.onnx",
       "gender": "M",
       "hz": 117.9
     },
     "leo": {
       "file": "pl_PL-bass-high.onnx",
+      "path": "pl/pl_PL/bass/high/pl_PL-bass-high.onnx",
       "gender": "M",
       "hz": 84.3
     }
@@ -146,16 +171,19 @@
   "sv": {
     "anna": {
       "file": "sv_SE-lisa-medium.onnx",
+      "path": "sv/sv_SE/lisa/medium/sv_SE-lisa-medium.onnx",
       "gender": "F",
       "hz": 191.7
     },
     "maria": {
       "file": "sv_SE-alma-medium.onnx",
+      "path": "sv/sv_SE/alma/medium/sv_SE-alma-medium.onnx",
       "gender": "F",
       "hz": 180.7
     },
     "tom": {
       "file": "sv_SE-nst-medium.onnx",
+      "path": "sv/sv_SE/nst/medium/sv_SE-nst-medium.onnx",
       "gender": "M",
       "hz": 74.5
     }
@@ -163,22 +191,26 @@
   "nl": {
     "anna": {
       "file": "nl_BE-nathalie-medium.onnx",
+      "path": "nl/nl_BE/nathalie/medium/nl_BE-nathalie-medium.onnx",
       "gender": "F",
       "hz": 185.3
     },
     "maria": {
       "file": "nl_NL-mls-medium.onnx",
+      "path": "nl/nl_NL/mls/medium/nl_NL-mls-medium.onnx",
       "speaker": 2,
       "gender": "F",
       "hz": 212.0
     },
     "tom": {
       "file": "nl_BE-rdh-medium.onnx",
+      "path": "nl/nl_BE/rdh/medium/nl_BE-rdh-medium.onnx",
       "gender": "M",
       "hz": 102.1
     },
     "leo": {
       "file": "nl_NL-ronnie-medium.onnx",
+      "path": "nl/nl_NL/ronnie/medium/nl_NL-ronnie-medium.onnx",
       "gender": "M",
       "hz": 135.3
     }
@@ -186,6 +218,7 @@
   "tr": {
     "tom": {
       "file": "tr_TR-dfki-medium.onnx",
+      "path": "tr/tr_TR/dfki/medium/tr_TR-dfki-medium.onnx",
       "gender": "M",
       "hz": 113.1
     }
@@ -193,16 +226,19 @@
   "ru": {
     "anna": {
       "file": "ru_RU-irina-medium.onnx",
+      "path": "ru/ru_RU/irina/medium/ru_RU-irina-medium.onnx",
       "gender": "F",
       "hz": 173.6
     },
     "tom": {
       "file": "ru_RU-ruslan-medium.onnx",
+      "path": "ru/ru_RU/ruslan/medium/ru_RU-ruslan-medium.onnx",
       "gender": "M",
       "hz": 114.2
     },
     "leo": {
       "file": "ru_RU-denis-medium.onnx",
+      "path": "ru/ru_RU/denis/medium/ru_RU-denis-medium.onnx",
       "gender": "M",
       "hz": 151.0
     }
@@ -210,24 +246,28 @@
   "uk": {
     "anna": {
       "file": "uk_UA-ukrainian_tts-medium.onnx",
+      "path": "uk/uk_UA/ukrainian_tts/medium/uk_UA-ukrainian_tts-medium.onnx",
       "speaker": 0,
       "gender": "F",
       "hz": 310.6
     },
     "maria": {
       "file": "uk_UA-ukrainian_tts-medium.onnx",
+      "path": "uk/uk_UA/ukrainian_tts/medium/uk_UA-ukrainian_tts-medium.onnx",
       "speaker": 2,
       "gender": "F",
       "hz": 201.4
     },
     "tom": {
       "file": "uk_UA-ukrainian_tts-medium.onnx",
+      "path": "uk/uk_UA/ukrainian_tts/medium/uk_UA-ukrainian_tts-medium.onnx",
       "speaker": 1,
       "gender": "M",
       "hz": 126.0
     },
     "leo": {
       "file": "uk_UA-oleksa-high.onnx",
+      "path": "uk/uk_UA/oleksa/high/uk_UA-oleksa-high.onnx",
       "gender": "M",
       "hz": 144.1
     }
@@ -235,16 +275,19 @@
   "zh": {
     "anna": {
       "file": "zh_CN-huayan-medium.onnx",
+      "path": "zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx",
       "gender": "F",
       "hz": 237.1
     },
     "maria": {
       "file": "zh_CN-xiao_ya-medium.onnx",
+      "path": "zh/zh_CN/xiao_ya/medium/zh_CN-xiao_ya-medium.onnx",
       "gender": "F",
       "hz": 310.6
     },
     "tom": {
       "file": "zh_CN-chaowen-medium.onnx",
+      "path": "zh/zh_CN/chaowen/medium/zh_CN-chaowen-medium.onnx",
       "gender": "M",
       "hz": 160.9
     }
@@ -252,12 +295,14 @@
   "ja": {
     "anna": {
       "file": "ja_JA-hi_fi_captain-medium.onnx",
+      "path": "ja/ja_JA/hi_fi_captain/medium/ja_JA-hi_fi_captain-medium.onnx",
       "speaker": 0,
       "gender": "F",
       "hz": 266.7
     },
     "tom": {
       "file": "ja_JA-hi_fi_captain-medium.onnx",
+      "path": "ja/ja_JA/hi_fi_captain/medium/ja_JA-hi_fi_captain-medium.onnx",
       "speaker": 1,
       "gender": "M",
       "hz": 152.4
