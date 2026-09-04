@@ -418,7 +418,18 @@ def voices():
     order = ["anna", "maria", "tom", "leo"]
     seen = {v for ids in by_lang.values() for v in ids}
     ids = [v for v in order if v in seen] + sorted(seen - set(order))
-    return {"ids": ids, "by_lang": by_lang}
+    # A PARTIAL INSTALL AND A THIN LANGUAGE LOOK IDENTICAL from the outside.
+    # Mid-copy, this row said French had no voices and English had three;
+    # finished, it says four each — and nothing in the numbers distinguished
+    # "still arriving" from "this is all the engine has". Turkish really does
+    # have one voice in the whole of Piper. So the row says which it is.
+    have = sum(len(v) for v in by_lang.values())
+    want = sum(len(v) for k, v in _roster().items() if not k.startswith("_"))
+    source = (f"{have} of {want} rostered voices installed on this machine"
+              + ("" if have >= want else
+                 " — a language offers only what is on this disk, so this "
+                 "count rises as the rest arrive"))
+    return {"ids": ids, "by_lang": by_lang, "source": source}
 
 
 def voice_for(lang, speaker=None):
