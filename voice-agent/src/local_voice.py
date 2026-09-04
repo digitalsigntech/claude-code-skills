@@ -477,7 +477,18 @@ def voice_for(lang, speaker=None):
     d = os.path.dirname(PIPER_VOICE)
     who = (speaker or "").strip().lower()
     if code and who:
-        entry = (_roster().get(code) or {}).get(who)
+        roster_here = _roster().get(code) or {}
+        entry = roster_here.get(who)
+        if entry is None:
+            # AN ID WE DO NOT KNOW IS NOT A DEFAULT, it is a disagreement. The
+            # app began sending `speaker` on every turn with build 338; if its
+            # ids ever stop matching this roster — a rename, a new voice, a
+            # different case convention — every user quietly gets the language
+            # default and nothing anywhere says why. Falling back is right;
+            # falling back in silence is how it goes unnoticed for a week.
+            print(f"[lq] no voice named {who!r} for {code} "
+                  f"(roster has: {' '.join(roster_here) or 'nothing'}) — "
+                  f"using the language default", file=sys.stderr)
         if entry and entry.get("file"):
             f = entry["file"]
             f = f if os.path.isabs(f) else os.path.join(d, f)
