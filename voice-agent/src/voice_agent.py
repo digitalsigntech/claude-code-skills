@@ -1030,14 +1030,35 @@ def time_context(tz):
     terms. A time somebody says belongs to the zone they are standing in, and
     the app tells us which that is on every ask.
     """
-    if not tz:
-        return ""
-    try:
-        from zoneinfo import ZoneInfo
-        from datetime import datetime
-        now = datetime.now(ZoneInfo(str(tz)))
-    except Exception:
-        return ""
+    # NO TIMEZONE MUST NOT MEAN NO DATE. This returned "" when the caller's
+    # zone was missing, and the LQ voice path does not carry one — so a spoken
+    # question got a model with no idea what day it was. It answered "Tuesday
+    # this week (Sept 1)" and "Monday this week (Sept 1)" in the same session,
+    # figures right both times and labels invented, which is the worst way to
+    # be wrong because the correct number vouches for the wrong date.
+    #
+    # The DAY is the same in almost every zone; it is the HOUR that differs. So
+    # an unknown zone still gets the date and the week, and is told only that it
+    # cannot speak with authority about the clock.
+    from datetime import datetime, timedelta
+    unknown_zone = not tz
+    if unknown_zone:
+        now = datetime.now()
+    else:
+        try:
+            from zoneinfo import ZoneInfo
+            now = datetime.now(ZoneInfo(str(tz)))
+        except Exception:
+            now = datetime.now()
+            unknown_zone = True
+    if unknown_zone:
+        mon = now - timedelta(days=now.weekday())
+        return (f"Today is {now.strftime('%A %d %b %Y')}. This week runs "
+                f"{mon.strftime('%a %d %b')} to "
+                f"{(mon + timedelta(days=6)).strftime('%a %d %b %Y')}; "
+                f"yesterday was {(now - timedelta(days=1)).strftime('%a %d %b')}"
+                f". You do NOT know which timezone the person is in, so give "
+                f"dates plainly and do not restate a clock time as theirs.")
     # THE WEEK IS STATED, NOT LEFT TO ARITHMETIC. Asked for "Monday this
     # week" on Fri 4 Sep, the answer came back "Monday this week (Sept 1)" —
     # Monday was Aug 31, and the figure beside it was right. A model given the
@@ -1045,7 +1066,6 @@ def time_context(tz):
     # a date that is wrong by a day next to a number that is right is the worst
     # of both: it looks checked. Naming the span costs one line and removes the
     # subtraction.
-    from datetime import timedelta
     mon = now - timedelta(days=now.weekday())
     sun = mon + timedelta(days=6)
     return (f"The person you are answering is in {tz}, where it is now "
