@@ -775,8 +775,107 @@ SPEECH_MAX_CHARS = 400
 _MD_NOISE = re.compile(r"\*\*|__|`+|^\s*[-*+]\s+|^\s*#{1,6}\s+", re.M)
 
 
+# HOW A PERSON WOULD SAY IT (2026-09-04, from the owner: LQ pronounced the
+# slash in "and/or" and read "Wed-Fri" as "wed fry"). A recogniser's output and
+# a screen's text are written for the EYE; every one of these is punctuation
+# that a reader resolves silently and a synthesiser cannot.
+#
+# I cannot verify the PRONUNCIATION from here — there is no espeak CLI on either
+# machine and I have no ears — so what is tested is the TEXT handed to Piper.
+# The bet, and it is a fair one, is that a synthesiser says ordinary words
+# correctly and symbols unpredictably; this turns the second into the first.
+_DAYS = {"mon": "Monday", "tue": "Tuesday", "tues": "Tuesday",
+         "wed": "Wednesday", "thu": "Thursday", "thur": "Thursday",
+         "thurs": "Thursday", "fri": "Friday", "sat": "Saturday",
+         "sun": "Sunday"}
+_MONTHS = {"jan": "January", "feb": "February", "mar": "March",
+           "apr": "April", "jun": "June", "jul": "July", "aug": "August",
+           "sep": "September", "sept": "September", "oct": "October",
+           "nov": "November", "dec": "December"}
+_PER_UNITS = {"h", "hr", "hrs", "hour", "hours", "min", "mins", "minute",
+              "minutes", "s", "sec", "secs", "second", "seconds", "day",
+              "days", "week", "weeks", "month", "months", "year", "years",
+              "km", "mi", "kg", "lb", "lbs", "ft", "sqft", "unit", "units",
+              "page", "pages", "sheet", "sheets"}
+_CODE = re.compile(r"\b([A-Za-z]{2,5})-(\d[\d-]*)\b")
+_ABBR = re.compile(r"\b([A-Za-z]{3,5})\.?(?=\b)")
+_RANGE_WORD = re.compile(r"\b(" + "|".join(sorted(
+    set(list(_DAYS.values()) + list(_MONTHS.values())))) +
+    r")\s*-\s*(" + "|".join(sorted(
+        set(list(_DAYS.values()) + list(_MONTHS.values())))) + r")\b")
+_RANGE_NUM = re.compile(r"(?<![\w-])(\d[\d,.]*)\s*-\s*(\d[\d,.]*)(?![\w-])")
+_SLASH = re.compile(r"(?<=\w)\s*/\s*(?=\w)")
+_MONEY = re.compile(r"\$\s*(\d[\d,]*)(?:\.(\d{2}))?")
+_TIME24 = re.compile(r"\b([01]?\d|2[0-3]):([0-5]\d)\b")
+
+
+def _spell(token):
+    """`PO-26-0412` -> `P O, 2 6, 0 4 1 2`. A code is heard, not understood."""
+    out = []
+    for group in token.split("-"):
+        if not group:
+            continue
+        out.append(" ".join(group.upper() if group.isalpha() else group))
+    return ", ".join(out)
+
+
+def _say_slash(m, text):
+    return " per " if False else " or "
+
+
+def say_text(text):
+    """Turn what is written for the eye into what a voice can read aloud."""
+    t = _MD_NOISE.sub(" ", text or "")
+    # Codes first: they contain hyphens and digits that every later rule would
+    # otherwise claim as a range or a quantity.
+    t = _CODE.sub(lambda m: _spell(m.group(0)), t)
+
+    def _abbr(m):
+        w = m.group(1)
+        # CAPITALISED ONLY. "Sun" is a day and "sun" is a noun; "Mar" is a month
+        # and "mar" is a verb. Expanding either without the capital turns "the
+        # sun is out" into "the Sunday is out", which is a worse sentence than
+        # the one this rule exists to fix.
+        if not w[:1].isupper():
+            return m.group(0)
+        k = w.lower()
+        return _DAYS.get(k) or _MONTHS.get(k) or m.group(0)
+    t = _ABBR.sub(_abbr, t)
+    t = _RANGE_WORD.sub(r"\1 to \2", t)
+    t = _RANGE_NUM.sub(r"\1 to \2", t)
+
+    # A SLASH IS TWO DIFFERENT WORDS. Between plain words it means "or";
+    # after a quantity it means "per". And when the word on the right IS the
+    # connector — "and/or" — saying it again gives "and or or", which is how
+    # the first version of this read aloud.
+    def _slash(m):
+        after = t[m.end():].split()
+        nxt = (after[0].strip(".,;:").lower() if after else "")
+        if nxt in ("or", "and"):
+            return " "
+        return " per " if nxt in _PER_UNITS else " or "
+    t = _SLASH.sub(_slash, t)
+    # "per h" is not something anyone says.
+    t = re.sub(r"\bper h\b", "per hour", t)
+    t = re.sub(r"\bper hr\b", "per hour", t)
+    t = re.sub(r"\bper min\b", "per minute", t)
+    t = re.sub(r"\bper sec?\b", "per second", t)
+    t = _MONEY.sub(lambda m: (f"{m.group(1)} dollars {m.group(2)}"
+                              if m.group(2) else f"{m.group(1)} dollars"), t)
+
+    def _time(m):
+        h, mi = int(m.group(1)), m.group(2)
+        if h == 0:
+            return f"12:{mi} AM"
+        if h > 12:
+            return f"{h - 12}:{mi} PM"
+        return m.group(0)
+    t = _TIME24.sub(_time, t)
+    return " ".join(t.split())
+
+
 def _speakable(text):
-    return " ".join(_MD_NOISE.sub(" ", text or "").split())
+    return say_text(text)
 
 
 def speech_for(text):
