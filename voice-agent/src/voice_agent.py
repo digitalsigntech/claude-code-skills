@@ -2403,7 +2403,8 @@ class Handler(BaseHTTPRequestHandler):
                 return str(res.get("answer") or "")
 
             out = local_voice.turn(payload, answer_fn,
-                                   on_transcript=on_transcript)
+                                   on_transcript=on_transcript,
+                                   account=account)
         except Exception as e:
             # A voice turn that fails must fail LOUDLY and in the clear: the app
             # can show "I could not hear that", and a SEALED error is a message
