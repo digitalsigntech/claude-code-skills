@@ -424,9 +424,19 @@ def speakers_for(lang):
     r = _roster().get(code) or {}
     d = os.path.dirname(PIPER_VOICE)
     cache = _spoken_cache()
+    kokoro = engine_for(code) == "kokoro"
     out = []
     for vid, entry in r.items():
+        # WHICHEVER ENGINE SPEAKS THIS LANGUAGE HERE. Kokoro brought two ids
+        # Piper never had — ja/maria and zh/leo — and a check that only looked
+        # for an .onnx would have hidden them while their greetings sat on the
+        # plane, which is a picker disagreeing with its own samples.
+        if kokoro and entry.get("kokoro"):
+            out.append(vid)
+            continue
         f = entry.get("file", "")
+        if not f:
+            continue
         f = f if os.path.isabs(f) else os.path.join(d, f)
         if not os.path.exists(f):
             continue
@@ -757,6 +767,105 @@ def _phrases(text, limit=None):
     return out
 
 
+def _encode(d, wav, seconds, rate):
+    """One wire format, whichever synthesiser produced the audio."""
+    if REPLY_FORMAT == "wav":
+        with open(wav, "rb") as f:
+            return f.read(), seconds, "wav", rate
+    ext = {"aac": ".m4a", "opus": ".ogg"}.get(REPLY_FORMAT, ".m4a")
+    codec = {"aac": ["-c:a", "aac"],
+             "opus": ["-c:a", "libopus"]}.get(REPLY_FORMAT, ["-c:a", "aac"])
+    enc = os.path.join(d, "out" + ext)
+    # THE SYNTHESISER'S OWN RATE, NOT THE RECOGNISER'S. This resampled every
+    # reply to 16 kHz — the rate whisper wants on the way IN, applied by habit
+    # on the way OUT — while the greeting clips kept 22.05 kHz. Same voice, same
+    # 32 kbps, half the top of the band, and exactly the "replies sound worse
+    # than the samples" that was reported (2026-09-04).
+    subprocess.run([FFMPEG, "-v", "error", "-y", "-i", wav, "-ac", "1",
+                    *(["-ar", REPLY_RATE] if REPLY_RATE else []),
+                    *codec, "-b:a", REPLY_BITRATE, enc],
+                   check=True, timeout=120)
+    with open(enc, "rb") as f:
+        # THE DURATION COMES FROM THE WAV, not the encoded file: the meter must
+        # not move because someone changed a bitrate.
+        return f.read(), seconds, REPLY_FORMAT, rate
+
+
+# THE SYNTHESISER FOLLOWS THE HARDWARE, as the recogniser already does
+# (2026-09-04). A CPU-only or AMD agent speaks Kokoro's languages with
+# Kokoro and the rest with Piper; an NVIDIA agent is a later branch and not this
+# one. Which language goes to which engine is DATA in the roster, not a rule
+# here, because it is a judgement about voices and it will change.
+KOKORO_MODEL = os.environ.get(
+    "LQ_KOKORO_MODEL", os.path.expanduser("~/kokoro/kokoro-v1.0.onnx"))
+KOKORO_VOICES = os.environ.get(
+    "LQ_KOKORO_VOICES", os.path.expanduser("~/kokoro/voices-v1.0.bin"))
+_kokoro = None
+
+
+def kokoro_ready():
+    if not (os.path.exists(KOKORO_MODEL) and os.path.exists(KOKORO_VOICES)):
+        return False
+    try:
+        _kokoro_engine()
+    except Exception as e:
+        print(f"[lq] kokoro not usable here: {e}", file=sys.stderr)
+        return False
+    return True
+
+
+# WHERE KOKORO IS INSTALLED, when it is not on the agent's own path. The agent
+# runs the system python; kokoro-onnx pulls onnxruntime and its friends, which
+# is not something to force into a distribution's site-packages on a box that is
+# serving somebody. A venv beside it and one path entry keeps both clean.
+KOKORO_SITE = os.environ.get("LQ_KOKORO_SITE", "")
+
+
+def _kokoro_engine():
+    global _kokoro
+    if _kokoro is None:
+        if KOKORO_SITE and KOKORO_SITE not in sys.path:
+            sys.path.insert(0, KOKORO_SITE)
+        from kokoro_onnx import Kokoro
+        _kokoro = Kokoro(KOKORO_MODEL, KOKORO_VOICES)
+    return _kokoro
+
+
+def engine_for(lang):
+    """Which synthesiser speaks this language on this machine."""
+    code = (lang or "").strip().lower()[:2]
+    want = (_roster().get("_engines") or {}).get(code, "piper")
+    if want == "kokoro" and not kokoro_ready():
+        return "piper"          # not installed here; the roster is a wish
+    return want
+
+
+def _kokoro_voice(lang, speaker):
+    code = (lang or "").strip().lower()[:2]
+    entry = (_roster().get(code) or {}).get((speaker or "").strip().lower())
+    if entry and entry.get("kokoro"):
+        return entry["kokoro"]
+    for vid, e in (_roster().get(code) or {}).items():
+        if e.get("kokoro"):
+            return e["kokoro"]
+    return None
+
+
+def _speak_kokoro(text, lang, speaker, wav):
+    """Synthesise with Kokoro. Returns False if this turn cannot use it."""
+    voice = _kokoro_voice(lang, speaker)
+    if not voice:
+        return False
+    import soundfile as sf
+    code = (lang or "en").strip().lower()[:2]
+    tag = {"en": "en-us", "ja": "ja", "pt": "pt-br", "zh": "cmn"}.get(code, code)
+    with _SPEECH_CPU:
+        samples, sr = _kokoro_engine().create(text, voice=voice, speed=1.0,
+                                              lang=tag)
+    sf.write(wav, samples, sr)
+    return True
+
+
 def speak(text, lang=None, speaker=None):
     """(audio_bytes, seconds, format, sample_rate) — spoken, then compressed.
 
@@ -775,6 +884,19 @@ def speak(text, lang=None, speaker=None):
             # -s it is always speaker 0, which would make two rostered ids the
             # same voice and nobody would hear the difference as a bug.
             cmd += ["-s", str(sid)]
+        if engine_for(lang) == "kokoro":
+            try:
+                if _speak_kokoro(text, lang, speaker, wav):
+                    seconds = _duration(wav)
+                    with wave.open(wav) as _w:
+                        rate = int(REPLY_RATE) if REPLY_RATE else _w.getframerate()
+                    return _encode(d, wav, seconds, rate)
+            except Exception as e:
+                # NEVER LOSE THE TURN TO A NEW ENGINE. Piper is installed,
+                # proven and one line away; a synthesiser that fails should cost
+                # a log line, not an answer.
+                print(f"[lq] kokoro failed ({e}) — speaking with piper",
+                      file=sys.stderr)
         pieces = _phrases(text)
         with _SPEECH_CPU:
             if len(pieces) == 1:
@@ -825,28 +947,7 @@ def speak(text, lang=None, speaker=None):
                            input=text, capture_output=True, text=True,
                            check=True, timeout=600)
             seconds = _duration(wav)
-        if REPLY_FORMAT == "wav":
-            with open(wav, "rb") as f:
-                return f.read(), seconds, "wav", rate
-        ext = {"aac": ".m4a", "opus": ".ogg"}.get(REPLY_FORMAT, ".m4a")
-        codec = {"aac": ["-c:a", "aac"],
-                 "opus": ["-c:a", "libopus"]}.get(REPLY_FORMAT, ["-c:a", "aac"])
-        enc = os.path.join(d, "out" + ext)
-        # PIPER'S OWN RATE, NOT THE RECOGNISER'S. This resampled every reply
-        # to 16 kHz — the rate whisper wants on the way IN, applied by habit on
-        # the way OUT — while the greeting clips on the plane kept Piper's
-        # native 22.05 kHz. Same voice, same 32 kbps, half the top of the band:
-        # which is exactly the "replies sound worse than the samples" the owner
-        # reported, and it was measurable the moment anyone put the two files
-        # side by side (2026-09-04).
-        subprocess.run([FFMPEG, "-v", "error", "-y", "-i", wav, "-ac", "1",
-                        *(["-ar", REPLY_RATE] if REPLY_RATE else []),
-                        *codec, "-b:a", REPLY_BITRATE, enc],
-                       check=True, timeout=120)
-        with open(enc, "rb") as f:
-            # THE DURATION COMES FROM THE WAV, not the encoded file: the meter
-            # must not move because someone changed a bitrate.
-            return f.read(), seconds, REPLY_FORMAT, rate
+        return _encode(d, wav, seconds, rate)
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

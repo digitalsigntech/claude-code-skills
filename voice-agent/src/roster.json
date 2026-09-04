@@ -5,25 +5,29 @@
       "file": "en_US-lessac-medium.onnx",
       "path": "en/en_US/lessac/medium/en_US-lessac-medium.onnx",
       "gender": "F",
-      "hz": 193.4
+      "hz": 193.4,
+      "kokoro": "af_heart"
     },
     "maria": {
       "file": "en_US-amy-medium.onnx",
       "path": "en/en_US/amy/medium/en_US-amy-medium.onnx",
       "gender": "F",
-      "hz": 202.3
+      "hz": 202.3,
+      "kokoro": "af_bella"
     },
     "tom": {
       "file": "en_US-joe-medium.onnx",
       "path": "en/en_US/joe/medium/en_US-joe-medium.onnx",
       "gender": "M",
-      "hz": 101.6
+      "hz": 101.6,
+      "kokoro": "am_michael"
     },
     "leo": {
       "file": "en_US-ryan-medium.onnx",
       "path": "en/en_US/ryan/medium/en_US-ryan-medium.onnx",
       "gender": "M",
-      "hz": 162.1
+      "hz": 162.1,
+      "kokoro": "am_adam"
     }
   },
   "fr": {
@@ -133,19 +137,22 @@
       "file": "pt_PT-tugão-medium.onnx",
       "path": "pt/pt_PT/tugão/medium/pt_PT-tugão-medium.onnx",
       "gender": "F",
-      "hz": 190.1
+      "hz": 190.1,
+      "kokoro": "pf_dora"
     },
     "tom": {
       "file": "pt_BR-cadu-medium.onnx",
       "path": "pt/pt_BR/cadu/medium/pt_BR-cadu-medium.onnx",
       "gender": "M",
-      "hz": 125.3
+      "hz": 125.3,
+      "kokoro": "pm_alex"
     },
     "leo": {
       "file": "pt_BR-jeff-medium.onnx",
       "path": "pt/pt_BR/jeff/medium/pt_BR-jeff-medium.onnx",
       "gender": "M",
-      "hz": 137.0
+      "hz": 137.0,
+      "kokoro": "pm_santa"
     }
   },
   "pl": {
@@ -277,19 +284,25 @@
       "file": "zh_CN-huayan-medium.onnx",
       "path": "zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx",
       "gender": "F",
-      "hz": 237.1
+      "hz": 237.1,
+      "kokoro": "zf_xiaoxiao"
     },
     "maria": {
       "file": "zh_CN-xiao_ya-medium.onnx",
       "path": "zh/zh_CN/xiao_ya/medium/zh_CN-xiao_ya-medium.onnx",
       "gender": "F",
-      "hz": 310.6
+      "hz": 310.6,
+      "kokoro": "zf_xiaoni"
     },
     "tom": {
       "file": "zh_CN-chaowen-medium.onnx",
       "path": "zh/zh_CN/chaowen/medium/zh_CN-chaowen-medium.onnx",
       "gender": "M",
-      "hz": 160.9
+      "hz": 160.9,
+      "kokoro": "zm_yunxi"
+    },
+    "leo": {
+      "kokoro": "zm_yunyang"
     }
   },
   "ja": {
@@ -298,14 +311,36 @@
       "path": "ja/ja_JA/hi_fi_captain/medium/ja_JA-hi_fi_captain-medium.onnx",
       "speaker": 0,
       "gender": "F",
-      "hz": 266.7
+      "hz": 266.7,
+      "kokoro": "jf_alpha"
     },
     "tom": {
       "file": "ja_JA-hi_fi_captain-medium.onnx",
       "path": "ja/ja_JA/hi_fi_captain/medium/ja_JA-hi_fi_captain-medium.onnx",
       "speaker": 1,
       "gender": "M",
-      "hz": 152.4
+      "hz": 152.4,
+      "kokoro": "jm_kumo"
+    },
+    "maria": {
+      "kokoro": "jf_nezumi"
     }
+  },
+  "_engines": {
+    "_why": "Which synthesiser speaks each language on a CPU-only or AMD agent. Kokoro only where it can fill AT LEAST as many named roles as Piper already does: it has one French voice against Piper's four, one Italian pair against three, three Spanish against four. Sounding better is not worth a picker that shrinks, and moving a language is one word here.",
+    "en": "kokoro",
+    "ja": "kokoro",
+    "pt": "kokoro",
+    "zh": "kokoro",
+    "de": "piper",
+    "es": "piper",
+    "fr": "piper",
+    "it": "piper",
+    "nl": "piper",
+    "pl": "piper",
+    "ru": "piper",
+    "sv": "piper",
+    "tr": "piper",
+    "uk": "piper"
   }
 }
