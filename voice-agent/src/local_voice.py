@@ -12,7 +12,7 @@ way out. **No audio ever leaves this machine.** The relay carries ciphertext and
 a duration; the speech provider is not in the path at all, because on this tier
 there is no speech provider.
 
-WHY DURATIONS TRAVEL IN THE CLEAR. The product bills seconds of audio, in
+WHY DURATIONS TRAVEL IN THE CLEAR. Vladimir chose to bill seconds of audio, in
 plus out, and you cannot measure what you cannot read. So the numbers ride
 beside the envelope rather than inside it — the only plaintext in a turn, and
 deliberately the most boring quantity in it.
@@ -48,10 +48,10 @@ WHISPER_MODEL = os.environ.get(
     "LQ_WHISPER_MODEL",
     os.path.expanduser("~/whisper.cpp/models/ggml-large-v3-turbo-q5_0.bin"))
 PIPER_BIN = os.environ.get(
-    "LQ_PIPER_BIN", os.path.join(HERE, "venv", "bin", "piper"))
+    "LQ_PIPER_BIN", os.path.expanduser("~/DST/voice/venv/bin/piper"))
 PIPER_VOICE = os.environ.get(
     "LQ_PIPER_VOICE",
-    os.path.join(HERE, "voices", "en_US-lessac-medium.onnx"))
+    os.path.expanduser("~/DST/voice/voices/en_US-lessac-medium.onnx"))
 FFMPEG = os.environ.get("LQ_FFMPEG", "ffmpeg")
 
 # A turn is one push of a button. Longer than this is not a question, it is an
@@ -90,7 +90,7 @@ def has_gpu():
 
 
 def preferred_model_name():
-    """The recogniser this machine should run (2026-09-04).
+    """The recogniser this machine should run (Vladimir, 2026-09-04).
 
     A CPU-only agent gets `small` MULTILINGUAL rather than `small.en`: the
     languages are worth more than the second or two the bigger vocabulary costs,
@@ -206,7 +206,8 @@ def _to_wav16k(src, dst):
 # WHAT WHISPER SAYS WHEN NOBODY SPOKE. It does not return an empty string: it
 # returns a bracketed token — [BLANK_AUDIO], [SILENCE], (music), *coughs* — and
 # a token is text, so it was posted as the user's own words and answered by a
-# model turn. Nine of those reached a real chat before anyone saw it (2026-09-04). A non-speech marker is the transcriber saying "there was
+# model turn. Nine of those reached a real person's Telegram before anyone saw
+# it (2026-09-04). A non-speech marker is the transcriber saying "there was
 # nothing here", which is the opposite of something to answer.
 _NON_SPEECH = re.compile(r"\[[^\]]*\]|\([^)]*\)|\*[^*]*\*|♪+|\.{2,}")
 # After the markers are gone: punctuation and stray single letters are not a
@@ -228,8 +229,40 @@ def speech_text(raw):
     return t if len(t) >= MIN_SPEECH_CHARS else ""
 
 
-def transcribe(audio_bytes, suffix=".m4a"):
-    """(text, seconds_of_audio, peak_dbfs). Raises on an absurdly long clip."""
+def voice_for(lang):
+    """The installed voice for a language code, or the configured default.
+
+    Fourteen voices on disk and one hard-coded path is a tier that ADVERTISES
+    fourteen languages and answers every one of them in English — which is what
+    the first Russian turn did (2026-09-04). The count and the pipeline have to
+    read the same directory.
+    """
+    code = (lang or "").strip().lower()[:2]
+    if not code:
+        return PIPER_VOICE
+    # The configured voice wins for its own language, so installing en_GB
+    # alongside en_US does not silently re-cast the English one.
+    if os.path.basename(PIPER_VOICE).lower().startswith(code + "_"):
+        return PIPER_VOICE
+    d = os.path.dirname(PIPER_VOICE)
+    try:
+        names = sorted(n for n in os.listdir(d) if n.endswith(".onnx"))
+    except OSError:
+        return PIPER_VOICE
+    for n in names:
+        if n.lower().startswith(code + "_"):
+            return os.path.join(d, n)
+    return PIPER_VOICE
+
+
+def transcribe(audio_bytes, suffix=".m4a", lang=None):
+    """(text, seconds, peak_dbfs, language_heard). Raises on an absurd clip.
+
+    The FOURTH value is not decoration. When the app sends no `lang` the
+    recogniser auto-detects, and the answer still has to be SPOKEN in something:
+    without carrying the detected code back out, an auto-detected Russian turn
+    gets a Russian transcript and an English voice reading it.
+    """
     d = tempfile.mkdtemp(prefix="lq-")
     try:
         raw = os.path.join(d, "in" + suffix)
@@ -244,11 +277,29 @@ def transcribe(audio_bytes, suffix=".m4a"):
         if peak < SILENCE_PEAK_DBFS:
             # Do not even run the recogniser: there is nothing in the file, and
             # asking a model what a silence says is how you get "you".
-            return "", seconds, peak
+            return "", seconds, peak, (lang or "")[:2].lower()
+        # -l MATTERS AND ITS DEFAULT IS "en". Without it whisper.cpp assumes
+        # English, and a Russian clip came back TRANSLATED into English rather
+        # than transcribed — "I can speak both Russian and Russian" — which
+        # reads like a bad transcription and is actually the wrong task. The
+        # turn's own language when the app sends one, `auto` otherwise.
+        code = (lang or "").strip().lower()[:2]
+        if code not in _voice_locales():
+            # A language we cannot answer in is not a language this tier speaks;
+            # let the recogniser decide rather than force a wrong one.
+            code = "auto"
         out = subprocess.run(
-            [WHISPER_BIN, "-m", WHISPER_MODEL, "-f", wav, "-nt", "-np"],
+            [WHISPER_BIN, "-m", WHISPER_MODEL, "-f", wav, "-nt", "-np",
+             "-l", code, "-oj", "-of", os.path.join(d, "res")],
             capture_output=True, text=True, timeout=600)
-        return " ".join(out.stdout.split()), seconds, peak
+        heard = code
+        if code == "auto":
+            try:
+                with open(os.path.join(d, "res.json")) as f:
+                    heard = str(json.load(f)["result"]["language"])[:2].lower()
+            except (OSError, ValueError, KeyError, TypeError):
+                heard = ""
+        return " ".join(out.stdout.split()), seconds, peak, heard
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
@@ -263,12 +314,12 @@ REPLY_FORMAT = os.environ.get("LQ_REPLY_FORMAT", "aac")
 REPLY_BITRATE = os.environ.get("LQ_REPLY_BITRATE", "32k")
 
 
-def speak(text):
+def speak(text, lang=None):
     """(audio_bytes, seconds, format) — spoken, then compressed for the wire."""
     d = tempfile.mkdtemp(prefix="lq-")
     try:
         wav = os.path.join(d, "out.wav")
-        subprocess.run([PIPER_BIN, "-m", PIPER_VOICE, "-f", wav],
+        subprocess.run([PIPER_BIN, "-m", voice_for(lang), "-f", wav],
                        input=text, capture_output=True, text=True,
                        check=True, timeout=600)
         seconds = _duration(wav)
@@ -342,7 +393,7 @@ def turn(payload, answer_fn, on_transcript=None):
     drift apart.
 
     `on_transcript(text, ts)` fires THE MOMENT STT FINISHES and before the model
-    is asked anything — the owner's rule: their own words belong on the screen
+    is asked anything — the owner's rule: his own words belong on the screen
     while the answer is still being thought about, not after it arrives. It is
     called with the same timestamp the reply will carry, so the two halves of
     one turn sort together however they race. A failure in it is swallowed: a
@@ -357,7 +408,9 @@ def turn(payload, answer_fn, on_transcript=None):
               "ogg": ".ogg", "opus": ".ogg"}.get(fmt, ".m4a")
     t0 = time.time()
     ts = time.time()
-    heard, secs_in, peak = transcribe(base64.b64decode(b64), suffix)
+    lang = str((payload or {}).get("lang") or "").strip().lower()[:5]
+    heard, secs_in, peak, heard_lang = transcribe(
+        base64.b64decode(b64), suffix, lang)
     user_text = speech_text(heard)
     t_stt = time.time() - t0
     if not user_text:
@@ -384,11 +437,17 @@ def turn(payload, answer_fn, on_transcript=None):
     # app can mute the karaoke when the two differ — the highlight follows the
     # voice, and the voice is no longer reading the thing on screen.
     spoken_line = speech_for(answer or "")
-    audio, secs_out, out_fmt = speak(spoken_line or answer or "")
+    audio, secs_out, out_fmt = speak(spoken_line or answer or "",
+                                     lang or heard_lang)
     return {
         "text": answer,
         **({"speech": spoken_line} if spoken_line else {}),
         "user_text": user_text,
+        # The language the turn actually RAN IN — the app's `lang` when it sent
+        # one, otherwise what the recogniser detected. It is the field that says
+        # which voice you are hearing, and it is how a caller can tell that a
+        # language it asked for was not one this install can answer in.
+        **({"lang": lang or heard_lang} if (lang or heard_lang) else {}),
         "voice": {"format": out_fmt, "b64": base64.b64encode(audio).decode()},
         # Beside the envelope, in the clear, because the meter cannot read the
         # envelope. Rounded to milliseconds: a bill does not need more and a
@@ -411,7 +470,7 @@ def selftest(clip=None):
         print("  missing:", m)
     if not ok:
         return 1
-    clip = clip or os.path.join(HERE, "test_en.wav")
+    clip = clip or os.path.expanduser("~/DST/voice/test_en.wav")
     if not os.path.exists(clip):
         print("no clip to test with:", clip)
         return 1
