@@ -1093,6 +1093,19 @@ def speech_for(text):
 # keeps the two chats consistent.
 REPLAY_WINDOW_S = float(os.environ.get("LQ_REPLAY_WINDOW_S", "120"))
 _recent_turns = {}
+# AND A RETRY THAT ARRIVES BEFORE THE FIRST HAS FINISHED. The cache above only
+# helps once there is an answer to replay; the app now retries a turn whose
+# network vanished mid-flight (2026-09-04), and such a retry lands while the
+# original is still being recognised — nothing cached, both run, two answers.
+# Measured before this existed: two identical clips 0.3s apart produced two
+# model calls and two different answers, which is the duplicate of #482 all
+# over again by another route.
+#
+# So a turn in progress is announced and a duplicate waits for it. The wait
+# never holds the speech lock: it happens before any of the work.
+_inflight = {}
+_inflight_guard = threading.Lock()
+INFLIGHT_WAIT_S = float(os.environ.get("LQ_INFLIGHT_WAIT_S", "180"))
 
 
 def _replay_key(account, audio):
@@ -1100,6 +1113,49 @@ def _replay_key(account, audio):
 
 
 def turn(payload, answer_fn, on_transcript=None, account=None):
+    """One LQ turn, answered once however many times it is asked."""
+    voice = (payload or {}).get("voice") or {}
+    b64 = voice.get("b64")
+    if not b64:
+        raise ValueError("no audio in the turn")
+    raw_audio = base64.b64decode(b64)
+    key = _replay_key(account, raw_audio)
+
+    seen_at, seen_out = _recent_turns.get(key, (0.0, None))
+    if seen_out is not None and time.time() - seen_at < REPLAY_WINDOW_S:
+        print(f"[lq] the same clip again after {time.time() - seen_at:.0f}s — "
+              f"returning the first answer rather than recognising it twice",
+              file=sys.stderr)
+        return seen_out
+
+    with _inflight_guard:
+        waiting = _inflight.get(key)
+        first = waiting is None
+        if first:
+            _inflight[key] = waiting = threading.Event()
+    if not first:
+        print("[lq] the same clip is already being answered — waiting for that "
+              "turn rather than starting a second", file=sys.stderr)
+        waiting.wait(INFLIGHT_WAIT_S)
+        seen_at, seen_out = _recent_turns.get(key, (0.0, None))
+        if seen_out is not None:
+            return seen_out
+        # It failed or timed out. Answer rather than leave them with nothing:
+        # a slow answer beats a dropped one.
+        with _inflight_guard:
+            _inflight[key] = waiting = threading.Event()
+    try:
+        out = _run_turn(payload, answer_fn, on_transcript, account, key,
+                        raw_audio)
+        _recent_turns[key] = (time.time(), out)
+        return out
+    finally:
+        with _inflight_guard:
+            _inflight.pop(key, None)
+        waiting.set()
+
+
+def _run_turn(payload, answer_fn, on_transcript, account, key, raw_audio):
     """One LQ turn: the opened plaintext in, the plaintext reply out.
 
     `payload` is what was inside the envelope: {"voice": {"format", "b64"},
@@ -1123,14 +1179,6 @@ def turn(payload, answer_fn, on_transcript=None, account=None):
               "ogg": ".ogg", "opus": ".ogg"}.get(fmt, ".m4a")
     t0 = time.time()
     ts = time.time()
-    raw_audio = base64.b64decode(b64)
-    key = _replay_key(account, raw_audio)
-    seen_at, seen_out = _recent_turns.get(key, (0.0, None))
-    if seen_out is not None and time.time() - seen_at < REPLAY_WINDOW_S:
-        print(f"[lq] the same clip again after "
-              f"{time.time() - seen_at:.0f}s — returning the first answer "
-              f"rather than recognising it twice", file=sys.stderr)
-        return seen_out
     lang = str((payload or {}).get("lang") or "").strip().lower()[:5]
     # "auto" IS A REQUEST, NOT A LANGUAGE, and it is truthy — which is how it
     # reached `speak(text, lang or heard_lang)` and won, so `voice_for("auto")`
@@ -1233,7 +1281,6 @@ def turn(payload, answer_fn, on_transcript=None, account=None):
                    "think_s": round(t1 - t0 - t_stt, 2),
                    "tts_s": round(time.time() - t1, 2)},
     }
-    _recent_turns[key] = (time.time(), out)
     return out
 
 
