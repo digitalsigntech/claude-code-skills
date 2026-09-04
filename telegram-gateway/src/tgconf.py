@@ -41,7 +41,11 @@ import shutil as _shutil
 CLAUDE_BIN = (os.environ.get("CLAUDE_BIN") or _shutil.which("claude")
               or os.path.expanduser("~/.local/bin/claude"))
 CLAUDE_WORKDIR = WORKSPACE_ROOT
-CLAUDE_MODEL = os.environ.get("TG_TG_MODEL", "claude-opus-5")
+# Fable 5.1 since 2026-09-04 (the owner: "Switch to fable 5.1"). It needed the
+# Claude Code upgrade to 2.1.260 first — the model id did not resolve on
+# 2.1.226. Was Opus 5 from 2026-08-01, which itself replaced Fable 5 when
+# that hit its usage limit. Override per-run with TG_TG_MODEL.
+CLAUDE_MODEL = os.environ.get("TG_TG_MODEL", "claude-fable-5-1")
 CLAUDE_TIMEOUT = int(os.environ.get("TG_TG_TIMEOUT", "900"))
 
 # ---- Identity -------------------------------------------------------------
