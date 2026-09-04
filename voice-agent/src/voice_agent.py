@@ -278,6 +278,10 @@ def is_guest():
     return bool(own and who and who not in own)
 
 
+# Below this is a manufactured guest id, never a Telegram one.
+GUEST_CHAT_FLOOR = -10**12
+
+
 def guest_chat_id(account=None):
     """A private, stable chat id for a guest, well away from Telegram's range."""
     a = account or caller() or "guest"
@@ -758,10 +762,20 @@ def _archive_history(limit, since):
                 "WHERE epoch > ? AND chat_id = ? ORDER BY epoch DESC LIMIT ?",
                 (since, guest_chat_id(), limit)).fetchall()
         else:
+            # AN OWNER'S TIMELINE IS THEIR OWN CHANNELS, NOT EVERY CALLER'S.
+            # This returned the whole archive, so an agent serving both an owner
+            # and demo accounts handed the owner's phone the demo sessions —
+            # other people's conversations, on his screen, with no way to tell
+            # whose they were. Found on 2026-09-04, the same shape as the device
+            # registry before #409: one store, several accounts, and no key.
+            #
+            # Guest ids are MANUFACTURED below -10^12 by guest_chat_id(); a
+            # Telegram chat id never reaches there. So the boundary is derived
+            # from the code that mints them rather than from a list to maintain.
             rows = cx.execute(
                 "SELECT epoch, sender, text, direction FROM messages "
-                "WHERE epoch > ? ORDER BY epoch DESC LIMIT ?",
-                (since, limit)).fetchall()
+                "WHERE epoch > ? AND chat_id > ? ORDER BY epoch DESC LIMIT ?",
+                (since, GUEST_CHAT_FLOOR, limit)).fetchall()
         cx.close()
     except Exception:
         return None
