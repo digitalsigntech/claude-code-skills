@@ -35,7 +35,8 @@
       "file": "fr_FR-siwis-medium.onnx",
       "path": "fr/fr_FR/siwis/medium/fr_FR-siwis-medium.onnx",
       "gender": "F",
-      "hz": 216.2
+      "hz": 216.2,
+      "kokoro": "ff_siwis"
     },
     "maria": {
       "file": "fr_FR-upmc-medium.onnx",
@@ -64,7 +65,8 @@
       "path": "es/es_ES/sharvard/medium/es_ES-sharvard-medium.onnx",
       "speaker": 1,
       "gender": "F",
-      "hz": 202.3
+      "hz": 202.3,
+      "kokoro": "ef_dora"
     },
     "maria": {
       "file": "es_MX-claude-high.onnx",
@@ -76,14 +78,16 @@
       "file": "es_ES-davefx-medium.onnx",
       "path": "es/es_ES/davefx/medium/es_ES-davefx-medium.onnx",
       "gender": "M",
-      "hz": 114.8
+      "hz": 114.8,
+      "kokoro": "em_alex"
     },
     "leo": {
       "file": "es_ES-sharvard-medium.onnx",
       "path": "es/es_ES/sharvard/medium/es_ES-sharvard-medium.onnx",
       "speaker": 0,
       "gender": "M",
-      "hz": 121.8
+      "hz": 121.8,
+      "kokoro": "em_santa"
     }
   },
   "de": {
@@ -117,7 +121,8 @@
       "file": "it_IT-paola-medium.onnx",
       "path": "it/it_IT/paola/medium/it_IT-paola-medium.onnx",
       "gender": "F",
-      "hz": 208.0
+      "hz": 208.0,
+      "kokoro": "if_sara"
     },
     "maria": {
       "file": "it_IT-serena-medium.onnx",
@@ -129,7 +134,8 @@
       "file": "it_IT-riccardo-x_low.onnx",
       "path": "it/it_IT/riccardo/x_low/it_IT-riccardo-x_low.onnx",
       "gender": "M",
-      "hz": 150.2
+      "hz": 150.2,
+      "kokoro": "im_nicola"
     }
   },
   "pt": {
@@ -327,15 +333,15 @@
     }
   },
   "_engines": {
-    "_why": "Which synthesiser speaks each language on a CPU-only or AMD agent. Kokoro only where it can fill AT LEAST as many named roles as Piper already does: it has one French voice against Piper's four, one Italian pair against three, three Spanish against four. Sounding better is not worth a picker that shrinks, and moving a language is one word here.",
+    "_why": "Which synthesiser speaks each language. The owner's rule (2026-09-04, second decision): Kokoro wherever it supports the language, Piper only where it does not. He was told the cost first — French drops from four voices to one and loses every male voice, Spanish four to three, Italian three to two — and chose the sound. Piper keeps de pl sv nl tr ru uk.",
     "en": "kokoro",
     "ja": "kokoro",
     "pt": "kokoro",
     "zh": "kokoro",
     "de": "piper",
-    "es": "piper",
-    "fr": "piper",
-    "it": "piper",
+    "es": "kokoro",
+    "fr": "kokoro",
+    "it": "kokoro",
     "nl": "piper",
     "pl": "piper",
     "ru": "piper",
