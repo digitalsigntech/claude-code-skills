@@ -935,6 +935,12 @@ def say_text(text):
         return m.group(0)
     t = _TIME24.sub(_time, t)
     t = re.sub(r"\x00(\d+)\x00", lambda m: kept[int(m.group(1))], t)
+    # A SPELLED CODE ENDS IN A COMMA and the sentence usually had one of its
+    # own: "the PR-01, a Performance Series" became "the P R, 0 1 , a
+    # Performance Series" — a space before a comma, which is an extra breath
+    # where there should be none.
+    t = re.sub(r"\s+([,.;:!?])", r"\1", t)
+    t = re.sub(r"([,.;:!?])\1+", r"\1", t)
     return " ".join(t.split())
 
 
