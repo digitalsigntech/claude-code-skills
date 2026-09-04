@@ -2462,10 +2462,14 @@ class Handler(BaseHTTPRequestHandler):
                 "audio_seconds_out": 0.0, "engine": "local",
                 "took_s": round(time.time() - t0, 2)})
         self.log_message(
-            "voice turn: %.1fs in, %.1fs out, stt %.1fs tts %.1fs, %d KB reply",
+            # THE ZONE IS IN THE LINE because "is it arriving?" cost a round
+            # trip to answer. A turn that reached the model with no date at all
+            # (#436) looked identical in the log to one that had it.
+            "voice turn: %.1fs in, %.1fs out, stt %.1fs tts %.1fs, %d KB reply,"
+            " tz=%s",
             out["audio_seconds_in"], out["audio_seconds_out"],
             out["timing"]["stt_s"], out["timing"]["tts_s"],
-            len(out["voice"]["b64"]) // 1024)
+            len(out["voice"]["b64"]) // 1024, d.get("tz") or "(none)")
         LAST_APP_TURN[account] = time.time()
         body = json.dumps({"text": out["text"], "user_text": out["user_text"],
                            # Present only when the answer's body belongs on the
