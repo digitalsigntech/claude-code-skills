@@ -431,8 +431,14 @@ def speakers_for(lang):
         # Piper never had — ja/maria and zh/leo — and a check that only looked
         # for an .onnx would have hidden them while their greetings sat on the
         # plane, which is a picker disagreeing with its own samples.
-        if kokoro and entry.get("kokoro"):
-            out.append(vid)
+        if kokoro:
+            # ONE ENGINE PER LANGUAGE, not one per voice. Offering `maria` in
+            # Spanish from Piper while the other three come from Kokoro would
+            # put two different synthesisers in one picker and leave her with
+            # no sample, since the greetings are regenerated per language. If
+            # Kokoro speaks this language, its voices are the whole list.
+            if entry.get("kokoro"):
+                out.append(vid)
             continue
         f = entry.get("file", "")
         if not f:
@@ -470,7 +476,18 @@ def voices():
     # "still arriving" from "this is all the engine has". Turkish really does
     # have one voice in the whole of Piper. So the row says which it is.
     have = sum(len(v) for v in by_lang.values())
-    want = sum(len(v) for k, v in _roster().items() if not k.startswith("_"))
+    # WHAT THE ENGINES CAN FILL, not what the roster lists. Moving a language
+    # to Kokoro strands the roles Kokoro has no voice for — Spanish maria,
+    # three quarters of French — and counting those as missing said "42 of 47,
+    # rises as the rest arrive" about voices that are never arriving.
+    want = 0
+    for code, entries in _roster().items():
+        if code.startswith("_"):
+            continue
+        if engine_for(code) == "kokoro":
+            want += sum(1 for e in entries.values() if e.get("kokoro"))
+        else:
+            want += sum(1 for e in entries.values() if e.get("file"))
     source = (f"{have} of {want} rostered voices installed on this machine"
               + ("" if have >= want else
                  " — a language offers only what is on this disk, so this "
