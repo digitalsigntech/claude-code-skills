@@ -2434,6 +2434,11 @@ class Handler(BaseHTTPRequestHandler):
             len(out["voice"]["b64"]) // 1024)
         LAST_APP_TURN[account] = time.time()
         body = json.dumps({"text": out["text"], "user_text": out["user_text"],
+                           # Present only when the answer's body belongs on the
+                           # screen rather than in the ear; the app mutes the
+                           # karaoke when it differs from `text`.
+                           **({"speech": out["speech"]} if out.get("speech")
+                              else {}),
                            "voice": out["voice"]}, ensure_ascii=False)
         sealed = seal_for_devices(body, account=account) or e2ee_seal(
             body, priv, mine, theirs, direction=DIR_TO_PHONE)
