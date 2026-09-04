@@ -874,9 +874,18 @@ def engine_for(lang):
 
 def _kokoro_voice(lang, speaker):
     code = (lang or "").strip().lower()[:2]
-    entry = (_roster().get(code) or {}).get((speaker or "").strip().lower())
+    who = (speaker or "").strip().lower()
+    here = _roster().get(code) or {}
+    entry = here.get(who)
     if entry and entry.get("kokoro"):
         return entry["kokoro"]
+    if who:
+        # THE SAME DISAGREEMENT #446 MADE AUDIBLE FOR PIPER: an id this roster
+        # lacks (or one Kokoro has no voice for) falls back to the language
+        # default, and it must say so in the log or the picker "does nothing".
+        print(f"[lq] no kokoro voice named {who!r} for {code} "
+              f"(roster has: {' '.join(k for k, e in here.items() if e.get('kokoro')) or 'nothing'})"
+              " — using the language default", file=sys.stderr)
     for vid, e in (_roster().get(code) or {}).items():
         if e.get("kokoro"):
             return e["kokoro"]
@@ -884,10 +893,11 @@ def _kokoro_voice(lang, speaker):
 
 
 def _speak_kokoro(text, lang, speaker, wav):
-    """Synthesise with Kokoro. Returns False if this turn cannot use it."""
+    """Synthesise with Kokoro. Returns the voice id that spoke, or None if
+    this turn cannot use it — ONE lookup, so a fallback is logged once."""
     voice = _kokoro_voice(lang, speaker)
     if not voice:
-        return False
+        return None
     import soundfile as sf
     code = (lang or "en").strip().lower()[:2]
     tag = {"en": "en-us", "ja": "ja", "pt": "pt-br", "zh": "cmn"}.get(code, code)
@@ -895,11 +905,15 @@ def _speak_kokoro(text, lang, speaker, wav):
         samples, sr = _kokoro_engine().create(text, voice=voice, speed=1.0,
                                               lang=tag)
     sf.write(wav, samples, sr)
-    return True
+    return voice
 
 
 def speak(text, lang=None, speaker=None):
-    """(audio_bytes, seconds, format, sample_rate) — spoken, then compressed.
+    """(audio_bytes, seconds, format, sample_rate, voice) — spoken, compressed.
+
+    THE LAST FIELD IS WHO SPOKE — "kokoro:am_michael" or a Piper file name —
+    reported by the code that chose it, because the label used to be a second
+    roster lookup that always named the Piper file whichever engine had spoken.
 
     THE RATE IS RETURNED because it took a side-by-side ffprobe of two files to
     discover that replies were resampled to 16 kHz while the greeting clips kept
@@ -909,6 +923,26 @@ def speak(text, lang=None, speaker=None):
     d = tempfile.mkdtemp(prefix="lq-")
     try:
         wav = os.path.join(d, "out.wav")
+        # THE ENGINE IS CHOSEN BEFORE ANY VOICE FILE IS LOOKED FOR. Resolving
+        # the Piper roster first, "just in case", is what made the box's first
+        # English turn log "rostered voice missing: leo/en" twice and then
+        # label a Kokoro reply as en_US-lessac-medium.onnx (request 475): the
+        # Piper files for Kokoro's languages are absent ON PURPOSE, and a
+        # warning about them is not a warning, it is noise that hides one.
+        if engine_for(lang) == "kokoro":
+            try:
+                kv = _speak_kokoro(text, lang, speaker, wav)
+                if kv:
+                    seconds = _duration(wav)
+                    with wave.open(wav) as _w:
+                        rate = int(REPLY_RATE) if REPLY_RATE else _w.getframerate()
+                    return _encode(d, wav, seconds, rate) + ("kokoro:" + kv,)
+            except Exception as e:
+                # NEVER LOSE THE TURN TO A NEW ENGINE. Piper is installed,
+                # proven and one line away; a synthesiser that fails should cost
+                # a log line, not an answer.
+                print(f"[lq] kokoro failed ({e}) — speaking with piper",
+                      file=sys.stderr)
         model, sid = voice_for(lang, speaker)
         cmd = [PIPER_BIN, "-m", model, "-f", wav]
         if sid is not None:
@@ -916,19 +950,7 @@ def speak(text, lang=None, speaker=None):
             # -s it is always speaker 0, which would make two rostered ids the
             # same voice and nobody would hear the difference as a bug.
             cmd += ["-s", str(sid)]
-        if engine_for(lang) == "kokoro":
-            try:
-                if _speak_kokoro(text, lang, speaker, wav):
-                    seconds = _duration(wav)
-                    with wave.open(wav) as _w:
-                        rate = int(REPLY_RATE) if REPLY_RATE else _w.getframerate()
-                    return _encode(d, wav, seconds, rate)
-            except Exception as e:
-                # NEVER LOSE THE TURN TO A NEW ENGINE. Piper is installed,
-                # proven and one line away; a synthesiser that fails should cost
-                # a log line, not an answer.
-                print(f"[lq] kokoro failed ({e}) — speaking with piper",
-                      file=sys.stderr)
+        spoke_by = os.path.basename(model) + ("" if sid is None else f"#{sid}")
         pieces = _phrases(text)
         with _SPEECH_CPU:
             if len(pieces) == 1:
@@ -979,7 +1001,7 @@ def speak(text, lang=None, speaker=None):
                            input=text, capture_output=True, text=True,
                            check=True, timeout=600)
             seconds = _duration(wav)
-        return _encode(d, wav, seconds, rate)
+        return _encode(d, wav, seconds, rate) + (spoke_by,)
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
@@ -1371,8 +1393,8 @@ def _run_turn(payload, answer_fn, on_transcript, account, key, raw_audio):
     to_say = _speakable(spoken_line or answer or "")
     if not to_say.strip():
         to_say = "I do not have an answer for that."
-    audio, secs_out, out_fmt, out_rate = speak(to_say, lang or heard_lang,
-                                               speaker)
+    audio, secs_out, out_fmt, out_rate, spoke_by = speak(
+        to_say, lang or heard_lang, speaker)
     out = {
         "text": answer,
         **({"speech": spoken_line} if spoken_line else {}),
@@ -1408,8 +1430,7 @@ def _run_turn(payload, answer_fn, on_transcript, account, key, raw_audio):
         # WHICH FILE SPOKE, not only how it was packaged. Asked "which voice
         # model spoke and what is its native rate" I could answer the second
         # from the log and had to go and look for the first (2026-09-04).
-        "reply_format": (f"{out_fmt} {out_rate} Hz {REPLY_BITRATE} "
-                         f"{os.path.basename(voice_for(lang or heard_lang, speaker)[0])}"),
+        "reply_format": f"{out_fmt} {out_rate} Hz {REPLY_BITRATE} {spoke_by}",
         "timing": {"stt_s": round(t_stt, 2),
                    "think_s": round(t1 - t0 - t_stt, 2),
                    "tts_s": round(time.time() - t1, 2)},
