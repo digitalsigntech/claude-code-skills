@@ -830,6 +830,8 @@ _CODE = re.compile(r"\b([A-Z]{2,3})-(\d[\d-]*)\b")
 # cannot reach inside them by accident.
 _OPAQUE = re.compile(r"(?:https?://\S+|www\.\S+|\S+@\S+\.\S+"
                      r"|/[\w.-]+(?:/[\w.-]+)+/?|\b[\w-]+\.[a-z]{2,}/\S*)")
+# More codes than this in one answer is a list, not a reference to write down.
+SPELL_MAX_CODES = 2
 _FRACTION = {"1/2": "one half", "1/3": "one third", "2/3": "two thirds",
              "1/4": "one quarter", "3/4": "three quarters"}
 _NUM_SLASH = re.compile(r"(?<![\w/])(\d+)\s*/\s*(\d+)(?![\w/])")
@@ -877,7 +879,19 @@ def say_text(text):
                                 f"{m.group(1)} over {m.group(2)}"), t)
     # Codes first: they contain hyphens and digits that every later rule would
     # otherwise claim as a range or a quantity.
-    t = _CODE.sub(lambda m: _spell(m.group(0)), t)
+    #
+    # BUT SPELLING IS FOR ONE CODE, NOT FOR A CATALOGUE. Reading "PO-26-0412"
+    # as characters is right when someone has to write it down. Applied to an
+    # answer listing six presses — PR-01 through PR-06, each named twice — it
+    # produced "P R, 0 1 ... P R, 0 2 ..." for four hundred characters, which
+    # the owner heard as gibberish and was right to (2026-09-04). Above a
+    # handful, the hyphen simply becomes a space and the code is read as words
+    # and numbers, which is how a person reads a list aloud.
+    codes = _CODE.findall(t)
+    if len(codes) > SPELL_MAX_CODES:
+        t = _CODE.sub(lambda m: m.group(0).replace("-", " "), t)
+    else:
+        t = _CODE.sub(lambda m: _spell(m.group(0)), t)
 
     def _abbr(m):
         w = m.group(1) or m.group(2)
@@ -1099,7 +1113,11 @@ def turn(payload, answer_fn, on_transcript=None, account=None):
         "peak_dbfs": (None if peak == float("-inf") else round(peak, 1)),
         # What the reply is, in the clear, so a complaint about how it sounds
         # has something to check itself against.
-        "reply_format": f"{out_fmt} {out_rate} Hz {REPLY_BITRATE}",
+        # WHICH FILE SPOKE, not only how it was packaged. Asked "which voice
+        # model spoke and what is its native rate" I could answer the second
+        # from the log and had to go and look for the first (2026-09-04).
+        "reply_format": (f"{out_fmt} {out_rate} Hz {REPLY_BITRATE} "
+                         f"{os.path.basename(voice_for(lang or heard_lang, speaker)[0])}"),
         "timing": {"stt_s": round(t_stt, 2),
                    "think_s": round(t1 - t0 - t_stt, 2),
                    "tts_s": round(time.time() - t1, 2)},
