@@ -928,6 +928,18 @@ def _speakable(text):
     return say_text(text)
 
 
+# The model's own signal that this one is to be heard entire (#460).
+READ_IN_FULL = "[read-in-full]"
+
+
+def read_in_full(text):
+    """(stripped_text, speak_it_all) — the marker never reaches the screen."""
+    t = (text or "").lstrip()
+    if t[:len(READ_IN_FULL)].lower() == READ_IN_FULL:
+        return t[len(READ_IN_FULL):].lstrip(), True
+    return text, False
+
+
 def speech_for(text):
     """A short line to SAY for an answer whose body belongs on the screen.
 
@@ -1029,11 +1041,15 @@ def turn(payload, answer_fn, on_transcript=None, account=None):
         except Exception as e:
             print(f"[lq] posting the transcript failed: {e}", file=sys.stderr)
     answer = answer_fn(user_text)
+    # THE MODEL ASKED FOR THE WHOLE THING. The cap is for conversation; when the
+    # person said "read me the email", cutting it at four hundred characters and
+    # saying "the rest is on your screen" answers a question nobody asked.
+    answer, speak_all = read_in_full(answer)
     t1 = time.time()
     # SPEAK THE SUMMARY, SHOW THE TABLE. `speech` travels beside `text` so the
     # app can mute the karaoke when the two differ — the highlight follows the
     # voice, and the voice is no longer reading the thing on screen.
-    spoken_line = speech_for(answer or "")
+    spoken_line = "" if speak_all else speech_for(answer or "")
     # STRIPPED WHETHER OR NOT IT WAS SUMMARISED. `speech_for()` cleans the
     # line it builds, but a short answer returns "" from it and went to Piper
     # RAW — so "**Total** 226,220" kept its asterisks and the voice read them.
