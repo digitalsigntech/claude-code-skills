@@ -855,6 +855,14 @@ def turn(payload, answer_fn, on_transcript=None, account=None):
         # The turn's own stamp, shared with the transcript posted above so the
         # two halves of one exchange sort together whichever arrives first.
         "ts": ts,
+        # HOW LOUD IT WAS, on a turn that DID produce words. Reported only for
+        # the silent ones until now, which is the wrong way round: silence is
+        # already explained. The unexplained case is a short transcript out of
+        # very quiet audio — whisper's documented habit of hallucinating a bare
+        # "you" or "Thank you." on near-silence (#433). A bare word is not a
+        # marker, so no filter here catches it; this at least makes it
+        # IDENTIFIABLE in the log the first time someone reports a phantom.
+        "peak_dbfs": (None if peak == float("-inf") else round(peak, 1)),
         "timing": {"stt_s": round(t_stt, 2),
                    "think_s": round(t1 - t0 - t_stt, 2),
                    "tts_s": round(time.time() - t1, 2)},

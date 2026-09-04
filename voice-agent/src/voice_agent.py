@@ -2466,10 +2466,22 @@ class Handler(BaseHTTPRequestHandler):
             # trip to answer. A turn that reached the model with no date at all
             # (#436) looked identical in the log to one that had it.
             "voice turn: %.1fs in, %.1fs out, stt %.1fs tts %.1fs, %d KB reply,"
-            " tz=%s",
+            " tz=%s, peak %s dBFS%s",
             out["audio_seconds_in"], out["audio_seconds_out"],
             out["timing"]["stt_s"], out["timing"]["tts_s"],
-            len(out["voice"]["b64"]) // 1024, d.get("tz") or "(none)")
+            len(out["voice"]["b64"]) // 1024, d.get("tz") or "(none)",
+            out.get("peak_dbfs"),
+            # THE PHANTOM'S SHAPE, flagged rather than filtered. A few words out
+            # of near-silence is what whisper's bare-word hallucination looks
+            # like, and no filter here can catch it because a word is not a
+            # marker. Tuning `--no-speech-thold` against it would need the
+            # failure to tune against, and every case I could synthesise came
+            # back as a marker instead. So: make it greppable, and tune when
+            # there is something real to tune on.
+            ("  <- SHORT TRANSCRIPT FROM QUIET AUDIO, possible hallucination"
+             if (len(out.get("user_text") or "") <= 12
+                 and isinstance(out.get("peak_dbfs"), (int, float))
+                 and out["peak_dbfs"] < -40) else ""))
         LAST_APP_TURN[account] = time.time()
         body = json.dumps({"text": out["text"], "user_text": out["user_text"],
                            # Present only when the answer's body belongs on the
