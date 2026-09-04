@@ -195,6 +195,63 @@ would know is the honest test.
 - [ ] `pair.py --test` returns ok
 - [ ] A real spoken question answered from this machine's files
 
+## The local tier (LQ) — optional, and it must prove itself (2026-09-04)
+
+LQ is speech in and speech out **on the agent's own machine**: whisper.cpp hears, the agent's
+ordinary ask path answers, Piper speaks. No audio leaves the machine and there is no speech
+provider in the path. Skip this whole section and the tier simply reports itself unavailable —
+which is the correct behaviour, not a degraded one.
+
+Four things have to exist, and `local_voice.py --probe` says which are missing:
+
+```bash
+# 1. the recogniser. small MULTILINGUAL on a CPU-only box; large-v3-turbo where
+#    there is an accelerator. small.en is English-only and the row will say so.
+#    (whisper.cpp, built per its own README)
+# 2. piper
+pip install piper-tts
+# 3. ffmpeg on PATH
+# 4. the voices — see below
+```
+
+Point the service at them:
+
+```
+LQ_WHISPER_BIN=/path/to/whisper-cli
+LQ_WHISPER_MODEL=/path/to/ggml-small.bin
+LQ_PIPER_BIN=/path/to/venv/bin/piper
+LQ_PIPER_VOICE=/path/to/voices/en_US-lessac-medium.onnx
+```
+
+### Voices: fetch what you will use, not all of them
+
+```bash
+python3 src/install_voices.py --langs en,de --dest /path/to/voices
+python3 src/install_voices.py --all          # all fourteen, ~2.6 GB
+```
+
+The roster names four ids — `anna`, `maria` (female), `tom`, `leo` (male) — and each language fills
+the roles it has voices for. **Not every language has four.** Turkish has exactly one voice in the
+whole of Piper; Japanese has two. The model row publishes `voices_by_lang` so the picker offers only
+what this machine can actually say, so a partial install is honest rather than broken: install two
+languages and the row reports two.
+
+The installer fetches from upstream rather than from us (measured 6.2 MB/s against 1.3 MB/s copying
+from the box), installs the phonemizers Piper does **not** ship — `pyopenjtalk` for Japanese, `g2pW`
+for Chinese — and ends by synthesising one word with every voice it installed.
+
+That last step is not ceremony. Japanese and Chinese voices load, produce no audio, and fail with
+`wave.Error: # channels not specified`, an error about the output file that says nothing about the
+cause. For a day the tier advertised fourteen languages and could speak twelve, because the count
+read filenames. Run it again yourself any time:
+
+```bash
+python3 src/local_voice.py --verify-voices
+```
+
+It prints `ok` or `MUTE` per voice and the language count that follows from it, and the model row's
+published reason ends in either *"proven to speak"* or *"installed but unverified"*.
+
 ## Reminders that actually fire (2026-08-13)
 
 The adapter can list and amend reminders as soon as `telegram-gateway`'s
