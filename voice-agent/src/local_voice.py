@@ -53,6 +53,25 @@ PIPER_BIN = os.environ.get(
 PIPER_VOICE = os.environ.get(
     "LQ_PIPER_VOICE",
     os.path.join(HERE, "voices", "en_US-lessac-medium.onnx"))
+# LANGUAGE ID IS NOT TRANSCRIPTION, and paying transcription prices for it is
+# what `-l auto` does: a second full encoder pass, 13.4s against 7.2s on a
+# two-core agent. A smaller model can say WHICH language without being able to
+# write down what was said — measured over ten languages on Max:
+#
+#     tiny   9/10   0.84s      base  10/10  1.82s      small  10/10  6.59s
+#
+# BASE, NOT TINY, AND THE REASON IS UKRAINIAN. Tiny called it Russian — the one
+# confusion in this set that matters most, and on this pipeline a wrong `-l`
+# does not fail, it translates (#419). It was also barely confident when right:
+# Turkish at p=0.39, Dutch at p=0.49. Base was right ten times out of ten and
+# never below p=0.97, for four seconds less than the full model.
+WHISPER_DETECT_MODEL = os.environ.get(
+    "LQ_WHISPER_DETECT_MODEL",
+    os.path.join(os.path.dirname(WHISPER_MODEL), "ggml-base.bin"))
+# Below this we do not believe the detector and pay for the full two-pass
+# `auto`. Base's worst CORRECT answer was 0.97 and tiny's wrong one was 0.61,
+# so this sits in the gap the measurement left rather than a round number.
+DETECT_MIN_P = float(os.environ.get("LQ_DETECT_MIN_P", "0.85"))
 FFMPEG = os.environ.get("LQ_FFMPEG", "ffmpeg")
 
 # A turn is one push of a button. Longer than this is not a question, it is an
@@ -480,6 +499,37 @@ def voice_for(lang, speaker=None):
     return PIPER_VOICE, None
 
 
+def detect_language(wav):
+    """Which language is this, per the small model — or "" if we cannot say.
+
+    Returns "" rather than a guess when the detector is absent or UNSURE, and
+    the caller then falls back to whisper's own `-l auto`. A detector that
+    invents a language is worse than none: forcing the wrong `-l` does not
+    fail, it TRANSLATES (#419), which is the bug this whole path exists to
+    avoid. Unsure is therefore a first-class answer, not a failure.
+    """
+    if not os.path.exists(WHISPER_DETECT_MODEL):
+        return ""
+    try:
+        r = subprocess.run(
+            [WHISPER_BIN, "-m", WHISPER_DETECT_MODEL, "-f", wav, "-dl", "-nt"],
+            capture_output=True, text=True, timeout=300)
+    except (OSError, subprocess.SubprocessError) as e:
+        print(f"[lq] language detection skipped: {e}", file=sys.stderr)
+        return ""
+    blob = (r.stdout or "") + (r.stderr or "")
+    m = re.search(r"auto-detected language:\s*([a-z]{2})\s*"
+                  r"\(p\s*=\s*([0-9.]+)\)", blob)
+    if not m:
+        return ""
+    code, p = m.group(1), float(m.group(2))
+    if p < DETECT_MIN_P:
+        print(f"[lq] detector unsure ({code} p={p:.2f}) — falling back to the "
+              f"full model", file=sys.stderr)
+        return ""
+    return code
+
+
 def transcribe(audio_bytes, suffix=".m4a", lang=None):
     """(text, seconds, peak_dbfs, language_heard). Raises on an absurd clip.
 
@@ -522,6 +572,8 @@ def transcribe(audio_bytes, suffix=".m4a", lang=None):
             # A language we cannot answer in also lands here: forcing one we
             # have no voice for buys a transcript we cannot reply to.
             code = "auto"
+        if code == "auto":
+            code = detect_language(wav) or "auto"
         out = subprocess.run(
             [WHISPER_BIN, "-m", WHISPER_MODEL, "-f", wav, "-nt", "-np",
              "-l", code, "-oj", "-of", os.path.join(d, "res")],
