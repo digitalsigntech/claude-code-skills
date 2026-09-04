@@ -528,6 +528,33 @@ def model_for(code):
     return WHISPER_MODEL
 
 
+# THE LANGUAGE OF THE LAST TURN, per account, briefly.
+#
+# Hands-free (2026-09-04) turns one long question into a stream of short ones,
+# and short audio is not reliably identifiable BY ANY MODEL HERE: 1.8s of
+# Ukrainian is read as Russian by base at p=0.94 AND by small at p=0.95 — both
+# wrong, both confident, so no threshold and no bigger model saves it. Half a
+# second of "Да" is read as English, or Portuguese.
+#
+# But a conversation does not change language every utterance. The first turn is
+# long enough to identify; the "yes" that follows it is not, and does not need
+# to be. So a detection is remembered for a few minutes and a clip too short to
+# trust inherits it.
+SHORT_CLIP_S = float(os.environ.get("LQ_SHORT_CLIP_S", "2.5"))
+RECENT_LANG_S = float(os.environ.get("LQ_RECENT_LANG_S", "600"))
+_recent_lang = {}
+
+
+def remember_lang(account, code):
+    if code:
+        _recent_lang[str(account or "default")] = (time.time(), code)
+
+
+def recent_lang(account):
+    ts, code = _recent_lang.get(str(account or "default"), (0, ""))
+    return code if time.time() - ts < RECENT_LANG_S else ""
+
+
 def detect_language(wav):
     """Which language is this, per the small model — or "" if we cannot say.
 
@@ -559,7 +586,7 @@ def detect_language(wav):
     return code
 
 
-def transcribe(audio_bytes, suffix=".m4a", lang=None):
+def transcribe(audio_bytes, suffix=".m4a", lang=None, hint=""):
     """(text, seconds, peak_dbfs, language_heard). Raises on an absurd clip.
 
     The FOURTH value is not decoration. When the app sends no `lang` the
@@ -602,7 +629,17 @@ def transcribe(audio_bytes, suffix=".m4a", lang=None):
             # have no voice for buys a transcript we cannot reply to.
             code = "auto"
         if code == "auto":
-            code = detect_language(wav) or "auto"
+            # TOO SHORT TO IDENTIFY: inherit the session's language rather than
+            # ask a model a question it cannot answer. Measured on Max — 1.8s of
+            # Ukrainian reads as Russian at p=0.94, and 0.53s of Russian reads
+            # as English at p=0.61 — so this is not a threshold that needs
+            # tuning, it is audio that does not contain the answer.
+            if seconds < SHORT_CLIP_S and hint:
+                print(f"[lq] {seconds:.2f}s is too short to identify — "
+                      f"continuing in {hint}", file=sys.stderr)
+                code = hint
+            else:
+                code = detect_language(wav) or "auto"
         model = model_for(code)
         out = subprocess.run(
             [WHISPER_BIN, "-m", model, "-f", wav, "-nt", "-np",
@@ -730,7 +767,7 @@ def speech_for(text):
     return "It is on your screen."
 
 
-def turn(payload, answer_fn, on_transcript=None):
+def turn(payload, answer_fn, on_transcript=None, account=None):
     """One LQ turn: the opened plaintext in, the plaintext reply out.
 
     `payload` is what was inside the envelope: {"voice": {"format", "b64"},
@@ -764,7 +801,10 @@ def turn(payload, answer_fn, on_transcript=None):
         lang = ""
     speaker = str((payload or {}).get("speaker") or "").strip().lower()[:32]
     heard, secs_in, peak, heard_lang = transcribe(
-        base64.b64decode(b64), suffix, lang)
+        base64.b64decode(b64), suffix, lang, recent_lang(account))
+    # Remember what this account is speaking, so the one-word answers that
+    # follow a question do not each have to be identified from scratch.
+    remember_lang(account, lang or heard_lang)
     user_text = speech_text(heard)
     t_stt = time.time() - t0
     if not user_text:
