@@ -630,6 +630,14 @@ REPLY_FORMAT = os.environ.get("LQ_REPLY_FORMAT", "aac")
 REPLY_BITRATE = os.environ.get("LQ_REPLY_BITRATE", "32k")
 
 
+# NOBODY SPEAKS FASTER THAN THIS. Above roughly forty characters a second the
+# audio is not fast speech, it is a voice DROPPING most of the text: a Ukrainian
+# model handed "Sales were 1,048,200." produced 0.44s where the English voice
+# produced 2.91s, and the failure is silence rather than an accent. Normal
+# speech, in every language here, sits near twelve to eighteen.
+MAX_CHARS_PER_SECOND = float(os.environ.get("LQ_MAX_CPS", "40"))
+
+
 def speak(text, lang=None, speaker=None):
     """(audio_bytes, seconds, format) — spoken, then compressed for the wire."""
     d = tempfile.mkdtemp(prefix="lq-")
@@ -646,6 +654,21 @@ def speak(text, lang=None, speaker=None):
                        input=text, capture_output=True, text=True,
                        check=True, timeout=600)
         seconds = _duration(wav)
+        # A VOICE THAT READ ALMOST NONE OF IT GETS ONE SECOND CHANCE. This
+        # happens when the answer is in a different script from the voice —
+        # the agent replying in English to a Ukrainian question — and the user
+        # would otherwise receive half a second of nothing and no error
+        # anywhere. The default voice is not necessarily right for the
+        # language, but it is certainly better than silence.
+        if (text.strip() and model != PIPER_VOICE
+                and seconds > 0 and len(text) / seconds > MAX_CHARS_PER_SECOND):
+            print(f"[lq] {os.path.basename(model)} read {len(text)} chars in "
+                  f"{seconds:.2f}s — speaking it with the default voice",
+                  file=sys.stderr)
+            subprocess.run([PIPER_BIN, "-m", PIPER_VOICE, "-f", wav],
+                           input=text, capture_output=True, text=True,
+                           check=True, timeout=600)
+            seconds = _duration(wav)
         if REPLY_FORMAT == "wav":
             with open(wav, "rb") as f:
                 return f.read(), seconds, "wav"
@@ -732,6 +755,13 @@ def turn(payload, answer_fn, on_transcript=None):
     t0 = time.time()
     ts = time.time()
     lang = str((payload or {}).get("lang") or "").strip().lower()[:5]
+    # "auto" IS A REQUEST, NOT A LANGUAGE, and it is truthy — which is how it
+    # reached `speak(text, lang or heard_lang)` and won, so `voice_for("auto")`
+    # found no voice for "au" and answered a Ukrainian question in English.
+    # That is #419 exactly, reintroduced by the contract that fixed it. Found by
+    # running a WHOLE TURN rather than the recogniser on its own.
+    if lang == "auto":
+        lang = ""
     speaker = str((payload or {}).get("speaker") or "").strip().lower()[:32]
     heard, secs_in, peak, heard_lang = transcribe(
         base64.b64decode(b64), suffix, lang)
