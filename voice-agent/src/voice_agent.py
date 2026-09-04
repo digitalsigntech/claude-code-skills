@@ -471,6 +471,16 @@ def _record_mirror(chat_id, mirrored):
     except Exception:
         pass
 
+# No sentence anyone speaks or types is this long; anything bigger is a payload
+# that took a wrong turn.
+MAX_ARCHIVE_CHARS = 20000
+
+
+def _looks_like_envelope(text):
+    t = (text or "").lstrip()[:200]
+    return t.startswith("{") and '"voice"' in t and '"b64"' in t
+
+
 def archive(text, direction, sender, account_name="", mirror=True,
             kind="text", ts=None):
     # `kind` and `ts` exist for LQ (#396). A transcribed line and a typed one
@@ -485,7 +495,20 @@ def archive(text, direction, sender, account_name="", mirror=True,
     because writing it down did. The row is filed under the TELEGRAM chat when
     there is one, not under a separate "Voice" pseudo-chat: one person talking
     to one agent should read back as one conversation, whichever way the words
-    arrived."""
+    arrived.
+
+    IT REFUSES A RAW VOICE ENVELOPE. Twice now (2026-09-04) I have posted a
+    `{"voice": {"b64": ...}}` payload to a live agent as an ordinary question
+    while probing the LQ path; both times it was filed as somebody's words —
+    25 KB the first time, which blanked his chat on launch, and 170 KB the
+    second. The archive has no business holding base64, from me or from any
+    other caller who gets the request shape wrong, and a rule here catches every
+    route in rather than every prober remembering."""
+    if len(text or "") > MAX_ARCHIVE_CHARS or _looks_like_envelope(text):
+        print(f"[voice-agent] archive refused: {len(text or '')} chars, "
+              f"{'voice envelope' if _looks_like_envelope(text) else 'too long'}",
+              file=sys.stderr)
+        return None
     chat = telegram_chat()
     db = _chatdb()
     if db and text:
@@ -2481,11 +2504,22 @@ class Handler(BaseHTTPRequestHandler):
             # a turn that was not a turn. The durations are still reported
             # truthfully; refusing to charge is the plane's decision, not a
             # number bent here to produce it.
+            # TWO RECOGNISERS DISAGREEING IS NOT THE SAME AS SILENCE. From
+            # build 341 the phone drops a clip its own on-device recogniser
+            # heard no words in, so an ask carrying `prefiltered` reached us
+            # BECAUSE the phone heard words. If this end then hears none, one of
+            # us is wrong and it is worth being able to grep for — most likely
+            # mine, since the phone had the raw microphone and I have a
+            # compressed clip. Logged, not acted on: the cure for a false
+            # negative here is a tuned gate, and tuning it on nothing is how
+            # the phantom one-word turn would arrive.
+            disagree = ("  <- THE PHONE HEARD WORDS (two recognisers disagree)"
+                        if d.get("prefiltered") else "")
             self.log_message("voice turn: NO SPEECH (%.1fs in, peak %s dBFS, "
                              "recogniser said %r) — nothing posted, nothing "
-                             "asked, nothing billed",
+                             "asked, nothing billed%s",
                              out["audio_seconds_in"], out.get("peak_dbfs"),
-                             out.get("heard_marker"))
+                             out.get("heard_marker"), disagree)
             return self._send(200, {
                 "no_speech": True,
                 "audio_seconds_in": out["audio_seconds_in"],
