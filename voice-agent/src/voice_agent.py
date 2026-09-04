@@ -2390,6 +2390,22 @@ class Handler(BaseHTTPRequestHandler):
             self.log_message("VOICE TURN FAILED: %.200s", e)
             return self._send(400, {"error": "voice_turn_failed",
                                     "detail": str(e)[:300]})
+        if out.get("no_speech"):
+            # NOTHING WAS SAID. No bubble, no model turn, no speech back — and
+            # `no_speech` travels in the clear so the meter can decline to bill
+            # a turn that was not a turn. The durations are still reported
+            # truthfully; refusing to charge is the plane's decision, not a
+            # number bent here to produce it.
+            self.log_message("voice turn: NO SPEECH (%.1fs in, peak %s dBFS, "
+                             "recogniser said %r) — nothing posted, nothing "
+                             "asked, nothing billed",
+                             out["audio_seconds_in"], out.get("peak_dbfs"),
+                             out.get("heard_marker"))
+            return self._send(200, {
+                "no_speech": True,
+                "audio_seconds_in": out["audio_seconds_in"],
+                "audio_seconds_out": 0.0, "engine": "local",
+                "took_s": round(time.time() - t0, 2)})
         self.log_message(
             "voice turn: %.1fs in, %.1fs out, stt %.1fs tts %.1fs, %d KB reply",
             out["audio_seconds_in"], out["audio_seconds_out"],

@@ -30,6 +30,7 @@ bitten four times by things that quietly did nothing.
 import base64
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -46,9 +47,6 @@ WHISPER_BIN = os.environ.get(
 WHISPER_MODEL = os.environ.get(
     "LQ_WHISPER_MODEL",
     os.path.expanduser("~/whisper.cpp/models/ggml-large-v3-turbo-q5_0.bin"))
-# RELATIVE TO THIS INSTALL, not to anyone's home directory. Every path here is
-# an env override with a default that lives beside the agent, so a fresh install
-# works without editing code and a different layout is one variable away.
 PIPER_BIN = os.environ.get(
     "LQ_PIPER_BIN", os.path.join(HERE, "venv", "bin", "piper"))
 PIPER_VOICE = os.environ.get(
@@ -80,6 +78,32 @@ def _duration(wav_path):
         return w.getnframes() / float(w.getframerate())
 
 
+# SILENCE DOES NOT COME BACK AS A MARKER. It was supposed to: whisper emits
+# [BLANK_AUDIO] and friends, and filtering those was the whole plan. Then I fed
+# it two seconds of literal digital zero and it returned the word "you" —
+# confidently, with no marker at all. Transcribers hallucinate on silence, so a
+# LEXICAL test can only catch the polite half of this.
+#
+# The physical test cannot be fooled the same way: audio with no energy in it
+# contains no speech whatever the model says about it. -50 dBFS peak is far
+# below any real microphone in any real room, so a whisper still passes and a
+# muted mic, a dead input or a stream of zeroes does not.
+SILENCE_PEAK_DBFS = float(os.environ.get("LQ_SILENCE_PEAK_DBFS", "-50"))
+
+
+def _peak_dbfs(wav_path):
+    """Loudest sample in the clip, in dBFS. -inf for pure digital silence."""
+    import array
+    import math
+    with wave.open(wav_path) as w:
+        if w.getsampwidth() != 2:
+            return 0.0                     # not 16-bit: do not judge it
+        a = array.array("h")
+        a.frombytes(w.readframes(w.getnframes()))
+    peak = max((abs(x) for x in a), default=0)
+    return -math.inf if peak == 0 else 20 * math.log10(peak / 32768.0)
+
+
 def _to_wav16k(src, dst):
     """Whatever the phone sent -> 16 kHz mono WAV, which is what whisper eats."""
     subprocess.run([FFMPEG, "-v", "error", "-y", "-i", src,
@@ -88,8 +112,33 @@ def _to_wav16k(src, dst):
     return _duration(dst)
 
 
+# WHAT WHISPER SAYS WHEN NOBODY SPOKE. It does not return an empty string: it
+# returns a bracketed token — [BLANK_AUDIO], [SILENCE], (music), *coughs* — and
+# a token is text, so it was posted as the user's own words and answered by a
+# model turn. Nine of those reached a real chat before anyone saw it (2026-09-04). A non-speech marker is the transcriber saying "there was
+# nothing here", which is the opposite of something to answer.
+_NON_SPEECH = re.compile(r"\[[^\]]*\]|\([^)]*\)|\*[^*]*\*|♪+|\.{2,}")
+# After the markers are gone: punctuation and stray single letters are not a
+# question either. Two characters is the shortest thing worth relaying — "no",
+# "ok", "да" — and anything under it is noise the recogniser could not resolve.
+MIN_SPEECH_CHARS = 2
+
+
+def speech_text(raw):
+    """The words in a transcript, or "" when it contains none.
+
+    Deliberately conservative in one direction: a line that is PART marker and
+    part speech keeps the speech ("[BLANK_AUDIO] what were our sales" is a real
+    question with a marker glued to it), and only a line with nothing left is
+    treated as silence.
+    """
+    t = _NON_SPEECH.sub(" ", raw or "")
+    t = " ".join(t.split()).strip(" .,!?-—…")
+    return t if len(t) >= MIN_SPEECH_CHARS else ""
+
+
 def transcribe(audio_bytes, suffix=".m4a"):
-    """(text, seconds_of_audio). Raises if the clip is absurdly long."""
+    """(text, seconds_of_audio, peak_dbfs). Raises on an absurdly long clip."""
     d = tempfile.mkdtemp(prefix="lq-")
     try:
         raw = os.path.join(d, "in" + suffix)
@@ -100,10 +149,15 @@ def transcribe(audio_bytes, suffix=".m4a"):
         if seconds > MAX_AUDIO_S:
             raise ValueError(f"{seconds:.0f}s of audio is not a question "
                              f"(limit {MAX_AUDIO_S:.0f}s)")
+        peak = _peak_dbfs(wav)
+        if peak < SILENCE_PEAK_DBFS:
+            # Do not even run the recogniser: there is nothing in the file, and
+            # asking a model what a silence says is how you get "you".
+            return "", seconds, peak
         out = subprocess.run(
             [WHISPER_BIN, "-m", WHISPER_MODEL, "-f", wav, "-nt", "-np"],
             capture_output=True, text=True, timeout=600)
-        return " ".join(out.stdout.split()), seconds
+        return " ".join(out.stdout.split()), seconds, peak
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
@@ -169,19 +223,28 @@ def turn(payload, answer_fn, on_transcript=None):
               "ogg": ".ogg", "opus": ".ogg"}.get(fmt, ".m4a")
     t0 = time.time()
     ts = time.time()
-    user_text, secs_in = transcribe(base64.b64decode(b64), suffix)
+    heard, secs_in, peak = transcribe(base64.b64decode(b64), suffix)
+    user_text = speech_text(heard)
     t_stt = time.time() - t0
-    if user_text and on_transcript:
+    if not user_text:
+        # NOTHING WAS SAID: no bubble, no model turn, no speech back, and
+        # nothing billed. The transcriber has told us there were no words, and
+        # every step after this one would be work done on that non-answer —
+        # including putting it in front of the person as their own sentence.
+        return {"text": "", "user_text": "", "no_speech": True,
+                "heard_marker": (heard or "")[:40],
+                "peak_dbfs": (None if peak == float("-inf")
+                              else round(peak, 1)),
+                "audio_seconds_in": round(secs_in, 3),
+                "audio_seconds_out": 0.0, "ts": ts,
+                "timing": {"stt_s": round(t_stt, 2), "think_s": 0.0,
+                           "tts_s": 0.0}}
+    if on_transcript:
         try:
             on_transcript(user_text, ts)
         except Exception as e:
             print(f"[lq] posting the transcript failed: {e}", file=sys.stderr)
-    if not user_text:
-        # SAY SO RATHER THAN ANSWER NOTHING. An empty transcription with a
-        # confident reply after it is the fabrication shape in another costume.
-        answer = ("I could not make out any words in that — say it again?")
-    else:
-        answer = answer_fn(user_text)
+    answer = answer_fn(user_text)
     t1 = time.time()
     audio, secs_out, out_fmt = speak(answer or "")
     return {
