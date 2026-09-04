@@ -751,6 +751,18 @@ _CODE_FENCE = re.compile(r"^\s*```")
 SPEECH_MAX_CHARS = 400
 
 
+# WHAT A VOICE SHOULD NOT READ ALOUD. Markdown is punctuation for the eye:
+# `**Needs a decision:**` is emphasis on screen and, spoken, either two stray
+# asterisks or nothing at all where a person would have changed their tone.
+# Bullets are worse — a dash at the start of eight lines is a list to look at
+# and a stutter to listen to.
+_MD_NOISE = re.compile(r"\*\*|__|`+|^\s*[-*+]\s+|^\s*#{1,6}\s+", re.M)
+
+
+def _speakable(text):
+    return " ".join(_MD_NOISE.sub(" ", text or "").split())
+
+
 def speech_for(text):
     """A short line to SAY for an answer whose body belongs on the screen.
 
@@ -771,8 +783,23 @@ def speech_for(text):
             continue
         kept.append(ln)
     if not had_table:
-        return ""                     # ordinary prose: say the answer itself
-    prose = " ".join(" ".join(kept).split()).strip()
+        # NO TABLE IS NOT THE SAME AS SHORT (2026-09-04, from the first
+        # build-338 turns in the field). A 957-character answer — bold headings, eight
+        # bullets, no table anywhere — was read aloud for EIGHTY-SIX SECONDS,
+        # longer than the fifty this whole mechanism was built to stop. The
+        # structure that triggered it was never the point; the LENGTH was.
+        #
+        # Nothing is lost: the full answer is on the screen either way, and the
+        # spoken version says so rather than stopping mid-thought.
+        prose = _speakable(text)
+        if len(prose) <= SPEECH_MAX_CHARS:
+            return ""                 # short enough to say as it stands
+        cut = prose[:SPEECH_MAX_CHARS]
+        stop = max(cut.rfind(". "), cut.rfind("? "), cut.rfind("! "))
+        if stop > SPEECH_MAX_CHARS // 3:
+            cut = cut[:stop + 1]
+        return cut + " The rest is on your screen."
+    prose = _speakable(" ".join(kept))
     if len(prose) >= MIN_SPEECH_CHARS:
         return prose[:SPEECH_MAX_CHARS]
     return "It is on your screen."
