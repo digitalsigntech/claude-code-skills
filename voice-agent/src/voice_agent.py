@@ -2017,7 +2017,7 @@ def e2ee_key_id(pub):
     return hashlib.sha256(pub).digest()[:8].hex()
 
 
-def v2_reader_keys():
+def v2_reader_keys(account=None):
     """Raw X25519 pubkeys of every device this agent has accepted (#352).
 
     One accepted device stays on v1 — every phone in the field speaks it. Two
@@ -2028,9 +2028,9 @@ def v2_reader_keys():
     try:
         import base64 as _b64
         import devices as _dev
-        rows = _dev.rows()
+        rows = _dev.rows(account)
         out = []
-        for dev in _dev.accepted_ids():
+        for dev in _dev.accepted_ids(account):
             try:
                 raw = _b64.b64decode((rows.get(dev) or {}).get("pubkey") or "")
             except Exception:
@@ -2042,10 +2042,10 @@ def v2_reader_keys():
         return []
 
 
-def seal_for_devices(text, direction=None):
+def seal_for_devices(text, direction=None, account=None):
     """v2 when there are two readers, None when there are not — caller falls
     back to v1 so a single-device account is byte-identical to yesterday."""
-    fleet = v2_reader_keys()
+    fleet = v2_reader_keys(account)
     if len(fleet) < 2:
         return None
     import e2ee_v2
@@ -2175,7 +2175,7 @@ def push_preview_envelope(account, text):
     payload = json.dumps(
         {"from": branding().get("bot_name") or "agent", "text": body},
         ensure_ascii=False, separators=(",", ":"))
-    multi = seal_for_devices(payload)
+    multi = seal_for_devices(payload, account=account)
     if multi:
         return multi
     priv, mine = agent_keys()
@@ -2185,7 +2185,7 @@ def push_preview_envelope(account, text):
     return e2ee_seal(payload, priv, mine, theirs, direction=DIR_TO_PHONE)
 
 
-def approved_device_pubkeys():
+def approved_device_pubkeys(account=None):
     """Base64 pubkeys of every device the registry has ACCEPTED and not revoked.
 
     The inbound counterpart to `v2_reader_keys()`: that one decides who may read
@@ -2195,7 +2195,7 @@ def approved_device_pubkeys():
     """
     try:
         import devices as _dev
-        return {r.get("pubkey") for r in _dev.rows().values()
+        return {r.get("pubkey") for r in _dev.rows(account).values()
                 if r.get("accepted") and not r.get("revoked") and r.get("pubkey")}
     except Exception:
         return set()
@@ -2266,7 +2266,7 @@ def peer_key(account, offered_b64=None):
             if len(raw) != 32:
                 raise ValueError(f"peer key is {len(raw)} bytes, expected 32")
             if cur and cur != offered_b64:
-                if offered_b64 in approved_device_pubkeys():
+                if offered_b64 in approved_device_pubkeys(account):
                     print(f"[voice-agent] second approved device sealed to "
                           f"{account}: {key_fingerprint(raw)}", file=sys.stderr)
                     return raw
@@ -2414,7 +2414,7 @@ class Handler(BaseHTTPRequestHandler):
         LAST_APP_TURN[account] = time.time()
         body = json.dumps({"text": out["text"], "user_text": out["user_text"],
                            "voice": out["voice"]}, ensure_ascii=False)
-        sealed = seal_for_devices(body) or e2ee_seal(
+        sealed = seal_for_devices(body, account=account) or e2ee_seal(
             body, priv, mine, theirs, direction=DIR_TO_PHONE)
         # DURATIONS IN THE CLEAR, beside the envelope, because the meter cannot
         # read the envelope. Both from this end — the only party that decodes
@@ -2470,8 +2470,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"accepted": False,
                                         "error": f"device store unavailable: {str(e)[:80]}"})
             if kind == "devices":
-                return self._send(200, {"accepted": _dev.accepted_ids(),
-                                        "rows": _dev.rows()})
+                return self._send(200, {"accepted": _dev.accepted_ids(account),
+                                        "rows": _dev.rows(account)})
             _id = str(d.get("device_id") or "")[:32]
             if kind == "device_revoke":
                 return self._send(200, {"revoked": bool(_dev.revoke(_id))})
@@ -2487,8 +2487,8 @@ class Handler(BaseHTTPRequestHandler):
                           str(d.get("type_") or "")[:24],
                           str(d.get("os") or "")[:40],
                           str(d.get("location") or "")[:60],
-                          auto_approve=_auto)
-            ok = _id in _dev.accepted_ids()
+                          auto_approve=_auto, account=account)
+            ok = _id in _dev.accepted_ids(account)
             if _auto:
                 self.log_message("device %s auto-approved (sandbox install): "
                                  "%s", _id, d.get("label") or "unnamed")
@@ -2564,7 +2564,8 @@ class Handler(BaseHTTPRequestHandler):
                         if not isinstance(row, dict) or "text" not in row:
                             continue
                         row["sealed"] = (
-                            seal_for_devices(str(row.get("text") or ""))
+                            seal_for_devices(str(row.get("text") or ""),
+                                             account=account)
                             or e2ee_seal(str(row.get("text") or ""),
                                          priv, mine, theirs,
                                          direction=DIR_TO_PHONE))
@@ -2967,7 +2968,8 @@ class Handler(BaseHTTPRequestHandler):
                     priv, mine = agent_keys()
                     theirs = peer_key(account)
                     out = dict(res)
-                    _multi = seal_for_devices(str(res.get("answer") or ""))
+                    _multi = seal_for_devices(str(res.get("answer") or ""),
+                                              account=account)
                     if _multi:
                         self.log_message("sealed v2 to %d devices",
                                          len(_multi.get("wraps") or []))

@@ -45,7 +45,7 @@ def _save(d):
 
 
 def register(device_id, pubkey, label="", kind="", os_name="", location="",
-             auto_approve=False):
+             auto_approve=False, account=None):
     """Record a request. `accepted` stays False unless this install says
     otherwise.
 
@@ -61,7 +61,19 @@ def register(device_id, pubkey, label="", kind="", os_name="", location="",
     """
     d = _load()
     row = d.get(device_id) or {}
-    # A NEW KEY ON A KNOWN ID IS A NEW DEVICE (2026-09-04). Carrying `accepted` forward
+    # AN APPROVAL BELONGS TO ONE ACCOUNT (2026-09-04). This store had no account
+    # at all, so an agent serving two accounts treated a device approved for the
+    # first as approved for the second — and the inbound gate, which trusts this
+    # list, would open its sealed asks on either. On a shared demo install that was
+    # not hypothetical: signing one phone into a second account inherited three
+    # approvals it had never been given.
+    #
+    # A row whose account differs is a DIFFERENT device as far as approval goes,
+    # so it starts again exactly as a re-key does.
+    if account and row.get("account") and row["account"] != account:
+        row = {}
+    # A NEW KEY ON A KNOWN ID IS A NEW DEVICE (2026-09-04, from Maclaude's #401
+    # asking what happens in exactly this case). Carrying `accepted` forward
     # across a CHANGED pubkey would make re-registration a way to launder a
     # substituted key past the approval gate: present the id of a device the
     # owner once approved, hand over a different key, inherit the tick. The id
@@ -73,6 +85,7 @@ def register(device_id, pubkey, label="", kind="", os_name="", location="",
     # and is announced again, which costs one tap and closes the hole.
     rekeyed = bool(row.get("pubkey")) and row.get("pubkey") != pubkey
     row.update({"pubkey": pubkey, "label": label, "type": kind,
+                **({"account": account} if account else {}),
                 "os": os_name, "location": location,
                 "first_seen": row.get("first_seen") or time.time(),
                 "last_seen": time.time(),
@@ -167,14 +180,27 @@ def history_shared(device_id):
     return bool(row.get("history_shared")) and not row.get("revoked")
 
 
-def accepted_ids():
-    """The only devices anything may be wrapped for."""
+def _mine(row, account):
+    """Does this row belong to the account asking?
+
+    A row with NO account is grandfathered — it predates the field, and refusing
+    it would silently unlink devices that work today. New rows always carry one,
+    so the ungated set only ever shrinks.
+    """
+    return (not account) or (not row.get("account")) or row["account"] == account
+
+
+def accepted_ids(account=None):
+    """The only devices anything may be wrapped for, for THIS account."""
     return [k for k, v in _load().items()
-            if v.get("accepted") and not v.get("revoked")]
+            if v.get("accepted") and not v.get("revoked") and _mine(v, account)]
 
 
-def rows():
-    return _load()
+def rows(account=None):
+    d = _load()
+    if not account:
+        return d
+    return {k: v for k, v in d.items() if _mine(v, account)}
 
 
 def main():
