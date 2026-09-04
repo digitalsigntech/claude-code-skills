@@ -1055,8 +1055,18 @@ def turn(payload, answer_fn, on_transcript=None, account=None):
     # RAW — so "**Total** 226,220" kept its asterisks and the voice read them.
     # The cleaning belongs at the point of speaking, which is the only place
     # every path passes through.
-    audio, secs_out, out_fmt, out_rate = speak(
-        _speakable(spoken_line or answer or ""), lang or heard_lang, speaker)
+    # NOTHING TO SAY IS NOT NOTHING TO DO. piper exits non-zero on empty input,
+    # which reached the app as a bare `voice_turn_failed` 400 — so a model that
+    # returned no text turned into "the voice service is broken" on the phone.
+    # The person did speak; their transcript is already up; the agent owes them
+    # a sentence about its own silence rather than an error code. These are the
+    # agent's words, never the model's, and they are the only words in this
+    # file that were not said by somebody.
+    to_say = _speakable(spoken_line or answer or "")
+    if not to_say.strip():
+        to_say = "I do not have an answer for that."
+    audio, secs_out, out_fmt, out_rate = speak(to_say, lang or heard_lang,
+                                               speaker)
     return {
         "text": answer,
         **({"speech": spoken_line} if spoken_line else {}),
