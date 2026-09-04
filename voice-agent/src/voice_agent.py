@@ -1038,8 +1038,21 @@ def time_context(tz):
         now = datetime.now(ZoneInfo(str(tz)))
     except Exception:
         return ""
+    # THE WEEK IS STATED, NOT LEFT TO ARITHMETIC. Asked for "Monday this
+    # week" on Fri 4 Sep, the answer came back "Monday this week (Sept 1)" —
+    # Monday was Aug 31, and the figure beside it was right. A model given the
+    # weekday and asked to count backwards will occasionally be off by one, and
+    # a date that is wrong by a day next to a number that is right is the worst
+    # of both: it looks checked. Naming the span costs one line and removes the
+    # subtraction.
+    from datetime import timedelta
+    mon = now - timedelta(days=now.weekday())
+    sun = mon + timedelta(days=6)
     return (f"The person you are answering is in {tz}, where it is now "
-            f"{now.strftime('%H:%M on %a %d %b')}. Any time they name — "
+            f"{now.strftime('%H:%M on %a %d %b %Y')}. This week runs "
+            f"{mon.strftime('%a %d %b')} to {sun.strftime('%a %d %b %Y')}; "
+            f"yesterday was {(now - timedelta(days=1)).strftime('%a %d %b')}. "
+            f"Any time they name — "
             f"\"4pm\", \"tomorrow morning\" — is in THAT zone, and anything "
             f"you schedule or read back must be too. This machine's own clock "
             f"is not theirs.")
