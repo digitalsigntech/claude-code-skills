@@ -199,6 +199,49 @@ def speak(text):
         shutil.rmtree(d, ignore_errors=True)
 
 
+# WHAT TO SAY OUT LOUD WHEN THE ANSWER IS A TABLE (2026-09-04). Asked for a
+# sales table, LQ recited the whole thing — every month, every figure, aloud,
+# while the same table sat drawn on the screen. That is the mistake `show_chart`
+# already names from the other direction: a table exists so the numbers do NOT
+# have to be listened to.
+#
+# The spoken line is DERIVED, never invented. Tables are removed and what is
+# left is the model's own prose; if that is nothing, the fallback names the
+# shape and points at the screen. No figure is ever summarised into speech that
+# the model did not itself write, because a spoken number nobody wrote is the
+# fabrication shape with a microphone.
+_TABLE_ROW = re.compile(r"^\s*\|.*\|\s*$")
+_CODE_FENCE = re.compile(r"^\s*```")
+SPEECH_MAX_CHARS = 400
+
+
+def speech_for(text):
+    """A short line to SAY for an answer whose body belongs on the screen.
+
+    Returns "" when the whole answer is already speakable — the caller then
+    speaks the answer itself and nothing changes for ordinary turns.
+    """
+    lines = (text or "").splitlines()
+    kept, in_fence, had_table = [], False, False
+    for ln in lines:
+        if _CODE_FENCE.match(ln):
+            in_fence = not in_fence
+            had_table = True
+            continue
+        if in_fence:
+            continue
+        if _TABLE_ROW.match(ln):
+            had_table = True
+            continue
+        kept.append(ln)
+    if not had_table:
+        return ""                     # ordinary prose: say the answer itself
+    prose = " ".join(" ".join(kept).split()).strip()
+    if len(prose) >= MIN_SPEECH_CHARS:
+        return prose[:SPEECH_MAX_CHARS]
+    return "It is on your screen."
+
+
 def turn(payload, answer_fn, on_transcript=None):
     """One LQ turn: the opened plaintext in, the plaintext reply out.
 
@@ -246,9 +289,14 @@ def turn(payload, answer_fn, on_transcript=None):
             print(f"[lq] posting the transcript failed: {e}", file=sys.stderr)
     answer = answer_fn(user_text)
     t1 = time.time()
-    audio, secs_out, out_fmt = speak(answer or "")
+    # SPEAK THE SUMMARY, SHOW THE TABLE. `speech` travels beside `text` so the
+    # app can mute the karaoke when the two differ — the highlight follows the
+    # voice, and the voice is no longer reading the thing on screen.
+    spoken_line = speech_for(answer or "")
+    audio, secs_out, out_fmt = speak(spoken_line or answer or "")
     return {
         "text": answer,
+        **({"speech": spoken_line} if spoken_line else {}),
         "user_text": user_text,
         "voice": {"format": out_fmt, "b64": base64.b64encode(audio).decode()},
         # Beside the envelope, in the clear, because the meter cannot read the
