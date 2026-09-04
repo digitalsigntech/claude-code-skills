@@ -1796,6 +1796,24 @@ def capabilities():
     # relaying, so an unclaimed capability is a feature that silently is not
     # there rather than one that fails loudly.
     caps.append("file")
+    # LQ, DECLARED ONLY WHEN IT WOULD ACTUALLY WORK. probe() checks the
+    # transcriber, its model, the speech binary and a voice file; a tier that
+    # advertises itself and then answers HTTP 400 is worse than one that says
+    # plainly it is unavailable, and the app is specified to show the row with
+    # a reason rather than hide it.
+    #
+    # BOTH SPELLINGS, on purpose. Every other capability here uses an
+    # underscore and none use a hyphen, so `voice_local` is the consistent
+    # name — but the client may gate its tier row on either, and a naming
+    # mismatch would present as a tier that simply never appears, which is the
+    # one failure shape this project keeps paying for. Two strings cost
+    # nothing; a silent absence costs a day.
+    try:
+        import local_voice
+        if local_voice.probe()[0]:
+            caps += ["voice_local", "voice-local"]
+    except Exception:
+        pass
     # Claimed only if there is somewhere to record an upload. Without an
     # archive a photo could be stored but never appear in the conversation,
     # and the honest answer to "can you take a photo" is then no.
@@ -2196,6 +2214,18 @@ def _check_fabrication(log_message, text, account):
         log_message("FABRICATION %s", json.dumps(verdict))
 
 
+def _voice_turn(plaintext):
+    """The opened payload if this is an LQ turn, else None."""
+    t = (plaintext or "").lstrip()
+    if not t.startswith("{") or '"voice"' not in t[:400]:
+        return None
+    try:
+        p = json.loads(t)
+    except ValueError:
+        return None
+    return p if isinstance(p, dict) and isinstance(p.get("voice"), dict) else None
+
+
 def peer_key(account, offered_b64=None):
     """The phone's public key for this account, pinning a new one once.
 
@@ -2296,6 +2326,55 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.rstrip("/") in ("", "/health"):
             return self._send(200, {"service": "voice-agent", "ok": health()["ok"]})
         self._send(404, {"error": "not found"})
+
+    def _voice_answer(self, payload, account, name, d, priv, mine, theirs):
+        """One LQ turn: audio in, the agent's own answer, audio out.
+
+        THE ANSWER COMES FROM THE ORDINARY ASK PATH, not from a voice-shaped
+        copy of it. A spoken question and a typed one are the same question, and
+        two code paths answering them is how they drift — the reminders reflex,
+        the fabrication ledger and the archive all apply here because they are
+        the same call.
+        """
+        import local_voice
+        t0 = time.time()
+        try:
+            def answer_fn(text):
+                self.log_message("voice ask from %s: %.60s",
+                                 name or account, text)
+                res = ask(account, text, name,
+                          archive_turn=(d.get("archive") is not False),
+                          context=time_context(d.get("tz")))
+                return str(res.get("answer") or "")
+
+            out = local_voice.turn(payload, answer_fn)
+        except Exception as e:
+            # A voice turn that fails must fail LOUDLY and in the clear: the app
+            # can show "I could not hear that", and a SEALED error is a message
+            # the person cannot read about a message they could not hear.
+            self.log_message("VOICE TURN FAILED: %.200s", e)
+            return self._send(400, {"error": "voice_turn_failed",
+                                    "detail": str(e)[:300]})
+        self.log_message(
+            "voice turn: %.1fs in, %.1fs out, stt %.1fs tts %.1fs, %d KB reply",
+            out["audio_seconds_in"], out["audio_seconds_out"],
+            out["timing"]["stt_s"], out["timing"]["tts_s"],
+            len(out["voice"]["b64"]) // 1024)
+        LAST_APP_TURN[account] = time.time()
+        body = json.dumps({"text": out["text"], "user_text": out["user_text"],
+                           "voice": out["voice"]}, ensure_ascii=False)
+        sealed = seal_for_devices(body) or e2ee_seal(
+            body, priv, mine, theirs, direction=DIR_TO_PHONE)
+        # DURATIONS IN THE CLEAR, beside the envelope, because the meter cannot
+        # read the envelope. Both from this end — the only party that decodes
+        # both directions — with the phone's own figure arriving separately as a
+        # cross-check rather than as the source.
+        return self._send(200, {
+            "sealed": sealed,
+            "audio_seconds_in": out["audio_seconds_in"],
+            "audio_seconds_out": out["audio_seconds_out"],
+            "engine": "local",
+            "took_s": round(time.time() - t0, 2)})
 
     def do_POST(self):
         cfg = config()
@@ -2719,6 +2798,17 @@ class Handler(BaseHTTPRequestHandler):
                     q = e2ee_open(sealed_in, priv, mine, theirs,
                                   direction=DIR_TO_AGENT).strip()
                     seal_reply = True
+                    # LQ: THE ENVELOPE SAYS WHAT IT IS. A voice turn arrives as
+                    # JSON inside the seal — {"voice": {...}, "lang": ...} —
+                    # rather than as a question string. Detected from the
+                    # PLAINTEXT rather than from a `kind` field beside the
+                    # envelope, deliberately: the relay forwards what it is
+                    # given and a turn that lied about its kind would be opened
+                    # anyway. What is inside decides what this is.
+                    vt = _voice_turn(q)
+                    if vt is not None:
+                        return self._voice_answer(
+                            vt, account, name, d, priv, mine, theirs)
                 except PeerKeyChanged as e:
                     self.log_message("DEVICE KEY CHANGED for %s", account)
                     return self._send(400, {"error": "device_key_changed",
