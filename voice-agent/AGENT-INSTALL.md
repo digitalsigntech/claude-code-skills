@@ -212,6 +212,8 @@ Four things have to exist, and `local_voice.py --probe` says which are missing:
 pip install piper-tts
 # 3. ffmpeg on PATH
 # 4. the voices — see below
+# 5. optional but worth it: ggml-base.bin beside the main model, used ONLY to
+#    identify the language when the app sends lang:"auto" (see below)
 ```
 
 Point the service at them:
@@ -251,6 +253,32 @@ python3 src/local_voice.py --verify-voices
 
 It prints `ok` or `MUTE` per voice and the language count that follows from it, and the model row's
 published reason ends in either *"proven to speak"* or *"installed but unverified"*.
+
+### `lang: "auto"` — pay a small model to do the language ID
+
+When the app cannot say which language a turn is in, it sends `auto`, and whisper's own `-l auto`
+answers by running the **whole model twice**: 13.4 s against 7.2 s on a two-core agent. Identifying
+a language does not need a transcription-grade model, so if `ggml-base.bin` sits beside the main
+one, the tier detects with base and then transcribes once with the code it found.
+
+Measured on a two-core agent, ten languages:
+
+| model | correct | average |
+|---|---|---|
+| `tiny` | 9/10 | 0.84 s |
+| `base` | **10/10** | 1.82 s |
+| `small` | 10/10 | 6.59 s |
+
+End to end, the same three clips: **13.2–13.8 s before, 9.3–9.7 s after**, same transcripts.
+
+**Not tiny, and the reason is Ukrainian** — tiny called it Russian, which is the one confusion in
+this set that matters most, and a wrong `-l` does not fail, it *translates*. Tiny was also barely
+confident when right (Turkish p=0.39, Dutch p=0.49), so no threshold rescues it. Base was never
+below p=0.97.
+
+Below `LQ_DETECT_MIN_P` (0.85) the detector is not believed and the turn falls back to the full
+two-pass `auto` — slower and correct. No `ggml-base.bin`, same fallback. Nothing breaks by skipping
+this; turns in an unknown language just cost four seconds more.
 
 ## Reminders that actually fire (2026-08-13)
 
