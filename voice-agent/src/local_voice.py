@@ -46,11 +46,14 @@ WHISPER_BIN = os.environ.get(
 WHISPER_MODEL = os.environ.get(
     "LQ_WHISPER_MODEL",
     os.path.expanduser("~/whisper.cpp/models/ggml-large-v3-turbo-q5_0.bin"))
+# RELATIVE TO THIS INSTALL, not to anyone's home directory. Every path here is
+# an env override with a default that lives beside the agent, so a fresh install
+# works without editing code and a different layout is one variable away.
 PIPER_BIN = os.environ.get(
-    "LQ_PIPER_BIN", os.path.expanduser("~/DST/voice/venv/bin/piper"))
+    "LQ_PIPER_BIN", os.path.join(HERE, "venv", "bin", "piper"))
 PIPER_VOICE = os.environ.get(
     "LQ_PIPER_VOICE",
-    os.path.expanduser("~/DST/voice/voices/en_US-lessac-medium.onnx"))
+    os.path.join(HERE, "voices", "en_US-lessac-medium.onnx"))
 FFMPEG = os.environ.get("LQ_FFMPEG", "ffmpeg")
 
 # A turn is one push of a button. Longer than this is not a question, it is an
@@ -190,7 +193,7 @@ def selftest(clip=None):
         print("  missing:", m)
     if not ok:
         return 1
-    clip = clip or os.path.expanduser("~/DST/voice/test_en.wav")
+    clip = clip or os.path.join(HERE, "test_en.wav")
     if not os.path.exists(clip):
         print("no clip to test with:", clip)
         return 1
