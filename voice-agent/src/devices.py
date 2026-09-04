@@ -29,12 +29,53 @@ STORE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                      "e2ee_devices.json")
 
 
+# THE KEY IS THE PAIR, NOT THE DEVICE (2026-09-04, second pass). Scoping the
+# READS by account closed the approval leak but left the row shared: this store
+# was keyed by device_id alone, so one phone signing into a second account
+# MOVED its row and silently unlinked it from the first. Verified rather than
+# reasoned — a simulated demo sign-in took his device count from three to two.
+#
+# Rows are keyed by "account\x00device_id" now, with a migration that stamps
+# any legacy flat row with the account it already carries. `rows(account)`
+# still answers {device_id: row}, so nothing above this line changed shape.
+SEP = "\x00"
+
+
+def _k(account, device_id):
+    return f"{account or ''}{SEP}{device_id}"
+
+
+def _split(key):
+    account, _, dev = key.partition(SEP)
+    return (account or None, dev) if SEP in key else (None, key)
+
+
+def _migrate(d):
+    """Flat rows -> pair-keyed, once, keeping every field."""
+    if all(SEP in k for k in d):
+        return d, False
+    out, moved = {}, False
+    for k, v in d.items():
+        if SEP in k:
+            out[k] = v
+            continue
+        moved = True
+        v = dict(v)
+        v["device_id"] = k
+        out[_k(v.get("account"), k)] = v
+    return out, moved
+
+
 def _load():
     try:
         with open(STORE) as f:
-            return json.load(f)
+            d = json.load(f)
     except (OSError, ValueError):
         return {}
+    d, moved = _migrate(d)
+    if moved:
+        _save(d)
+    return d
 
 
 def _save(d):
@@ -60,19 +101,20 @@ def register(device_id, pubkey, label="", kind="", os_name="", location="",
     an AGENT deciding its own policy, which is the shape the contract asks for.
     """
     d = _load()
-    row = d.get(device_id) or {}
+    key = _k(account, device_id)
+    row = d.get(key) or {}
     # AN APPROVAL BELONGS TO ONE ACCOUNT (2026-09-04). This store had no account
     # at all, so an agent serving two accounts treated a device approved for the
     # first as approved for the second — and the inbound gate, which trusts this
-    # list, would open its sealed asks on either. On a shared demo install that was
-    # not hypothetical: signing one phone into a second account inherited three
+    # list, would open its sealed asks on either. On the demo machine that was
+    # not hypothetical: signing one phone into the demo account inherited three
     # approvals it had never been given.
     #
     # A row whose account differs is a DIFFERENT device as far as approval goes,
     # so it starts again exactly as a re-key does.
-    if account and row.get("account") and row["account"] != account:
-        row = {}
-    # A NEW KEY ON A KNOWN ID IS A NEW DEVICE (2026-09-04). Carrying `accepted` forward
+
+    # A NEW KEY ON A KNOWN ID IS A NEW DEVICE (2026-09-04, from Maclaude's #401
+    # asking what happens in exactly this case). Carrying `accepted` forward
     # across a CHANGED pubkey would make re-registration a way to launder a
     # substituted key past the approval gate: present the id of a device the
     # owner once approved, hand over a different key, inherit the tick. The id
@@ -100,7 +142,8 @@ def register(device_id, pubkey, label="", kind="", os_name="", location="",
         row["history_shared"] = time.time()
         row["approved_at"] = row.get("approved_at") or time.time()
         row["auto"] = True
-    d[device_id] = row
+    row["device_id"] = device_id
+    d[key] = row
     _save(d)
     return row
 
@@ -146,13 +189,22 @@ def revoke(key):
 
 
 def _find(d, key):
-    """By id, or by label — the owner says "the iPad", not a hex string."""
+    """The STORE key for a device named by id or by label.
+
+    The owner says "the iPad", not a hex string — and since rows are keyed by
+    the account/device pair now, a bare device id has to be matched against the
+    id INSIDE the row rather than against the key.
+    """
     if key in d:
         return key
-    key = (key or "").strip().lower()
-    for dev, row in d.items():
-        if key and key in (row.get("label") or "").lower():
-            return dev
+    raw = (key or "").strip()
+    for k, row in d.items():
+        if raw and (row.get("device_id") == raw or _split(k)[1] == raw):
+            return k
+    low = raw.lower()
+    for k, row in d.items():
+        if low and low in (row.get("label") or "").lower():
+            return k
     return None
 
 
@@ -174,8 +226,11 @@ def share_history(key):
     return hit
 
 
-def history_shared(device_id):
-    row = _load().get(device_id) or {}
+def history_shared(device_id, account=None):
+    d = _load()
+    row = d.get(_find(d, device_id) or "") or {}
+    if account and not _mine(row, account):
+        return False
     return bool(row.get("history_shared")) and not row.get("revoked")
 
 
@@ -191,15 +246,14 @@ def _mine(row, account):
 
 def accepted_ids(account=None):
     """The only devices anything may be wrapped for, for THIS account."""
-    return [k for k, v in _load().items()
+    return [v.get("device_id") or _split(k)[1] for k, v in _load().items()
             if v.get("accepted") and not v.get("revoked") and _mine(v, account)]
 
 
 def rows(account=None):
-    d = _load()
-    if not account:
-        return d
-    return {k: v for k, v in d.items() if _mine(v, account)}
+    """{device_id: row} — the shape every caller above this line expects."""
+    return {(v.get("device_id") or _split(k)[1]): v
+            for k, v in _load().items() if _mine(v, account)}
 
 
 def main():
@@ -209,11 +263,13 @@ def main():
         if not d:
             print("no devices have asked yet")
             return 0
-        for dev, r in sorted(d.items(), key=lambda kv: kv[1].get("first_seen", 0)):
+        for k, r in sorted(d.items(), key=lambda kv: kv[1].get("first_seen", 0)):
             state = ("revoked" if r.get("revoked") else
                      "LINKED" if r.get("accepted") else "pending")
+            dev = r.get("device_id") or _split(k)[1]
             print(f"{dev}  {state:<8} {r.get('label') or '?':<22} "
-                  f"{r.get('type') or '':<8} {r.get('location') or ''}")
+                  f"{r.get('type') or '':<8} {(r.get('account') or '-'):<22}"
+                  f"{r.get('location') or ''}")
         return 0
     if args[0] in ("approve", "revoke") and len(args) > 1:
         rest = [a for a in args[1:] if a != "--no-history"]
