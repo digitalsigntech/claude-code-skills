@@ -29,6 +29,7 @@ is worse than one that says it is unavailable, and this project has now been
 bitten four times by things that quietly did nothing.
 """
 import base64
+import hashlib
 import json
 import os
 import re
@@ -1002,6 +1003,26 @@ def speech_for(text):
     return "It is on your screen."
 
 
+# THE SAME CLIP TWICE IS A RETRY, NOT A SECOND QUESTION.
+#
+# 2026-09-04, from his own session: one 31.3-second clip arrived twice, sixteen
+# seconds apart, identical to the tenth of a decibel in peak level. It was
+# transcribed twice, answered twice — with two DIFFERENT answers — and both
+# questions and both answers landed in his chat. On a two-core box that is
+# thirteen seconds of recogniser spent to produce a duplicate, while the lock
+# holds everyone else up behind it.
+#
+# Byte-identical audio from one account inside two minutes is a resend. The
+# answer already given is returned again, which is also the only response that
+# keeps the two chats consistent.
+REPLAY_WINDOW_S = float(os.environ.get("LQ_REPLAY_WINDOW_S", "120"))
+_recent_turns = {}
+
+
+def _replay_key(account, audio):
+    return f"{account or 'default'}\x00{hashlib.sha256(audio).hexdigest()}"
+
+
 def turn(payload, answer_fn, on_transcript=None, account=None):
     """One LQ turn: the opened plaintext in, the plaintext reply out.
 
@@ -1026,6 +1047,14 @@ def turn(payload, answer_fn, on_transcript=None, account=None):
               "ogg": ".ogg", "opus": ".ogg"}.get(fmt, ".m4a")
     t0 = time.time()
     ts = time.time()
+    raw_audio = base64.b64decode(b64)
+    key = _replay_key(account, raw_audio)
+    seen_at, seen_out = _recent_turns.get(key, (0.0, None))
+    if seen_out is not None and time.time() - seen_at < REPLAY_WINDOW_S:
+        print(f"[lq] the same clip again after "
+              f"{time.time() - seen_at:.0f}s — returning the first answer "
+              f"rather than recognising it twice", file=sys.stderr)
+        return seen_out
     lang = str((payload or {}).get("lang") or "").strip().lower()[:5]
     # "auto" IS A REQUEST, NOT A LANGUAGE, and it is truthy — which is how it
     # reached `speak(text, lang or heard_lang)` and won, so `voice_for("auto")`
@@ -1036,7 +1065,7 @@ def turn(payload, answer_fn, on_transcript=None, account=None):
         lang = ""
     speaker = str((payload or {}).get("speaker") or "").strip().lower()[:32]
     heard, secs_in, peak, heard_lang = transcribe(
-        base64.b64decode(b64), suffix, lang, recent_lang(account))
+        raw_audio, suffix, lang, recent_lang(account))
     # Remember what this account is speaking, so the one-word answers that
     # follow a question do not each have to be identified from scratch.
     remember_lang(account, lang or heard_lang)
@@ -1087,7 +1116,7 @@ def turn(payload, answer_fn, on_transcript=None, account=None):
         to_say = "I do not have an answer for that."
     audio, secs_out, out_fmt, out_rate = speak(to_say, lang or heard_lang,
                                                speaker)
-    return {
+    out = {
         "text": answer,
         **({"speech": spoken_line} if spoken_line else {}),
         "user_text": user_text,
@@ -1128,6 +1157,8 @@ def turn(payload, answer_fn, on_transcript=None, account=None):
                    "think_s": round(t1 - t0 - t_stt, 2),
                    "tts_s": round(time.time() - t1, 2)},
     }
+    _recent_turns[key] = (time.time(), out)
+    return out
 
 
 def selftest(clip=None):
