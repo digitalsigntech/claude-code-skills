@@ -2547,7 +2547,28 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"accepted": ok,
                                     "state": "linked" if ok else "pending"})
         if kind == "capabilities":
-            return self._send(200, {"capabilities": capabilities()})
+            body = {"capabilities": capabilities()}
+            # WHAT THIS INSTALL CAN ACTUALLY HEAR AND SAY. The picker showed
+            # "14 languages" for the local tier on a machine that ran an
+            # English-only transcriber and one English voice: the plane omits a
+            # count it does not know, and the app then falls back to the
+            # interface languages we ship. That fallback is right for a cloud
+            # tier and wrong here, because a local tier's languages are a
+            # property of the files on this disk. So the disk answers.
+            try:
+                import local_voice
+                if local_voice.probe()[0]:
+                    n, codes, why = local_voice.languages()
+                    body["voice_local"] = {
+                        "languages": n, "codes": codes, "why": why,
+                        # What the recogniser hears, separately from what a
+                        # whole turn can be had in. Both are true and they are
+                        # not the same number.
+                        "understands": local_voice.understands(),
+                        "model": os.path.basename(local_voice.WHISPER_MODEL)}
+            except Exception as e:
+                self.log_message("local language count skipped: %.80s", e)
+            return self._send(200, body)
         if kind == "progress":
             return self._send(200, progress(account))
         if kind == "qr_spent":
