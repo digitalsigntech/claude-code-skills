@@ -467,7 +467,14 @@ def _record_mirror(chat_id, mirrored):
     except Exception:
         pass
 
-def archive(text, direction, sender, account_name="", mirror=True):
+def archive(text, direction, sender, account_name="", mirror=True,
+            kind="text", ts=None):
+    # `kind` and `ts` exist for LQ (#396). A transcribed line and a typed one
+    # read identically once they are rows, and later — deciding what to re-run,
+    # what to trust, what to show — the difference matters: one was heard by a
+    # speech model and may be wrong in ways typing never is. `ts` lets the
+    # transcript carry the same stamp as the reply it belongs to, so the two
+    # halves of one exchange sort together whichever wins the race to the feed.
     """Record a voice turn in the machine's archive, and mirror it to Telegram.
 
     The archive write is best-effort by design — a voice turn must never fail
@@ -493,7 +500,13 @@ def archive(text, direction, sender, account_name="", mirror=True):
             try:
                 db.record(text, direction,            # no cap (#275)
                           sender=sender, chat_id=archive_chat_id(),
-                          chat_title=_chat_title(), kind="text")
+                          chat_title=_chat_title(), kind=kind,
+                          # `epoch`, NOT `ts` — the store's own parameter name.
+                          # A wrong keyword here would raise TypeError into the
+                          # bare `except` below and the row would simply never
+                          # be written, silently, which is the exact failure
+                          # this project keeps paying for.
+                          **({"epoch": ts} if ts else {}))
             except Exception:
                 pass
     # A guest's words go nowhere near the owner's Telegram.
@@ -2339,15 +2352,34 @@ class Handler(BaseHTTPRequestHandler):
         import local_voice
         t0 = time.time()
         try:
+            keep = d.get("archive") is not False
+
+            def on_transcript(text, ts):
+                # HIS WORDS GO UP THE MOMENT THEY EXIST, before the model is
+                # asked anything — the answer can take seconds and a screen
+                # that shows nothing in the meantime looks like a turn that was
+                # dropped. Filed as the USER's line, sealed by archive() as any
+                # line is, and carried on to Telegram by the same mirror that
+                # carries a typed one.
+                if keep:
+                    archive(text, "in", sender=person_name(name),
+                            kind="voice_transcript", ts=ts)
+
             def answer_fn(text):
                 self.log_message("voice ask from %s: %.60s",
                                  name or account, text)
-                res = ask(account, text, name,
-                          archive_turn=(d.get("archive") is not False),
+                # archive_question=False BECAUSE IT IS ALREADY UP. The ordinary
+                # path would file the question itself, and posting it twice is
+                # a duplicate bubble the app has no reason to expect — its
+                # dedupe was built for the app-versus-agent race, not for the
+                # agent racing itself.
+                res = ask(account, text, name, archive_question=False,
+                          archive_turn=keep,
                           context=time_context(d.get("tz")))
                 return str(res.get("answer") or "")
 
-            out = local_voice.turn(payload, answer_fn)
+            out = local_voice.turn(payload, answer_fn,
+                                   on_transcript=on_transcript)
         except Exception as e:
             # A voice turn that fails must fail LOUDLY and in the clear: the app
             # can show "I could not hear that", and a SEALED error is a message

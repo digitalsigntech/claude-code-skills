@@ -145,13 +145,20 @@ def speak(text):
         shutil.rmtree(d, ignore_errors=True)
 
 
-def turn(payload, answer_fn):
+def turn(payload, answer_fn, on_transcript=None):
     """One LQ turn: the opened plaintext in, the plaintext reply out.
 
     `payload` is what was inside the envelope: {"voice": {"format", "b64"},
     "lang"}. `answer_fn(text) -> str` is the agent's ordinary ask path, so a
     spoken question and a typed one are answered by the same code and cannot
     drift apart.
+
+    `on_transcript(text, ts)` fires THE MOMENT STT FINISHES and before the model
+    is asked anything — the owner's rule: their own words belong on the screen
+    while the answer is still being thought about, not after it arrives. It is
+    called with the same timestamp the reply will carry, so the two halves of
+    one turn sort together however they race. A failure in it is swallowed: a
+    turn must not die because writing it down did.
     """
     voice = (payload or {}).get("voice") or {}
     b64 = voice.get("b64")
@@ -161,8 +168,14 @@ def turn(payload, answer_fn):
     suffix = {"aac": ".m4a", "m4a": ".m4a", "wav": ".wav",
               "ogg": ".ogg", "opus": ".ogg"}.get(fmt, ".m4a")
     t0 = time.time()
+    ts = time.time()
     user_text, secs_in = transcribe(base64.b64decode(b64), suffix)
     t_stt = time.time() - t0
+    if user_text and on_transcript:
+        try:
+            on_transcript(user_text, ts)
+        except Exception as e:
+            print(f"[lq] posting the transcript failed: {e}", file=sys.stderr)
     if not user_text:
         # SAY SO RATHER THAN ANSWER NOTHING. An empty transcription with a
         # confident reply after it is the fabrication shape in another costume.
@@ -180,6 +193,9 @@ def turn(payload, answer_fn):
         # float with sixteen digits invites someone to diff two of them.
         "audio_seconds_in": round(secs_in, 3),
         "audio_seconds_out": round(secs_out, 3),
+        # The turn's own stamp, shared with the transcript posted above so the
+        # two halves of one exchange sort together whichever arrives first.
+        "ts": ts,
         "timing": {"stt_s": round(t_stt, 2),
                    "think_s": round(t1 - t0 - t_stt, 2),
                    "tts_s": round(time.time() - t1, 2)},
@@ -193,7 +209,7 @@ def selftest(clip=None):
         print("  missing:", m)
     if not ok:
         return 1
-    clip = clip or os.path.join(HERE, "test_en.wav")
+    clip = clip or os.path.expanduser("~/DST/voice/test_en.wav")
     if not os.path.exists(clip):
         print("no clip to test with:", clip)
         return 1
