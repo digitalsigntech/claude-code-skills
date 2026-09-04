@@ -497,10 +497,19 @@ def transcribe(audio_bytes, suffix=".m4a", lang=None):
         # than transcribed — "I can speak both Russian and Russian" — which
         # reads like a bad transcription and is actually the wrong task. The
         # turn's own language when the app sends one, `auto` otherwise.
-        code = (lang or "").strip().lower()[:2]
-        if code not in _voice_locales():
-            # A language we cannot answer in is not a language this tier speaks;
-            # let the recogniser decide rather than force a wrong one.
+        want = (lang or "").strip().lower()
+        code = want[:2]
+        if want == "auto" or code not in _voice_locales():
+            # `auto` IS PART OF THE CONTRACT, not a value that happens to fall
+            # through. A pinned language is a claim about what the person is
+            # ABOUT to say, made from a setting; when it is wrong whisper does
+            # not fail, it TRANSLATES — `-l en` on the Russian clip returns
+            # "What were the sales last month?", fluent and plausible and not
+            # what anyone said. Detection costs about seven seconds on a CPU
+            # agent and is the price of never doing that silently.
+            #
+            # A language we cannot answer in also lands here: forcing one we
+            # have no voice for buys a transcript we cannot reply to.
             code = "auto"
         out = subprocess.run(
             [WHISPER_BIN, "-m", WHISPER_MODEL, "-f", wav, "-nt", "-np",
