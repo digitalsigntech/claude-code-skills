@@ -59,6 +59,97 @@ FFMPEG = os.environ.get("LQ_FFMPEG", "ffmpeg")
 MAX_AUDIO_S = float(os.environ.get("LQ_MAX_AUDIO_S", "120"))
 
 
+# WHAT THIS INSTALL CAN ACTUALLY HEAR AND SAY (2026-09-04). The picker showed
+# "14 languages" for the local tier while this machine ran `ggml-base.en` and
+# one English voice — which is one language. The 14 was never a claim anyone
+# made: the plane OMITS a count it does not know (#307, so a tier is never given
+# a borrowed number) and the app then falls back to the interface languages we
+# ship. Right for a cloud tier, wrong here, because a local tier's languages are
+# a property of the FILES ON THIS DISK and of nothing else.
+#
+# A turn needs both halves. A model that only transcribes English cannot serve a
+# Spanish question however many voices are installed, and a voice we do not have
+# cannot answer one we transcribed. So the count is the INTERSECTION of what the
+# transcriber hears and what the voices speak — the languages a whole turn can
+# actually be had in.
+WHISPER_MULTILINGUAL_LANGS = 99          # whisper.cpp's own documented figure
+
+
+def has_gpu():
+    """Is there an accelerator worth loading a large model onto?
+
+    Deliberately crude and cheap: a Vulkan/CUDA whisper build present, or an
+    NVIDIA or Metal device visible. A wrong YES costs a slow first turn; a wrong
+    NO costs accuracy nobody notices. Neither is worth probing hardware for.
+    """
+    if "vulkan" in WHISPER_BIN or "cuda" in WHISPER_BIN.lower():
+        return True
+    if shutil.which("nvidia-smi"):
+        return True
+    return sys.platform == "darwin"
+
+
+def preferred_model_name():
+    """The recogniser this machine should run (2026-09-04).
+
+    A CPU-only agent gets `small` MULTILINGUAL rather than `small.en`: the
+    languages are worth more than the second or two the bigger vocabulary costs,
+    and the English-only model was never a decision — it was the smallest thing
+    that made the first turn work. An agent with an accelerator gets the
+    99-language `large-v3-turbo`.
+    """
+    return "ggml-large-v3-turbo-q5_0.bin" if has_gpu() else "ggml-small.bin"
+
+
+def _voice_locales():
+    """The languages the installed Piper voices can speak, as ISO codes."""
+    out = set()
+    d = os.path.dirname(PIPER_VOICE)
+    try:
+        names = os.listdir(d)
+    except OSError:
+        names = [os.path.basename(PIPER_VOICE)]
+    for n in names:
+        if n.endswith(".onnx"):
+            code = n.split("-", 1)[0].split("_", 1)[0].lower()
+            if len(code) == 2:
+                out.add(code)
+    return out
+
+
+def understands():
+    """How many languages the RECOGNISER can hear, whatever we can answer in."""
+    return (1 if os.path.basename(WHISPER_MODEL).endswith(".en.bin")
+            else WHISPER_MULTILINGUAL_LANGS)
+
+
+def languages():
+    """(count, codes, why) — what a whole turn can be had in, on this install.
+
+    Honest by construction: it reads the model filename and the voice files
+    rather than a constant, so an install that adds a multilingual model and
+    more voices starts reporting the truth without anyone editing a number.
+    """
+    voices = _voice_locales()
+    english_only = os.path.basename(WHISPER_MODEL).endswith(".en.bin")
+    if english_only:
+        codes = sorted(voices & {"en"})
+        why = (f"{os.path.basename(WHISPER_MODEL)} transcribes English only, "
+               f"so English is the only language a turn can complete in")
+        return len(codes), codes, why
+    codes = sorted(voices)
+    # TWO HONEST NUMBERS, and they are different. A multilingual recogniser
+    # hears up to 99; a turn also has to be ANSWERED, and only the installed
+    # voices can do that. Reporting the 99 alone would be the borrowed-number
+    # mistake again, one tier along: true of half the pipeline and false of the
+    # thing the user experiences.
+    why = (f"{os.path.basename(WHISPER_MODEL)} understands up to "
+           f"{WHISPER_MULTILINGUAL_LANGS} languages; a turn also needs a voice "
+           f"to answer in, and {len(codes)} "
+           f"{'is' if len(codes) == 1 else 'are'} installed")
+    return len(codes), codes, why
+
+
 def probe():
     """(ok, reasons) — is this install actually able to serve the tier?"""
     missing = []
