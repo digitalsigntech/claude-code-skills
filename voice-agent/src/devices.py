@@ -113,8 +113,7 @@ def register(device_id, pubkey, label="", kind="", os_name="", location="",
     # A row whose account differs is a DIFFERENT device as far as approval goes,
     # so it starts again exactly as a re-key does.
 
-    # A NEW KEY ON A KNOWN ID IS A NEW DEVICE (2026-09-04, from Maclaude's #401
-    # asking what happens in exactly this case). Carrying `accepted` forward
+    # A NEW KEY ON A KNOWN ID IS A NEW DEVICE (2026-09-04). Carrying `accepted` forward
     # across a CHANGED pubkey would make re-registration a way to launder a
     # substituted key past the approval gate: present the id of a device the
     # owner once approved, hand over a different key, inherit the tick. The id
