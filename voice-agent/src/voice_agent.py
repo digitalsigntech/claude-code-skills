@@ -620,6 +620,78 @@ def save_upload(blob, content_type="image/jpeg", stem="photo"):
     return path, media_token(path)
 
 
+# SEALED ATTACHMENTS, STAGE 3 (#514, request 481). A file that leaves this
+# agent for a sealed account travels as ciphertext under a key that lives only
+# inside a sealed message: the plane stores and serves bytes it cannot read.
+# The sealed twin is made ONCE per file and kept beside it (`<path>.sealed` +
+# `.sealed.json` holding the reference), so every row, feed item and `blob`
+# fetch that names the file agrees on key, nonce and hash. One key, one file,
+# once: a re-sent file is a new upload with a new twin.
+SEALED_BLOB_MAX = 25 * 1024 * 1024        # the `file` relay's ceiling, kept
+
+
+def sealed_ref(path):
+    """The reference {token,key_b64,nonce_b64,mime,name,bytes,sha256} for a
+    file on disk, sealing it on first use. sha256 is over the CIPHERTEXT."""
+    side, meta_p = path + ".sealed", path + ".sealed.json"
+    if os.path.exists(side) and os.path.exists(meta_p):
+        try:
+            ref = json.load(open(meta_p))
+            if ref.get("token") == media_token(path):
+                return ref
+        except Exception:
+            pass
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    key, nonce = secrets.token_bytes(32), secrets.token_bytes(12)
+    with open(path, "rb") as f:
+        plain = f.read()
+    ct = AESGCM(key).encrypt(nonce, plain, None)
+    with open(side + ".tmp", "wb") as f:
+        f.write(ct)
+    os.replace(side + ".tmp", side)
+    ref = {"token": media_token(path),
+           "key_b64": base64.b64encode(key).decode(),
+           "nonce_b64": base64.b64encode(nonce).decode(),
+           "mime": mimetypes.guess_type(path)[0] or "application/octet-stream",
+           "name": os.path.basename(path), "bytes": len(plain),
+           "sha256": hashlib.sha256(ct).hexdigest()}
+    with open(meta_p + ".tmp", "w") as f:
+        json.dump(ref, f)
+    os.replace(meta_p + ".tmp", meta_p)
+    return ref
+
+
+def open_sealed_blob(ref, ct):
+    """Plaintext bytes of an uploaded blob, or raises. The hash is checked
+    before the key is used, and the promised size after."""
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    want = str(ref.get("sha256") or "").lower()
+    if not want or hashlib.sha256(ct).hexdigest() != want:
+        raise ValueError("blob hash does not match its reference")
+    key = base64.b64decode(str(ref.get("key_b64") or ""))
+    nonce = base64.b64decode(str(ref.get("nonce_b64") or ""))
+    if len(key) != 32 or len(nonce) != 12:
+        raise ValueError("reference carries a malformed key or nonce")
+    plain = AESGCM(key).decrypt(nonce, ct, None)
+    if isinstance(ref.get("bytes"), int) and ref["bytes"] != len(plain):
+        raise ValueError("blob length differs from its reference")
+    return plain
+
+
+def _attachments_turn(plaintext):
+    """The opened attachments message if this is one, else None. Read from
+    the PLAINTEXT like a voice turn: what is inside decides what this is."""
+    t = (plaintext or "").lstrip()
+    if not t.startswith("{") or '"attachments"' not in t[:200]:
+        return None
+    try:
+        p = json.loads(t)
+    except ValueError:
+        return None
+    return p if isinstance(p, dict) and isinstance(p.get("attachments"),
+                                                   list) else None
+
+
 def _att_kind(path):
     ext = os.path.splitext(path)[1].lower()
     if ext in (".jpg", ".jpeg", ".png", ".heic", ".webp", ".gif"):
@@ -847,7 +919,8 @@ def _archive_history(limit, since):
                 toks = [media_token(p) for p in paths]
                 m.update(token=toks[0], tokens=toks,
                          kind=_att_kind(paths[0]),
-                         filename=os.path.basename(paths[0]))
+                         filename=os.path.basename(paths[0]),
+                         _paths=paths)      # for meta_sealed; never sent
         msgs.append(m)
     return msgs
 
@@ -1943,6 +2016,11 @@ def capabilities():
     # when a key exists, the library imports, and the operator turned it on.
     if e2ee_ready(caller()):
         caps.append("e2ee-v1")
+        # STAGE 3 (#514/request 481): files sealed under a per-file key. The
+        # app seals only when the account seals AND this is listed, so it is
+        # claimed only where `attachments[]` can be opened and `blob` answered.
+        if _chatdb() and config().get("e2ee_attachments"):
+            caps.append("sealed-attachments")
     return caps
 
 
@@ -2450,6 +2528,80 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"service": "voice-agent", "ok": health()["ok"]})
         self._send(404, {"error": "not found"})
 
+    def _attachments_answer(self, spec, account, name, d, priv, mine, theirs):
+        """A sealed upload (#514, request 481): the opened plaintext names the
+        blobs and carries their keys; the blobs themselves ride beside the
+        envelope as `blobs[]`, put there by the plane from its short-lived
+        store. From the first plaintext byte on this is the `photos` path."""
+        if not isinstance(spec, dict):
+            return self._send(400, {"error": "bad_attachments",
+                                    "detail": "plaintext is not an "
+                                              "attachments message"})
+        refs = spec.get("attachments") or []
+        caption = str(spec.get("caption") or "").strip() or None
+        blobs = {str(b.get("token") or ""): str(b.get("b64") or "")
+                 for b in (d.get("blobs") or []) if isinstance(b, dict)}
+        saved, received, missing = [], [], []
+        for ref in refs[:10]:
+            if not isinstance(ref, dict):
+                continue
+            tok = str(ref.get("token") or "")
+            if not tok or not blobs.get(tok):
+                missing.append(tok)
+                continue
+            # RECEIVED MEANS THE PLANE MAY DELETE IT: a blob that fails to
+            # open will not open on a retry either, so it is reported as
+            # received and logged, never left to expire in the clear.
+            received.append(tok)
+            try:
+                plain = open_sealed_blob(ref, base64.b64decode(blobs[tok]))
+            except Exception as e:
+                self.log_message("SEALED BLOB REFUSED (%s): %.120s", tok, e)
+                continue
+            if not plain or len(plain) > UPLOAD_MAX:
+                continue
+            stem = (os.path.splitext(str(ref.get("name") or ""))[0]
+                    or "file")[:40]
+            saved.append(save_upload(
+                plain, str(ref.get("mime") or "application/octet-stream"),
+                stem=re.sub(r"[^A-Za-z0-9._-]+", "-", stem) or "file"))
+        if not saved:
+            return self._send(400, {"error": "no attachments opened",
+                                    "received": received,
+                                    "missing": missing})
+        paths = [p for p, _ in saved]
+        toks = [t for _, t in saved]
+        posted = archive_file(paths, caption, person_name(name))
+        self.log_message("sealed attachments: %d file(s) opened, %d missing,"
+                         " %s", len(paths), len(missing),
+                         "archived" if posted else "STORED BUT NOT ARCHIVED")
+        answer = None
+        if caption:
+            try:
+                where = ", ".join(paths)
+                answer = ask(account, caption, name,
+                             archive_question=False,
+                             context=f"The user just sent {len(paths)} "
+                                     f"file(s) with this message, saved "
+                                     f"at: {where}. Open them if the "
+                                     f"message refers to them.").get("answer")
+            except Exception as e:
+                self.log_message("caption turn failed: %s", e)
+        out = {"ok": True, "posted": posted,
+               "posted_to": "Telegram" if telegram_chat() else "your chat",
+               "count": len(paths), "tokens": toks, "token": toks[0],
+               "name": os.path.basename(paths[0]), "received": received,
+               **({"missing": missing} if missing else {})}
+        if answer:
+            try:
+                out["sealed"] = (seal_for_devices(str(answer), account=account)
+                                 or e2ee_seal(str(answer), priv, mine, theirs,
+                                              direction=DIR_TO_PHONE))
+            except Exception as e:
+                self.log_message("SEAL FAILED on attachments answer: %s", e)
+                return self._send(500, {"error": "seal_failed"})
+        return self._send(200, out)
+
     def _voice_answer(self, payload, account, name, d, priv, mine, theirs):
         """One LQ turn: audio in, the agent's own answer, audio out.
 
@@ -2735,6 +2887,19 @@ class Handler(BaseHTTPRequestHandler):
                     for row in rows:
                         if not isinstance(row, dict) or "text" not in row:
                             continue
+                        _paths = row.pop("_paths", None)
+                        if _paths and config().get("e2ee_attachments"):
+                            _meta = json.dumps({
+                                "caption": "",
+                                "filename": row.get("filename", ""),
+                                "attachments": [
+                                    sealed_ref(p) for p in _paths
+                                    if os.path.exists(p) and
+                                    os.path.getsize(p) <= SEALED_BLOB_MAX]})
+                            row["meta_sealed"] = (
+                                seal_for_devices(_meta, account=account)
+                                or e2ee_seal(_meta, priv, mine, theirs,
+                                             direction=DIR_TO_PHONE))
                         row["sealed"] = (
                             seal_for_devices(str(row.get("text") or ""),
                                              account=account)
@@ -2749,6 +2914,9 @@ class Handler(BaseHTTPRequestHandler):
                     self.log_message("HISTORY SEAL FAILED: %s", e)
                     return self._send(500, {"error": "seal_failed",
                                             "detail": str(e)[:300]})
+            for row in rows:
+                if isinstance(row, dict):
+                    row.pop("_paths", None)
             return self._send(200, {"messages": rows,
                                     "chat": bool(telegram_chat())
                                             and not is_guest()})
@@ -2762,6 +2930,26 @@ class Handler(BaseHTTPRequestHandler):
                 # to its own plain panel, which is the honest look for "unset".
                 return self._send(404, {"error": "no branding"})
             return self._send(200, b)
+        if kind == "blob":
+            # The `file` hook's sealed twin (#514): ciphertext of a file this
+            # agent holds, for the plane to cache and serve without a key.
+            tok = str(d.get("token") or "")
+            path = MEDIA.get(tok) or _remint(tok)
+            if not path or not os.path.exists(path):
+                return self._send(404, {"error": "no such token"})
+            if os.path.getsize(path) > SEALED_BLOB_MAX:
+                return self._send(413, {"error": "file too large for relay"})
+            try:
+                ref = sealed_ref(path)
+                with open(path + ".sealed", "rb") as f:
+                    ct = f.read()
+            except Exception as e:
+                self.log_message("BLOB SEAL FAILED for %s: %.120s", tok, e)
+                return self._send(500, {"error": "seal_failed"})
+            return self._send(200, {
+                "b64": base64.b64encode(ct).decode(),
+                "content_type": "application/octet-stream",
+                "filename": ref["name"], "bytes": len(ct)})
         if kind == "file":
             # Only paths this process minted a token for are servable — the
             # plane asking for a file is not authority to read arbitrary ones.
@@ -2934,8 +3122,17 @@ class Handler(BaseHTTPRequestHandler):
                     priv, mine = agent_keys()
                     theirs = peer_key(account)
                     for it in items:
+                        _p = MEDIA.get(it.get("token") or "")
                         meta = json.dumps({"filename": it.get("filename", ""),
-                                           "caption": it.get("caption", "")})
+                                           "caption": it.get("caption", ""),
+                                           # a ref per token, album order;
+                                           # a token without one falls back
+                                           # to file/ on the phone
+                                           "attachments": (
+                                               [sealed_ref(_p)] if _p and
+                                               os.path.exists(_p) and
+                                               os.path.getsize(_p)
+                                               <= SEALED_BLOB_MAX else [])})
                         it["meta_sealed"] = e2ee_seal(meta, priv, mine, theirs,
                                                       direction=DIR_TO_PHONE)
                         it.pop("filename", None)
@@ -3029,6 +3226,10 @@ class Handler(BaseHTTPRequestHandler):
                     # envelope, deliberately: the relay forwards what it is
                     # given and a turn that lied about its kind would be opened
                     # anyway. What is inside decides what this is.
+                    at = _attachments_turn(q)
+                    if at is not None or str(d.get("kind") or "") == "attachments":
+                        return self._attachments_answer(
+                            at, account, name, d, priv, mine, theirs)
                     vt = _voice_turn(q)
                     if vt is not None:
                         return self._voice_answer(
