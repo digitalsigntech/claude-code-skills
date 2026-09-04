@@ -1028,6 +1028,12 @@ SPEECH_MAX_CHARS = 400
 # Bullets are worse — a dash at the start of eight lines is a list to look at
 # and a stutter to listen to.
 _MD_NOISE = re.compile(r"\*\*|__|`+|^\s*[-*+]\s+|^\s*#{1,6}\s+", re.M)
+# SINGLE-ASTERISK EMPHASIS IS ALSO MARKUP. `*Your reminders* (3 pending)`
+# is how the reminders table is headed, and on the box's first reminders turn
+# the synthesiser said "asterisk" twice (request 477). Paired, tight against
+# the words, not inside a word: "2 * 3" and snake_case stay as they are.
+_MD_EMPH = re.compile(r"(?<![\w*])\*(?!\s)([^*\n]+?)(?<!\s)\*(?![\w*])"
+                      r"|(?<![\w_])_(?!\s)([^_\n]+?)(?<!\s)_(?![\w_])")
 
 
 # HOW A PERSON WOULD SAY IT (2026-09-04, from the owner: LQ pronounced the
@@ -1098,6 +1104,7 @@ def _say_slash(m, text):
 def say_text(text):
     """Turn what is written for the eye into what a voice can read aloud."""
     t = _MD_NOISE.sub(" ", text or "")
+    t = _MD_EMPH.sub(lambda m: m.group(1) or m.group(2), t)
     # Park the things no rule should touch, and put them back at the end.
     kept = []
 
