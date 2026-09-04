@@ -2529,10 +2529,12 @@ class Handler(BaseHTTPRequestHandler):
             # THE ZONE IS IN THE LINE because "is it arriving?" cost a round
             # trip to answer. A turn that reached the model with no date at all
             # (#436) looked identical in the log to one that had it.
-            "voice turn: %.1fs in, %.1fs out, stt %.1fs tts %.1fs, %d KB reply,"
+            "voice turn: %.1fs in, %.1fs out, stt %.1fs model %.1fs tts %.1fs,"
+            " %d KB reply,"
             " tz=%s, peak %s dBFS, reply %s%s",
             out["audio_seconds_in"], out["audio_seconds_out"],
-            out["timing"]["stt_s"], out["timing"]["tts_s"],
+            out["timing"]["stt_s"], out["timing"].get("think_s", -1.0),
+            out["timing"]["tts_s"],
             len(out["voice"]["b64"]) // 1024, d.get("tz") or "(none)",
             out.get("peak_dbfs"), out.get("reply_format") or "?",
             # THE PHANTOM'S SHAPE, flagged rather than filtered. A few words out
