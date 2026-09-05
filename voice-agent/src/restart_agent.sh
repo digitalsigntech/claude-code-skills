@@ -9,6 +9,8 @@
 set -euo pipefail
 UNIT="${1:-voice-agent}"; WAIT="${WAIT:-120}"
 busy() {
+  n="$(cat "$(dirname "$0")/.streams_open" 2>/dev/null || echo 0)"
+  [ "$n" != "0" ] && { echo "stream ($n open)"; return; }
   pgrep -x whisper-cli >/dev/null && { echo "whisper"; return; }
   pgrep -x piper >/dev/null && { echo "piper"; return; }
   # a hook turn in flight: the adapter logs "ask from" / "voice ask" before
