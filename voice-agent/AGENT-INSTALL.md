@@ -390,6 +390,59 @@ Below `LQ_DETECT_MIN_P` (0.85) the detector is not believed and the turn falls b
 two-pass `auto` — slower and correct. No `ggml-base.bin`, same fallback. Nothing breaks by skipping
 this; turns in an unknown language just cost four seconds more.
 
+## Real-time streaming (2026-09-05) — GPU installs only, declared by proof
+
+Local quality sends one sealed clip per sentence. Streaming sends the sentence AS IT IS
+SPOKEN: the phone streams 100 ms frames of PCM16/16 kHz over one WebSocket per session, a
+resident recogniser on the GPU re-decodes the open utterance every 700 ms for partial words on
+the screen, decodes it once more with full context when the person pauses, and the turn is then
+the ordinary one — the same answer path, the same spoken cap, the same synthesiser — delivered
+as a `reply` shaped exactly like a clip reply.
+
+**The gate is a fact.** The local row says `"stream": true` only when the recogniser binary
+reports a GPU backend (`ggml_vulkan`, CUDA, Metal) and a resident `whisper-server` is up and
+answering. A CPU-only install starts the server once, reads "cpu", stops it and never declares
+the flag: `small` on two cores is 7 s a clip and no streaming makes that converse.
+
+**Why resident, why a sized window — measured.** Whisper's cost is a padded 30-second encoder
+window plus a model load per invocation, not the audio length. On an AMD iGPU (Vulkan),
+`large-v3-turbo` on a 4 s utterance: 2.39 s per `whisper-cli` call, 1.96 s resident, **0.5 s
+resident with `audio_ctx` sized to the utterance** (floor 512 — 384 made a 3 s question come
+back twice over, 320 made a 2 s clip decode to dots). `small`: 1.05 / 0.56 / 0.25 s. So one
+resident turbo does partials AND finals; a real streaming decoder (a Parakeet-TDT port is in
+the whisper.cpp tree) is a later stage that changes nothing on the wire.
+
+**The wire** (app build 346). First frame: a sealed text frame (today's envelope) whose
+plaintext is `{"type":"start","lang","speaker","tz","key_b64","format":"pcm16","rate":16000,
+"frame_ms":100,…}`. Every later frame is binary: 1 kind byte (1 audio, 2 control JSON, 3 agent
+JSON) ‖ 12-byte nonce (4 random ‖ 8-byte big-endian counter) ‖ AES-256-GCM ciphertext ‖ tag,
+under the stream key; the agent answers with kind 3 under its own nonce prefix. Control:
+`utterance_start {id}` (optional), `utterance_end {id, seconds, prefiltered}`,
+`utterance_cancel {id}`, `heard_out {seconds}`. Agent: `hello {recogniser, backend,
+partial_every_ms, max_utterance_s}` before any audio, `partial {id,text}`, `final {id,text}`,
+`reply {…as a clip reply…, audio_seconds, audio_seconds_out}`, `no_speech {id}`, `error`.
+
+**The plane is opaque to words, not to seconds.** A metered agent frame (reply, no_speech)
+travels to the plane as JSON text `{"frame": <base64>, "id", "audio_seconds",
+"audio_seconds_out"}`; the plane bills the clear fields exactly as it bills a clip and forwards
+the binary frame to the phone unchanged. Phone-to-plane stays fully opaque.
+
+**Files.** `src/ws_min.py` — WebSocket on the standard library, server and client, proven
+against the `websockets` library in both roles. `src/stream_lq.py` — the resident recogniser,
+the frame codec, the session; `python3 src/stream_lq.py --selftest` streams a synthesised
+sentence through the whole thing with no network and expects a hello, partials, a final and a
+metered reply; `--facts` prints what the row will say. The adapter serves `/stream` beside
+`/hook` (the plane authenticates with the hook secret and names the account in headers, because
+an upgrade has no body) and starts the recogniser at boot. `LQ_STREAM_PORT` (8098),
+`LQ_STREAM_PARTIAL_MS` (700), `LQ_STREAM_MAX_UTTERANCE_S` (60) are the knobs; the restart script
+recycles the recogniser's port because it is the adapter's child.
+
+**Measured end to end** (a scripted phone through the real plane to the owner's GPU agent,
+2026-09-05): hello 0.3 s after the start frame, partials at 3.4 s and 4.6 s while the sentence
+was still streaming, the final 0.6 s after the end of speech, the reply after a real model
+turn; the plane billed 3.1 s in + 4.8 s out as one utterance and the phone received the frame
+with no wrapper.
+
 ## Sealed attachments (2026-09-04) — stage 3 of end-to-end encryption
 
 Once an account is sealed (`e2ee` on, a device key on disk) and `e2ee_attachments`
