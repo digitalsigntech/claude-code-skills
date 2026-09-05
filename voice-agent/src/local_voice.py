@@ -426,6 +426,21 @@ def _roster():
     return d if isinstance(d, dict) else {}
 
 
+def _entry(code, who):
+    """The roster entry for an id, following an alias. Request 485: the
+    listed ids are the engines' own names; `anna`/`maria`/`tom`/`leo` stay
+    as hidden aliases so a pick stored by an earlier build keeps speaking."""
+    # Ids keep the engine's case (`de_DE-thorsten-high`) and callers lowercase
+    # what the app sent, so the match is case-insensitive.
+    here = {k.lower(): v for k, v in (_roster().get(code) or {}).items()}
+    e = here.get((who or "").lower())
+    seen = 0
+    while isinstance(e, dict) and e.get("alias") and seen < 3:
+        e = here.get(str(e["alias"]).lower())
+        seen += 1
+    return e if isinstance(e, dict) and not e.get("alias") else None
+
+
 def speakers_for(lang):
     """The ids offerable in a language, in roster order. [] when unrostered.
 
@@ -485,6 +500,20 @@ def voices():
     order = ["anna", "maria", "tom", "leo"]
     seen = {v for ids in by_lang.values() for v in ids}
     ids = [v for v in order if v in seen] + sorted(seen - set(order))
+    # WHAT TO CALL EACH ID (request 485): the picker shows a name a person can
+    # say, not `af_heart`. Female first, then male, in each language's list —
+    # the roster is written in that order and by_lang keeps it.
+    labels = {}
+    for code, entries in _roster().items():
+        if code.startswith("_"):
+            continue
+        for vid, e in entries.items():
+            if vid in seen and vid not in labels:
+                labels[vid] = {
+                    "name": e.get("name") or vid.capitalize(),
+                    "gender": {"F": "female", "M": "male"}.get(
+                        e.get("gender"), "unknown"),
+                    **({"accent": e["accent"]} if e.get("accent") else {})}
     # A PARTIAL INSTALL AND A THIN LANGUAGE LOOK IDENTICAL from the outside.
     # Mid-copy, this row said French had no voices and English had three;
     # finished, it says four each — and nothing in the numbers distinguished
@@ -507,7 +536,7 @@ def voices():
               + ("" if have >= want else
                  " — a language offers only what is on this disk, so this "
                  "count rises as the rest arrive"))
-    return {"ids": ids, "by_lang": by_lang, "source": source}
+    return {"ids": ids, "by_lang": by_lang, "labels": labels, "source": source}
 
 
 def voice_for(lang, speaker=None):
@@ -522,8 +551,9 @@ def voice_for(lang, speaker=None):
     d = os.path.dirname(PIPER_VOICE)
     who = (speaker or "").strip().lower()
     if code and who:
-        roster_here = _roster().get(code) or {}
-        entry = roster_here.get(who)
+        roster_here = {k: v for k, v in (_roster().get(code) or {}).items()
+                       if not v.get("alias")}
+        entry = _entry(code, who)
         if entry is None:
             # AN ID WE DO NOT KNOW IS NOT A DEFAULT, it is a disagreement. The
             # app began sending `speaker` on every turn with build 338; if its
@@ -875,8 +905,9 @@ def engine_for(lang):
 def _kokoro_voice(lang, speaker):
     code = (lang or "").strip().lower()[:2]
     who = (speaker or "").strip().lower()
-    here = _roster().get(code) or {}
-    entry = here.get(who)
+    here = {k: v for k, v in (_roster().get(code) or {}).items()
+            if not v.get("alias")}
+    entry = _entry(code, who)
     if entry and entry.get("kokoro"):
         return entry["kokoro"]
     if who:
@@ -900,7 +931,10 @@ def _speak_kokoro(text, lang, speaker, wav):
         return None
     import soundfile as sf
     code = (lang or "en").strip().lower()[:2]
-    tag = {"en": "en-us", "ja": "ja", "pt": "pt-br", "zh": "cmn"}.get(code, code)
+    tag = {"en": "en-us", "ja": "ja", "pt": "pt-br", "zh": "cmn", "es": "es",
+           "fr": "fr-fr", "it": "it"}.get(code, code)
+    if code == "en" and voice.startswith("b"):
+        tag = "en-gb"                    # the British voices, tagged as such
     with _SPEECH_CPU:
         samples, sr = _kokoro_engine().create(text, voice=voice, speed=1.0,
                                               lang=tag)
@@ -1349,7 +1383,7 @@ def _run_turn(payload, answer_fn, on_transcript, account, key, raw_audio):
     # running a WHOLE TURN rather than the recogniser on its own.
     if lang == "auto":
         lang = ""
-    speaker = str((payload or {}).get("speaker") or "").strip().lower()[:32]
+    speaker = str((payload or {}).get("speaker") or "").strip().lower()[:64]
     heard, secs_in, peak, heard_lang = transcribe(
         raw_audio, suffix, lang, recent_lang(account))
     # Remember what this account is speaking, so the one-word answers that
