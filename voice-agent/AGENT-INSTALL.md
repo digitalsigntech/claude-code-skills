@@ -420,7 +420,7 @@ under the stream key; the agent answers with kind 3 under its own nonce prefix. 
 `utterance_start {id}` (optional), `utterance_end {id, seconds, prefiltered}`,
 `utterance_cancel {id}`, `interrupt {id}` (the phone stopped playing that answer — the agent stops synthesising and sending its chunks; the `reply` row still comes, with `streamed.interrupted: true`), `heard_out {seconds}`. Agent: `hello {recogniser, backend,
 partial_every_ms, max_utterance_s}` before any audio, `partial {id,text}`, `final {id,text}`,
-`reply {…as a clip reply…, audio_seconds, audio_seconds_out}`, `no_speech {id}`, `error`.
+`reply {…as a clip reply…, audio_seconds, audio_seconds_out}`, `no_speech {id}`, `error`. `prefiltered: false` means the phone's own recogniser heard no words; the agent then keeps the transcript only if it is plausible speech (0.8–4 words/s, peak above −24 dBFS, not a stock phrase) of at least six words — or three when the transcript is in a script or language the phone's recogniser does not read (Cyrillic on an English phone), because that phone hears no words in it by construction. A transcript mixing scripts is treated as no speech.
 
 **The plane is opaque to words, not to seconds.** A metered agent frame (reply, no_speech)
 travels to the plane as JSON text `{"frame": <base64>, "id", "audio_seconds",
