@@ -418,7 +418,7 @@ plaintext is `{"type":"start","lang","speaker","tz","key_b64","format":"pcm16","
 JSON) ‖ 12-byte nonce (4 random ‖ 8-byte big-endian counter) ‖ AES-256-GCM ciphertext ‖ tag,
 under the stream key; the agent answers with kind 3 under its own nonce prefix. Control:
 `utterance_start {id}` (optional), `utterance_end {id, seconds, prefiltered}`,
-`utterance_cancel {id}`, `heard_out {seconds}`. Agent: `hello {recogniser, backend,
+`utterance_cancel {id}`, `interrupt {id}` (the phone stopped playing that answer — the agent stops synthesising and sending its chunks; the `reply` row still comes, with `streamed.interrupted: true`), `heard_out {seconds}`. Agent: `hello {recogniser, backend,
 partial_every_ms, max_utterance_s}` before any audio, `partial {id,text}`, `final {id,text}`,
 `reply {…as a clip reply…, audio_seconds, audio_seconds_out}`, `no_speech {id}`, `error`.
 
