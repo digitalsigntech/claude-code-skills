@@ -2536,6 +2536,26 @@ def e2ee_locked(account):
 
 
 # ---------------------------------------------------------------- server
+_STREAMS_OPEN = [0]
+_STREAMS_LOCK = threading.Lock()
+
+
+def _streams_open(delta):
+    """How many phones are streaming right now, written to `.streams_open`
+    beside this file for restart_agent.sh: a restart under a live stream shows
+    the person "Socket is not connected", and only this process knows a
+    socket is open."""
+    with _STREAMS_LOCK:
+        _STREAMS_OPEN[0] = max(0, _STREAMS_OPEN[0] + delta)
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".streams_open")
+        try:
+            with open(path + ".tmp", "w") as f:
+                f.write(str(_STREAMS_OPEN[0]))
+            os.replace(path + ".tmp", path)
+        except OSError:
+            pass
+
+
 def _stream_facts():
     """`stream: true` on the local row by proof — a GPU backend reported by the
     resident recogniser, running and answering (#548, amendment B). A CPU-only
@@ -2593,6 +2613,7 @@ class Handler(BaseHTTPRequestHandler):
         set_caller(account)
         ws = ws_min.accept(self)
         self.log_message("stream open (%s)", account)
+        _streams_open(+1)
 
         def open_envelope(env):
             priv, mine = agent_keys()
@@ -2623,6 +2644,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             self.log_message("STREAM FAILED (%s): %.200s", account, e)
         finally:
+            _streams_open(-1)
             try:
                 ws.close()
             except Exception:
