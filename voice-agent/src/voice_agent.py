@@ -2749,6 +2749,12 @@ class Handler(BaseHTTPRequestHandler):
                           context=time_context(d.get("tz")) + VOICE_CONTEXT)
                 return str(res.get("answer") or "")
 
+            # The phone's endpointer verdict rides beside the envelope; the
+            # phantom gate in the turn wants it (a "Thank you" the phone did
+            # not hear either is whisper's, not the person's).
+            if isinstance(payload, dict) and "prefiltered" not in payload \
+                    and d.get("prefiltered") is not None:
+                payload["prefiltered"] = bool(d.get("prefiltered"))
             out = local_voice.turn(payload, answer_fn,
                                    on_transcript=on_transcript,
                                    account=account)

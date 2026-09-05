@@ -387,6 +387,42 @@ _NON_SPEECH = re.compile(r"\[[^\]]*\]|\([^)]*\)|\*[^*]*\*|♪+|\.{2,}")
 MIN_SPEECH_CHARS = 2
 
 
+# WHISPER'S WORDS FOR SILENCE. Trained on subtitles, whisper fills a quiet or
+# near-empty clip with the phrases that end videos: "Thank you", "Thanks for
+# watching", "You're welcome", "Bye". On 2026-09-05 the box answered two of
+# them in one session ("Thank you", 1.2 s, and again) — the phone's mic had
+# caught the tail of the reply, and the recogniser turned nothing into
+# gratitude. These are dropped as no-speech ONLY when the clip is short or the
+# phone's own endpointer did not hear words either; a real "thank you" said
+# over 1.5 s of audio still goes through.
+PHANTOMS = {
+    "thank you", "thanks", "thank you very much", "thank you so much",
+    "thanks for watching", "thank you for watching", "thanks for listening",
+    "you're welcome", "you are welcome", "bye", "goodbye", "bye bye",
+    "see you next time", "see you", "subscribe", "please subscribe",
+    "like and subscribe", "the end", "you", "okay", "ok", "so", "hmm", "mm",
+    "uh", "um", "yeah", "i'm sorry", "sorry",
+}
+PHANTOM_MAX_S = float(os.environ.get("LQ_PHANTOM_MAX_S", "1.5"))
+
+
+def phantom_gate(text, seconds, prefiltered=None, peak=None):
+    """True when `text` is one of whisper's silence phrases AND the clip is too
+    short (< PHANTOM_MAX_S), or the phone's endpointer heard no words
+    (prefiltered is False), or the audio was near-silent. Never on a phrase
+    that is not in the list; never on a long clip the phone also heard."""
+    t = " ".join((text or "").lower().split()).strip(" .,!?-—…\"'")
+    if t not in PHANTOMS:
+        return False
+    if seconds is not None and seconds < PHANTOM_MAX_S:
+        return True
+    if prefiltered is False:
+        return True
+    if peak is not None and peak != float("-inf") and peak < -30.0:
+        return True
+    return False
+
+
 def speech_text(raw):
     """The words in a transcript, or "" when it contains none.
 
@@ -1391,6 +1427,12 @@ def _run_turn(payload, answer_fn, on_transcript, account, key, raw_audio):
     remember_lang(account, lang or heard_lang)
     user_text = speech_text(heard)
     t_stt = time.time() - t0
+    if user_text and phantom_gate(user_text, secs_in,
+                                  (payload or {}).get("prefiltered"), peak):
+        print(f"[lq] phantom dropped: {user_text!r} ({secs_in:.1f}s, "
+              f"prefiltered={(payload or {}).get('prefiltered')})",
+              file=sys.stderr)
+        user_text = ""
     if not user_text:
         # NOTHING WAS SAID: no bubble, no model turn, no speech back, and
         # nothing billed. The transcriber has told us there were no words, and

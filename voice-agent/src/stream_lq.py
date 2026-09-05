@@ -479,6 +479,9 @@ class StreamSession:
             return
         user_text = untangle(lv.speech_text(heard))
         t_stt = time.time() - t0
+        if user_text and lv.phantom_gate(user_text, secs_in, ctrl.get("prefiltered"), peak):
+            self.log(f"phantom dropped: {user_text!r} ({secs_in}s, prefiltered={ctrl.get('prefiltered')})")
+            heard, user_text = user_text, ""
         if not user_text:
             self._agent({"type": "no_speech", "id": uid, "heard_marker": heard[:40]},
                         meter={"id": uid, "audio_seconds": secs_in, "audio_seconds_out": 0.0, "no_speech": True})
