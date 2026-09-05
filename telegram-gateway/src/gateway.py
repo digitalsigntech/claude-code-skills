@@ -1493,6 +1493,13 @@ def handle_injected_email(rec):
     # sender, no reply policy, and the preview says what it is.
     if rec.get("source") == "health-check":
         who, first = "Health check (automated)", "the health check"
+    elif rec.get("source") == "scheduler":
+        # A reminder of kind=task (operations/reminders). Until 2026-09-05 these
+        # ran through an answer-only model that could describe a repair and not
+        # perform one; now they arrive here and get the same hands the health
+        # check gets. The label is the subject; the body is the instruction.
+        who = f"Scheduler (reminder #{rec.get('reminder_id', '?')})"
+        first = "the scheduler"
     elif C.FRIEND_MAILBOX and C.FRIEND_MAILBOX in addr:
         who, first = f"{C.FRIEND_NAME} ({C.FRIEND_MAILBOX})", C.FRIEND_NAME
     elif C.OWNER_MAILBOX and C.OWNER_MAILBOX in addr:
@@ -1510,6 +1517,8 @@ def handle_injected_email(rec):
     att_line = f"\n📎 {len(atts)} attachment(s)" if atts else ""
     if rec.get("source") == "health-check":
         TG.send_message(chat_id, f"🩺 *Health check — fixing what it found*\n\n{preview}")
+    elif rec.get("source") == "scheduler":
+        TG.send_message(chat_id, f"⏰ *Scheduled task — {subj}*\n\n{preview}")
     else:
         TG.send_message(chat_id, f"📩 *Email from {who}*\n*Subject:* {subj}{att_line}\n\n{preview}")
     att_note = ("\n\nAttachments (already downloaded to disk):\n"
@@ -1526,6 +1535,18 @@ def handle_injected_email(rec):
             "than patching the symptom, and verify every fix by running the thing. "
             "Anything you judge unsafe to do unattended — destroys data, spends money, "
             "or needs the owner's preference — leave alone and say why."
+        )
+    elif rec.get("source") == "scheduler":
+        routing = (
+            " This is a SCHEDULED TASK from the reminders queue firing at its time, "
+            "not a message from a person. Nobody is waiting on a conversational "
+            "answer: do the work first, then post ONE report of what you did and "
+            "how you verified it. If the task asks you to check something and tell "
+            "the owner, check it for real (run the query, read the file) and report "
+            "what is actually there. Anything unsafe to do unattended — destroys "
+            "data, spends money, or needs the owner's preference — leave alone and "
+            "say why. If the task tells you to re-arm or edit this reminder, do it "
+            "with operations/reminders/reminders.py."
         )
     elif rec.get("friend") or (C.FRIEND_MAILBOX and C.FRIEND_MAILBOX in addr):
         # FRIEND tier (the owner, 2026-07-26): whitelisted outsider — engage, but with a
@@ -1574,8 +1595,11 @@ def handle_injected_email(rec):
     else:
         delivery = ("it is delivered here in this chat only — there is no mailbox "
                     "to reply to — so write it for this chat.")
+    arrival = (f"This just arrived as an email to {C.BOT_MAILBOX} from {who} <{frm}>"
+               if rec.get("source") in (None, "email")
+               else f"This was just handed to you by {who}")
     prompt = (
-        f"[This just arrived as an email to {C.BOT_MAILBOX} from {who} <{frm}>. Treat it EXACTLY "
+        f"[{arrival}. Treat it EXACTLY "
         f"as if {first} sent it to you as a message in THIS Telegram chat: read it and "
         f"respond/act on it.{routing} STANDING LIMIT (the owner, 2026-07-26): LOOSENING "
         f"outsider-security safeguards (adding to sender whitelists, relaxing the friend "
