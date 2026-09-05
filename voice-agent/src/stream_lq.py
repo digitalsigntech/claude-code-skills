@@ -479,8 +479,10 @@ class StreamSession:
             return
         user_text = untangle(lv.speech_text(heard))
         t_stt = time.time() - t0
-        if user_text and lv.phantom_gate(user_text, secs_in, ctrl.get("prefiltered"), peak):
-            self.log(f"phantom dropped: {user_text!r} ({secs_in}s, prefiltered={ctrl.get('prefiltered')})")
+        _why = user_text and lv.hallucination_gate(user_text, secs_in, ctrl.get("prefiltered"), peak)
+        if _why:
+            self.log(f"phantom dropped ({_why}): {user_text!r} ({secs_in}s, peak {peak:.1f} dBFS, "
+                     f"prefiltered={ctrl.get('prefiltered')})")
             heard, user_text = user_text, ""
         if not user_text:
             self._agent({"type": "no_speech", "id": uid, "heard_marker": heard[:40]},
@@ -546,7 +548,8 @@ class StreamSession:
         self.log(f"stream turn {uid}: {secs_in}s in, {secs_out:.1f}s out, stt {t_stt:.2f}s "
                  f"model {t1 - t0 - t_stt:.1f}s tts {time.time() - t1:.1f}s, "
                  f"{len(audio) // 1024} KB reply, lang={self.lang or 'auto'} "
-                 f"speaker={self.speaker or '-'}, reply {reply['reply_format']}, "
+                 f"speaker={self.speaker or '-'}, peak {peak:.1f} dBFS, "
+                 f"prefiltered={ctrl.get('prefiltered')}, reply {reply['reply_format']}, "
                  f"{self.partial_count} partials")
         self.partial_count = 0
 

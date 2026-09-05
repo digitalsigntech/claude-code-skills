@@ -402,6 +402,14 @@ PHANTOMS = {
     "see you next time", "see you", "subscribe", "please subscribe",
     "like and subscribe", "the end", "you", "okay", "ok", "so", "hmm", "mm",
     "uh", "um", "yeah", "i'm sorry", "sorry",
+    # the longer stock phrases whisper produces on minutes of noise (a car
+    # cabin over Bluetooth, 2026-09-05 18:49 UTC: 30 s of road produced
+    # "I'm going to go ahead and get started" and was answered)
+    "i'm going to go ahead and get started", "i'll see you in the next video",
+    "and i'll see you in the next video", "see you in the next video",
+    "thank you for joining us", "thanks for joining us", "let's get started",
+    "i'll see you next time", "we'll see you next time", "peace out",
+    "have a great day", "thank you for your time", "that's all for today",
 }
 PHANTOM_MAX_S = float(os.environ.get("LQ_PHANTOM_MAX_S", "1.5"))
 
@@ -421,6 +429,44 @@ def phantom_gate(text, seconds, prefiltered=None, peak=None):
     if peak is not None and peak != float("-inf") and peak < -30.0:
         return True
     return False
+
+
+def hallucination_gate(text, seconds, prefiltered=None, peak=None):
+    """Whisper's output on audio that held no words — the FULL rule (request
+    from the app after the car-cabin session of 2026-09-05):
+
+    1. a stock phrase (PHANTOMS) on a short, unheard or near-silent clip
+       (phantom_gate);
+    2. the phone's own recogniser heard NO WORDS (prefiltered is False): the
+       transcript is dropped unless it is long and plausible — at least six
+       words, spoken at a speech-like rate (0.8–4 words a second), on audio
+       that peaked above −24 dBFS, and not a stock phrase;
+    3. word density: a "sentence" of few words spread over many seconds
+       (under 0.5 words a second across 8 s or more) is noise narrated, not
+       speech — "I'm going to go ahead and get started" over 30 s is eight
+       words at 0.27 a second.
+
+    Returns the reason (a short string) when the transcript should be treated
+    as no-speech, else "". Whisper's own no_speech_prob was measured at 0.0
+    for speech, pink noise, road noise and near-silence alike on this model,
+    so nothing here leans on it."""
+    t = " ".join((text or "").split())
+    if not t:
+        return ""
+    words = len(t.split())
+    secs = float(seconds or 0)
+    if phantom_gate(t, secs, prefiltered, peak):
+        return "stock phrase"
+    tl = t.lower().strip(" .,!?-—…\"'")
+    if prefiltered is False:
+        rate = words / secs if secs > 0 else 0
+        plausible = (words >= 6 and 0.8 <= rate <= 4.0 and tl not in PHANTOMS
+                     and (peak is None or peak == float("-inf") or peak >= -24.0))
+        if not plausible:
+            return "phone heard no words"
+    if secs >= 8.0 and words / secs < 0.5:
+        return f"{words} words over {secs:.0f}s"
+    return ""
 
 
 def speech_text(raw):
@@ -1427,11 +1473,12 @@ def _run_turn(payload, answer_fn, on_transcript, account, key, raw_audio):
     remember_lang(account, lang or heard_lang)
     user_text = speech_text(heard)
     t_stt = time.time() - t0
-    if user_text and phantom_gate(user_text, secs_in,
-                                  (payload or {}).get("prefiltered"), peak):
-        print(f"[lq] phantom dropped: {user_text!r} ({secs_in:.1f}s, "
-              f"prefiltered={(payload or {}).get('prefiltered')})",
-              file=sys.stderr)
+    _why = user_text and hallucination_gate(
+        user_text, secs_in, (payload or {}).get("prefiltered"), peak)
+    if _why:
+        print(f"[lq] phantom dropped ({_why}): {user_text!r} ({secs_in:.1f}s, "
+              f"peak {peak:.1f} dBFS, prefiltered="
+              f"{(payload or {}).get('prefiltered')})", file=sys.stderr)
         user_text = ""
     if not user_text:
         # NOTHING WAS SAID: no bubble, no model turn, no speech back, and
