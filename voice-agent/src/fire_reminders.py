@@ -172,6 +172,17 @@ def fire_one(va, row):
     title = (row.get("label") or "").strip() or row["text"]
     text = f"⏰ {title}"
     ok = va.tg_text(text)
+    if ok:
+        # THE ROW THE APP READS. tg_text() only sends; the app's history is
+        # the archive, and a reminder that reached Telegram but not the
+        # archive was invisible to a phone open in that very chat while its
+        # push was suppressed by a live voice session (2026-09-05, 09:37).
+        try:
+            va.archive(text, "out",
+                       sender=va.branding().get("bot_name") or "agent",
+                       mirror=False)
+        except Exception as e:                                # noqa: BLE001
+            log(f"#{row['id']} archive skipped: {e}")
     if row.get("photo") and os.path.isfile(row["photo"]):
         va.tg_file(row["photo"], title[:1000])
     p = push(va, row, title)
