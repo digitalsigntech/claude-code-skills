@@ -49,6 +49,7 @@ KIND_AUDIO, KIND_CTRL, KIND_AGENT = 1, 2, 3
 RATE = 16000
 FRAME_MS = 100
 PARTIAL_MS = int(os.environ.get("LQ_STREAM_PARTIAL_MS", "700"))
+PROGRESS_S = float(os.environ.get("LQ_STREAM_PROGRESS_S", "4"))
 MAX_UTTERANCE_S = int(os.environ.get("LQ_STREAM_MAX_UTTERANCE_S", "60"))
 STREAM_PORT = int(os.environ.get("LQ_STREAM_PORT", "8098"))
 STREAM_THREADS = int(os.environ.get("LQ_STREAM_THREADS", "4"))
@@ -366,6 +367,7 @@ class StreamSession:
                      "recogniser": os.path.basename(self.recog.model),
                      "backend": self.recog.backend,
                      "partial_every_ms": PARTIAL_MS,
+                     "progress_every_s": PROGRESS_S,
                      "max_utterance_s": MAX_UTTERANCE_S,
                      "frame_ms": FRAME_MS})
         self.log(f"stream open: lang={self.lang or 'auto'} speaker={self.speaker or '-'} "
@@ -489,7 +491,33 @@ class StreamSession:
             except Exception as e:
                 self.log(f"posting the transcript failed: {e}")
         lv.remember_lang(self.account, self.lang or "")
-        answer = str(self.answer_fn(user_text) or "")
+        # THE SOCKET IS NEVER SILENT WHILE THE MODEL THINKS (2026-09-05, 17:37
+        # UTC): the phone closed a working stream 19 s after the final because
+        # nothing had arrived since — a model turn on a real question runs
+        # 10–30 s. A `progress` frame every few seconds says the reply is on
+        # its way, and gives the app something to draw.
+        box = {}
+
+        def _think():
+            try:
+                box["answer"] = str(self.answer_fn(user_text) or "")
+            except Exception as e:                                 # noqa: BLE001
+                box["error"] = e
+
+        th = threading.Thread(target=_think, daemon=True)
+        th.start()
+        t_think = time.time()
+        while th.is_alive():
+            th.join(PROGRESS_S)
+            if th.is_alive():
+                try:
+                    self._agent({"type": "progress", "id": uid,
+                                 "elapsed_s": round(time.time() - t_think, 1)})
+                except Exception:
+                    break                       # the socket is gone; the turn ends below
+        if "error" in box:
+            raise box["error"]
+        answer = box.get("answer", "")
         answer, speak_all = lv.read_in_full(answer)
         t1 = time.time()
         spoken_line = "" if speak_all else lv.speech_for(answer or "")
@@ -584,7 +612,7 @@ def _selftest():
     start = {"type": "start", "lang": "en", "speaker": "af_heart", "key_b64": base64.b64encode(key).decode(),
              "format": "pcm16", "rate": 16000, "frame_ms": 100, "tz": "America/Toronto"}
     sess = StreamSession(ws, lambda env: json.dumps(start),
-                         lambda q: f"You asked: {q} The dock opens at two thirty.",
+                         lambda q: (time.sleep(5), f"You asked: {q} The dock opens at two thirty.")[1],
                          account="selftest", on_transcript=lambda t, ts: print("  transcript:", t))
     t0 = time.time()
     try:
