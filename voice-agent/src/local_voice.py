@@ -1357,6 +1357,113 @@ def speech_for(text):
     return "It is on your screen."
 
 
+# THE GREETING (request 489, 2026-09-05). The cloud tiers greet on connect;
+# Local quality never did. Four or more short lines per language, one picked
+# at random, the person's first name where the app sent one, spoken in the
+# voice they picked — under four seconds, because it is a hello, not a speech.
+# It is UNBILLED: nothing was asked.
+GREETINGS = {
+    "en": (["Hi {name}, I'm listening.", "Hello {name}. What can I do for you?",
+            "Good to hear you, {name}. Go ahead.", "Hey {name}, I'm here.",
+            "Hi {name}. Ready when you are."],
+           ["Hi, I'm listening.", "Hello. What can I do for you?",
+            "Ready when you are.", "I'm here. Go ahead."]),
+    "fr": (["Bonjour {name}, je vous écoute.", "Salut {name}. Que puis-je faire pour vous ?",
+            "Ravi de vous entendre, {name}. Allez-y.", "Bonjour {name}. Je suis là."],
+           ["Bonjour, je vous écoute.", "Que puis-je faire pour vous ?",
+            "Je suis là. Allez-y.", "Prêt quand vous voulez."]),
+    "es": (["Hola {name}, te escucho.", "Hola {name}. ¿En qué te ayudo?",
+            "Qué bueno oírte, {name}. Adelante.", "Hola {name}. Aquí estoy."],
+           ["Hola, te escucho.", "¿En qué te ayudo?", "Aquí estoy. Adelante.",
+            "Listo cuando quieras."]),
+    "de": (["Hallo {name}, ich höre.", "Hallo {name}. Was kann ich für dich tun?",
+            "Schön, dich zu hören, {name}. Leg los.", "Hallo {name}. Ich bin da."],
+           ["Hallo, ich höre.", "Was kann ich für dich tun?", "Ich bin da. Leg los.",
+            "Bereit, wenn du es bist."]),
+    "it": (["Ciao {name}, ti ascolto.", "Ciao {name}. Cosa posso fare per te?",
+            "Che bello sentirti, {name}. Dimmi.", "Ciao {name}. Sono qui."],
+           ["Ciao, ti ascolto.", "Cosa posso fare per te?", "Sono qui. Dimmi.",
+            "Pronto quando vuoi."]),
+    "pt": (["Olá {name}, estou ouvindo.", "Oi {name}. O que posso fazer por você?",
+            "Bom te ouvir, {name}. Pode falar.", "Olá {name}. Estou aqui."],
+           ["Olá, estou ouvindo.", "O que posso fazer por você?", "Estou aqui. Pode falar.",
+            "Pronto quando quiser."]),
+    "pl": (["Cześć {name}, słucham.", "Witaj {name}. W czym mogę pomóc?",
+            "Miło cię słyszeć, {name}. Mów.", "Cześć {name}. Jestem tu."],
+           ["Cześć, słucham.", "W czym mogę pomóc?", "Jestem tu. Mów.",
+            "Gotowy, kiedy chcesz."]),
+    "sv": (["Hej {name}, jag lyssnar.", "Hej {name}. Vad kan jag göra för dig?",
+            "Kul att höra dig, {name}. Varsågod.", "Hej {name}. Jag är här."],
+           ["Hej, jag lyssnar.", "Vad kan jag göra för dig?", "Jag är här. Varsågod.",
+            "Redo när du är."]),
+    "nl": (["Hallo {name}, ik luister.", "Hoi {name}. Wat kan ik voor je doen?",
+            "Goed je te horen, {name}. Ga je gang.", "Hallo {name}. Ik ben er."],
+           ["Hallo, ik luister.", "Wat kan ik voor je doen?", "Ik ben er. Ga je gang.",
+            "Klaar wanneer jij het bent."]),
+    "tr": (["Merhaba {name}, dinliyorum.", "Selam {name}. Sana nasıl yardımcı olabilirim?",
+            "Seni duymak güzel, {name}. Buyur.", "Merhaba {name}. Buradayım."],
+           ["Merhaba, dinliyorum.", "Sana nasıl yardımcı olabilirim?", "Buradayım. Buyur.",
+            "Hazırım."]),
+    "ru": (["Привет, {name}, я слушаю.", "Здравствуйте, {name}. Чем могу помочь?",
+            "Рад вас слышать, {name}. Говорите.", "Привет, {name}. Я здесь."],
+           ["Привет, я слушаю.", "Чем могу помочь?", "Я здесь. Говорите.",
+            "Готов, когда вы готовы."]),
+    "uk": (["Привіт, {name}, я слухаю.", "Вітаю, {name}. Чим можу допомогти?",
+            "Радий вас чути, {name}. Кажіть.", "Привіт, {name}. Я тут."],
+           ["Привіт, я слухаю.", "Чим можу допомогти?", "Я тут. Кажіть.",
+            "Готовий, коли ви готові."]),
+    "zh": (["你好，{name}。", "{name}，我在听。", "你好，{name}，请说。", "{name}，我在这里。"],
+           ["你好，我在听。", "请说。", "我在这里。", "你好。"]),
+    "ja": (["{name}さん、こんにちは。", "{name}さん、聞いています。", "こんにちは、{name}さん。",
+            "{name}さん、どうぞ。"],
+           ["こんにちは。聞いています。", "こんにちは。", "どうぞ。", "聞いています。"]),
+}
+GREETING_MAX_S = float(os.environ.get("LQ_GREETING_MAX_S", "4.0"))
+
+
+def greeting_text(lang, name=None):
+    import random
+    code = (lang or "en").strip().lower()[:2]
+    named, plain = GREETINGS.get(code) or GREETINGS["en"]
+    first = " ".join(str(name or "").split()).split(" ")[0] if name else ""
+    first = first.strip(" ,.;:!?\"'")[:40]
+    # A Latin name inside a Japanese or Chinese sentence is spelled out letter
+    # by letter by the synthesiser (5.8 s for one short line, measured), so
+    # those two greet without the name unless the name is in their script.
+    if code in ("ja", "zh") and first and first.isascii():
+        first = ""
+    return random.choice(named).format(name=first) if first else random.choice(plain)
+
+
+def greeting_reply(lang, speaker=None, name=None):
+    """A voice reply shaped like an answer, with no question behind it:
+    {text, voice:{format,b64}, lang, speaker, audio_seconds_in: 0,
+    audio_seconds_out, reply_format, greeting: true}. Never billed."""
+    code = (lang or "en").strip().lower()[:2]
+    if code not in GREETINGS:
+        code = "en"
+    # UNDER FOUR SECONDS IS A RULE, SO IT IS ENFORCED: a synthesiser can run
+    # long on a line that reads short (Kokoro's Japanese took 10 s on one), so
+    # up to three lines are tried and the shortest spoken one is kept.
+    best = None
+    for _ in range(3):
+        text = greeting_text(code, name)
+        audio, secs, fmt, rate, who = speak(text, code, speaker)
+        if best is None or secs < best[1]:
+            best = (text, secs, fmt, rate, who, audio)
+        if secs <= GREETING_MAX_S:
+            break
+    text, secs, fmt, rate, who, audio = best
+    if secs > GREETING_MAX_S:
+        print(f"[lq] greeting ran {secs:.1f}s in {code} after 3 tries: {text!r}",
+              file=sys.stderr)
+    return {"text": text, "greeting": True,
+            "voice": {"format": fmt, "b64": base64.b64encode(audio).decode()},
+            "lang": code, **({"speaker": speaker} if speaker else {}),
+            "audio_seconds_in": 0.0, "audio_seconds_out": round(secs, 3),
+            "reply_format": f"{fmt} {rate} Hz {REPLY_BITRATE} {who}"}
+
+
 # THE SAME CLIP TWICE IS A RETRY, NOT A SECOND QUESTION.
 #
 # 2026-09-04, from his own session: one 31.3-second clip arrived twice, sixteen

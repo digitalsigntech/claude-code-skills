@@ -679,6 +679,18 @@ def open_sealed_blob(ref, ct):
     return plain
 
 
+def _greeting_turn(plaintext):
+    """The opened greeting request if this is one ({"greeting": true, …})."""
+    t = (plaintext or "").lstrip()
+    if not t.startswith("{") or '"greeting"' not in t[:120]:
+        return None
+    try:
+        p = json.loads(t)
+    except ValueError:
+        return None
+    return p if isinstance(p, dict) and p.get("greeting") else None
+
+
 def _attachments_turn(plaintext):
     """The opened attachments message if this is one, else None. Read from
     the PLAINTEXT like a voice turn: what is inside decides what this is."""
@@ -2659,6 +2671,31 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"service": "voice-agent", "ok": health()["ok"]})
         self._send(404, {"error": "not found"})
 
+    def _greeting_answer(self, spec, account, name, priv, mine, theirs):
+        """Request 489: Local quality greets on connect — by first name, in the
+        app's language, in the picked voice, under four seconds, unbilled. The
+        reply has the voice-reply shape with no user_text."""
+        t0 = time.time()
+        try:
+            import local_voice
+            who = str(spec.get("name") or "").strip() or person_name(name)
+            g = local_voice.greeting_reply(
+                str(spec.get("lang") or "en"),
+                str(spec.get("speaker") or "").strip().lower()[:64] or None, who)
+        except Exception as e:
+            self.log_message("GREETING FAILED (%s): %.160s", account, e)
+            return self._send(400, {"error": "greeting_failed", "detail": str(e)[:200]})
+        body = json.dumps({"text": g["text"], "voice": g["voice"], "greeting": True},
+                          ensure_ascii=False)
+        sealed = seal_for_devices(body, account=account) or e2ee_seal(
+            body, priv, mine, theirs, direction=DIR_TO_PHONE)
+        self.log_message("greeting (%s): %r %.1fs %s", account, g["text"],
+                         g["audio_seconds_out"], g["reply_format"])
+        return self._send(200, {
+            "sealed": sealed, "audio_seconds_in": 0.0,
+            "audio_seconds_out": g["audio_seconds_out"], "engine": "local",
+            "greeting": True, "took_s": round(time.time() - t0, 2)})
+
     def _attachments_answer(self, spec, account, name, d, priv, mine, theirs):
         """A sealed upload (#514, request 481): the opened plaintext names the
         blobs and carries their keys; the blobs themselves ride beside the
@@ -3369,6 +3406,10 @@ class Handler(BaseHTTPRequestHandler):
                     # envelope, deliberately: the relay forwards what it is
                     # given and a turn that lied about its kind would be opened
                     # anyway. What is inside decides what this is.
+                    gt = _greeting_turn(q)
+                    if gt is not None or str(d.get("kind") or "") == "greeting":
+                        return self._greeting_answer(gt or {}, account, name,
+                                                     priv, mine, theirs)
                     at = _attachments_turn(q)
                     if at is not None or str(d.get("kind") or "") == "attachments":
                         return self._attachments_answer(
