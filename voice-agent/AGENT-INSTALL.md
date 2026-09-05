@@ -198,24 +198,133 @@ would know is the honest test.
 ## The local tier (LQ) — optional, and it must prove itself (2026-09-04)
 
 LQ is speech in and speech out **on the agent's own machine**: whisper.cpp hears, the agent's
-ordinary ask path answers, Piper speaks. No audio leaves the machine and there is no speech
-provider in the path. Skip this whole section and the tier simply reports itself unavailable —
-which is the correct behaviour, not a degraded one.
+ordinary ask path answers, Kokoro or Piper speaks. No audio leaves the machine and there is no
+speech provider in the path. Skip this whole section and the tier simply reports itself
+unavailable — which is the correct behaviour, not a degraded one. `local_voice.py --probe` says
+which pieces are missing.
 
-Four things have to exist, and `local_voice.py --probe` says which are missing:
+### Which models, by hardware — this is a rule, not a suggestion (the owner's, 2026-09-04)
+
+The recogniser and the synthesiser both follow the hardware. Nothing here is a tuning knob;
+each row was measured on a whole turn, and the wrong row is either too slow to converse or
+silently worse.
+
+| | **CPU only** (a 2-core VPS) | **iGPU** (AMD via Vulkan, Apple) | **NVIDIA** |
+|---|---|---|---|
+| recogniser | `ggml-small.bin`; English turns `ggml-small.en.bin` | `ggml-large-v3-turbo-q5_0.bin` on the Vulkan build | `large-v3-turbo` on CUDA (not yet installed anywhere — same rule as the iGPU column) |
+| language ID for `lang:"auto"` | `ggml-base.bin` | `ggml-base.bin` | `ggml-base.bin` |
+| synthesiser, `en es fr it ja pt zh` | **Kokoro** (`install_kokoro.sh`) | Kokoro | Kokoro today; Chatterbox is the planned branch, not built |
+| synthesiser, `de nl pl ru sv tr uk` | Piper | Piper | Piper |
+| concurrency | one recogniser/synthesiser at a time (`_SPEECH_CPU` lock) | same lock | same |
+| a long English answer, measured | ~7 s STT + 3–7 s TTS | 2.5 s STT (turbo, Vulkan) + 1–4 s TTS | — |
+
+Why each line:
+
+- **CPU only, `small`.** `large-v3-turbo` on two cores is 40 s a turn; `small` is 7 s and
+  its transcripts were character-identical on clean speech. `small.en` for English is the
+  same size and the same speed; it is there for hard English (accents, crosstalk), see below.
+- **iGPU, `large-v3-turbo`.** Measured on the whole turn on an AMD Rembrandt iGPU: 2.5 s
+  where `small` on the same CPU took 7 — the largest model that beat small-on-CPU, which was
+  the selection rule. Build whisper.cpp with `-DGGML_VULKAN=1`; the binary is
+  `build-vulkan/bin/whisper-cli`.
+- **Kokoro wherever it speaks the language.** Piper was judged not good enough to listen to;
+  Kokoro's loopback intelligibility on the same sentences is higher and it does not rush.
+  The cost, stated before the decision: French drops from four voices to one and has no male
+  voice; Spanish four → three; Italian three → two. The owner chose the sound. Which engine
+  speaks which language is DATA — `_engines` in `roster.json` — not a rule in code, and Piper
+  stays installed as the floor: a Kokoro failure costs a log line, never an answer.
+- **The lock.** Two whisper passes at once on two cores are SLOWER than one after the other
+  (18.9 s each against 7.3 + 14.6). The lock covers the CPU work only, never the model call.
+- **Phrase splitting.** A Piper voice given a 290-character sentence rushed it at 27
+  characters a second and the recogniser read back 23% of it; in ≤180-character phrases
+  joined with ffmpeg it reads back 81%. Rate is watched: a reply faster than 22 ch/s logs
+  `faster than speech`; above 40 ch/s the voice is treated as broken and the default speaks.
+
+Environment for the service — copy `src/voice-agent.service.d.example/lq.conf` and edit:
+
+```
+LQ_WHISPER_BIN            whisper-cli (the Vulkan build where there is a GPU)
+LQ_WHISPER_MODEL          small (CPU) or large-v3-turbo (accelerator)
+LQ_WHISPER_MODEL_EN       small.en, CPU-only agents
+LQ_WHISPER_DETECT_MODEL   ggml-base.bin, for lang:"auto"
+LQ_PIPER_BIN / LQ_PIPER_VOICE
+LQ_KOKORO_SITE / LQ_KOKORO_MODEL / LQ_KOKORO_VOICES   printed by install_kokoro.sh
+LQ_ROSTER                 roster.json if it is not beside the voices
+LQ_REPLY_RATE             leave EMPTY: the reply is encoded at the synthesiser's native
+                          rate (22.05 kHz Piper, 24 kHz Kokoro). Resampling to 16 kHz is how
+                          "the replies sound worse than the samples" happened.
+```
+
+### Kokoro
 
 ```bash
-# 1. the recogniser. small MULTILINGUAL on a CPU-only box; large-v3-turbo where
-#    there is an accelerator. small.en is English-only and the row will say so.
-#    (whisper.cpp, built per its own README)
-# 2. piper
-pip install piper-tts
-# 3. ffmpeg on PATH
-# 4. the voices — see below
-# 5. optional but worth it: ggml-base.bin beside the main model, used ONLY to
-#    identify the language when the app sends lang:"auto" (see below)
-# 6. on a CPU-only agent, ggml-small.en.bin as well: English turns use it
+src/install_kokoro.sh            # venv beside ~/kokoro, kokoro-onnx 0.6.1, model + voices, hashes checked
+src/install_kokoro.sh --check    # verify an existing install
 ```
+
+The venv is deliberate: `kokoro-onnx` pulls `onnxruntime`, which does not belong in the
+system site-packages of a box that serves somebody. **One trap, found the hard way:** any file
+named `signal.py` in the agent's working directory shadows the standard library for the
+whole process, and onnxruntime dies on `signal.SIGINT` — rename it.
+
+### What a turn carries, and what the turn line says
+
+The app sends, per turn: `lang` (a code, or `auto`), `speaker` (`anna maria tom leo`), `tz`,
+and since build 344 `speaker_from` (how the app chose the id, voice names only). The reply
+carries `lang` (the language the turn RAN in), `speaker`, `peak_dbfs`, `reply_format`
+(`aac 24000 Hz 32k kokoro:am_michael` — which voice actually spoke), `timing.stt_s /
+think_s / tts_s`, and `no_speech` when the recogniser heard nothing (unbilled). The log line:
+
+```
+voice turn: 2.8s in, 13.8s out, stt 2.5s model 19.0s tts 4.0s, 75 KB reply,
+  lang=en speaker=tom from=[selected=tom pool=anna,maria,tom,leo ui=en],
+  tz=America/Toronto, peak -2.3 dBFS, reply aac 24000 Hz 32k kokoro:am_michael
+```
+
+Every field in it was added because a question needed it and the log could not answer: which
+voice spoke, which id arrived, whether the model or the recogniser was the slow leg.
+
+### Rules the turn applies, all measured on the owner's phone
+
+- **Spoken length.** Prose is capped at 400 characters (~24 s) and ends with "The rest is on
+  your screen"; tables and code are never read, the prose around them is. A model that sees
+  the person asked to hear something in full prefixes `[read-in-full]` and the cap lifts.
+- **The normaliser** (`say_text`, 30 cases in `test_say_text.py`): slash → "or"/"per", day and
+  month abbreviations spelled out, hyphen ranges → "to", 2–3 capital codes spelled, currency and
+  24 h times read as a person would, `**bold**`, `*italic*`, `_under_`, bullets and headings
+  stripped. URLs, paths and emails are masked first so none of that touches them.
+- **Short clips inherit the session language** (≤2.5 s, remembered 10 min per account): a
+  one-word "yes" is not re-identified from scratch.
+- **The same clip twice is a retry.** A 120 s replay cache keyed on the audio's sha256 returns
+  the answer already given, and a duplicate that arrives while the first is still running
+  waits for it — a 31 s clip used to be transcribed and answered twice, differently.
+- **Both legs are cross-checked against the phone** (in: phone clip length vs decoded, floor
+  0.5 s; out: phone played vs any of the last four replies, floor 0.75 s) and logged, never
+  refused.
+- **An unknown speaker id is logged**, not silently defaulted (`no voice named 'x'` /
+  `no kokoro voice named 'x'`).
+
+### Greetings and `voices_rev`
+
+The picker's samples are built on the plane from the same roster and engine table
+(`build_greetings.py`, plane-side), 42 clips for 14 languages. The local model row carries
+`voices_rev`, a hash of the clip set; the app keys its on-device sample cache by it, so a
+rebuilt clip is fetched again instead of a cached voice being played for a rebuilt one.
+
+### Verify the tier, with tools, not by reading
+
+```bash
+python3 src/local_voice.py --probe            # what is installed
+python3 src/local_voice.py --verify-voices    # every voice speaks (ok / MUTE), counts follow
+python3 src/loopback_check.py                 # speak → transcribe → % of the sentence that survived
+python3 src/test_say_text.py                  # the normaliser's cases
+python3 src/gpu_bench.py                      # which recogniser beats small-on-CPU here
+python3 src/tts_bench.py                      # Piper vs Kokoro on the same sentences
+```
+
+`loopback_check.py` is the only objective ear an operator without speakers has: the
+recogniser reading back what the synthesiser said. 75–85% on a normal sentence is healthy;
+23% was the gibberish of 2026-09-04.
 
 **On the extra English model, measured rather than assumed.** `small.en` is the same size as
 `small` — 487.6 MB each, within 12 KB — so it is not a smaller model and there is no less
@@ -225,15 +334,6 @@ accuracy on *hard* English — accents, noise, crosstalk — which clean synthes
 demonstrate either way. It is installed because English turns are the common case and the model is
 the one place to spend on them; if the 488 MB matters more on a given box, point
 `LQ_WHISPER_MODEL_EN` at nothing and every turn uses the multilingual model as before.
-
-Point the service at them:
-
-```
-LQ_WHISPER_BIN=/path/to/whisper-cli
-LQ_WHISPER_MODEL=/path/to/ggml-small.bin
-LQ_PIPER_BIN=/path/to/venv/bin/piper
-LQ_PIPER_VOICE=/path/to/voices/en_US-lessac-medium.onnx
-```
 
 ### Voices: fetch what you will use, not all of them
 
@@ -319,6 +419,38 @@ and the app stops sending photos and files in the clear:
   1 sent, 1 received` line in the plane log and a `sealed attachments: 1 file(s)
   opened` line in the agent's; `GET blob/<token>` for a file the agent sent
   returns bytes whose sha256 matches the `.sealed.json` beside the file.
+
+## What changed the week of 2026-09-01, and what an install must do by hand
+
+Everything below is in `src/` unless marked *by hand*; both installs this was measured on run it.
+
+- **Local tier by hardware class** — the table above; `install_kokoro.sh`; the drop-in
+  `voice-agent.service.d.example/lq.conf`. *By hand on the hosted install:* the drop-in itself at
+  `/etc/systemd/system/voice-agent.service.d/`, Kokoro under `/root/kokoro` + `/root/kokoro-venv`,
+  `REMINDERS_MINT_MODULE=voice_agent` + `PYTHONPATH` so reminder thumbnails are minted in-process.
+- **Roster** (`roster.json`): four ids per language, `_engines` per language, Kokoro voice ids
+  under `kokoro`. `install_voices.py` fetches only what an engine will use.
+- **Turn fields and the turn line** — `lang`, `speaker`, `speaker_from`, `reply_format`,
+  `timing`, `peak_dbfs`, `no_speech`; the line prints `stt / model / tts`.
+- **Normaliser, spoken cap, `[read-in-full]`, phrase split, rate watch, replay cache,
+  in-flight wait, cross-checks, language memory** — all in `local_voice.py`.
+- **`answer_question()`** (the owner's own agent): one answer path for typed and spoken questions —
+  viewer time zone, in-process reflexes, table safety net, fresh-reminder append, figure
+  ledger — because the voice path calling the model directly turned a milliseconds reminders
+  answer into a 19-second model turn with no thumbnails. the adapter's voice path already goes
+  through `ask()`; the lesson for an install is *one road, both origins*.
+- **Archive guard**: `archive()` refuses voice envelopes and anything over 20,000 characters
+  (a probe once put 170 KB of base64 audio into a guest's chat).
+- **Restart guards**: `restart_agent.sh` waits for idle whisper/piper and no turn in flight.
+  On the owner's agent and the plane the same scripts also refuse while a phone holds a live session
+  (the plane's session table) — restarting under a live session shows the person
+  "Not connected" and an empty chat.
+- **Sealed attachments** (section above) and **`e2ee-v1`** (`README.md` § Security,
+  `devices.py`, `e2ee_v2.py`).
+- **Persona rule** *(by hand, in the workdir's `agent-system-prompt.md`)*: never name a file
+  as your source — text in `src/persona-rules.md`.
+- **Manual**: the plane serves `/manual` + `/manual/version`; the adapter polls the version every
+  15 minutes and fetches on change (`sync_app_docs`), so the model answers from the current one.
 
 ## Reminders that actually fire (2026-08-13)
 
