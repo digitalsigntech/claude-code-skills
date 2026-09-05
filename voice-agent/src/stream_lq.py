@@ -374,7 +374,7 @@ class StreamSession:
         worker.start()
         try:
             while True:
-                op, data = self.ws.recv(timeout=180)
+                op, data = self.ws.recv(timeout=900)
                 if op != 2:                              # BINARY only after start
                     self.log(f"text frame after start ignored ({len(data)} bytes)")
                     continue
