@@ -129,66 +129,7 @@ def untangle(text):
 import unicodedata as _ud
 
 
-def _script_of(ch):
-    o = ord(ch)
-    if 0x0400 <= o <= 0x052F:
-        return "cyrl"
-    if 0x3040 <= o <= 0x30FF:
-        return "kana"
-    if 0x4E00 <= o <= 0x9FFF or 0x3400 <= o <= 0x4DBF:
-        return "cjk"
-    if 0xAC00 <= o <= 0xD7AF or 0x1100 <= o <= 0x11FF:
-        return "hang"
-    if 0x0600 <= o <= 0x06FF or 0x0750 <= o <= 0x077F:
-        return "arab"
-    if 0x0590 <= o <= 0x05FF:
-        return "hebr"
-    if 0x0E00 <= o <= 0x0E7F:
-        return "thai"
-    if 0x0900 <= o <= 0x097F:
-        return "deva"
-    if 0x0370 <= o <= 0x03FF:
-        return "grek"
-    if ch.isalpha():
-        return "latn"
-    return None
-
-
-def scripts_in(text):
-    """{script: letter count} for the letters of `text`."""
-    out = {}
-    for ch in text or "":
-        sc = _script_of(ch)
-        if sc:
-            out[sc] = out.get(sc, 0) + 1
-    return out
-
-
-def mixed_scripts(text):
-    """True for whisper's salad, false for a person switching language.
-
-    "Now I'd like to see, если мы можем переключиться" is Latin and Cyrillic
-    in one breath and was answered correctly; "the,amel, Adam, 향, ٰس …" is
-    Latin with a stray Hangul letter, two Arabic ones and a replacement
-    character, and was garbage. So: a replacement character, THREE or more
-    scripts, or a minority script that is a few stray letters of a script
-    nobody in this roster speaks (Hangul, Arabic, Hebrew, Thai, Devanagari,
-    Greek) inside another script's sentence — any of those is garbled. Two
-    real scripts side by side, each with real words, is not."""
-    t = text or ""
-    if "\ufffd" in t:
-        return True
-    sc = scripts_in(t)
-    if "kana" in sc and "cjk" in sc:
-        sc["cjk"] = sc.pop("kana") + sc["cjk"]
-    if len(sc) >= 3:
-        return True
-    if len(sc) == 2:
-        top = max(sc, key=sc.get)
-        other = [k for k in sc if k != top][0]
-        if other in ("hang", "arab", "hebr", "thai", "deva", "grek") and sc[other] <= 6:
-            return True
-    return False
+scripts_in, mixed_scripts = lv.scripts_in, lv.mixed_scripts   # the one rule, shared with the clip path
 
 
 LATIN_LANGS = {"en", "fr", "es", "de", "it", "pt", "pl", "sv", "nl", "tr"}
@@ -842,7 +783,10 @@ class StreamSession:
             self.log(f"garbled decode (mixed scripts, heard {heard_code or '?'} p={heard_p:.2f}): "
                      f"{user_text[:60]!r} ({secs_in}s, peak {peak:.1f} dBFS)")
             return self._no_speech(uid, secs_in, peak, "mixed scripts", heard=user_text)
-        _why = user_text and lv.hallucination_gate(user_text, secs_in, ctrl.get("prefiltered"), peak)
+        _why = user_text and lv.hallucination_gate(
+            user_text, secs_in, ctrl.get("prefiltered"), peak,
+            heard=(heard_code if heard_p >= 0.6 else None),
+            phone_lang=str(self.start.get("ui_lang") or "")[:2] or None)
         if _why:
             self.log(f"phantom dropped ({_why}): {user_text!r} ({secs_in}s, peak {peak:.1f} dBFS, "
                      f"prefiltered={ctrl.get('prefiltered')})")
