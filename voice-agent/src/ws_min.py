@@ -42,8 +42,13 @@ class WS:
         self.closed = False
         self._rl = threading.Lock()
         self._wl = threading.Lock()
-        if timeout is not None:
-            sock.settimeout(timeout)
+        # ALWAYS applied, None included. connect() opens the socket with a
+        # 15 s timeout for the handshake, and a socket keeps its timeout until
+        # told otherwise — so a relay leg that fell silent for 15 s "timed out"
+        # and the stream ended (2026-09-05, 19:48 and 19:51 UTC, twice on the
+        # owner's phone). None means blocking, which is what a long-lived
+        # socket wants; callers that need a bound pass it to recv().
+        sock.settimeout(timeout)
 
     # ---- reading ---------------------------------------------------------
     def _read_exact(self, n):
