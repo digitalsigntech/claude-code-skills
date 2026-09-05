@@ -372,6 +372,17 @@ class StreamSession:
                      "frame_ms": FRAME_MS})
         self.log(f"stream open: lang={self.lang or 'auto'} speaker={self.speaker or '-'} "
                  f"backend={self.recog.backend}")
+        if start.get("greet"):
+            # Request 489: the greeting is an id-0 reply right after the hello,
+            # in the app's language, by first name, in the picked voice —
+            # unmetered, so it goes as a plain binary frame the plane cannot bill.
+            try:
+                g = lv.greeting_reply(str(start.get("ui_lang") or self.lang or "en"),
+                                      self.speaker, start.get("name"))
+                self._agent({"type": "reply", "id": 0, **g})
+                self.log(f"greeting: {g['text']!r} ({g['audio_seconds_out']}s, {g['reply_format']})")
+            except Exception as e:
+                self.log(f"greeting failed: {str(e)[:100]}")
         worker = threading.Thread(target=self._partials, daemon=True)
         worker.start()
         try:
@@ -616,7 +627,8 @@ def _selftest():
     frames.append("END")
     ws = _FakeWS(frames)
     start = {"type": "start", "lang": "en", "speaker": "af_heart", "key_b64": base64.b64encode(key).decode(),
-             "format": "pcm16", "rate": 16000, "frame_ms": 100, "tz": "America/Toronto"}
+             "format": "pcm16", "rate": 16000, "frame_ms": 100, "tz": "America/Toronto",
+             "greet": True, "ui_lang": "en", "name": "Alex"}
     sess = StreamSession(ws, lambda env: json.dumps(start),
                          lambda q: (time.sleep(5), f"You asked: {q} The dock opens at two thirty.")[1],
                          account="selftest", on_transcript=lambda t, ts: print("  transcript:", t))
@@ -645,10 +657,15 @@ def _selftest():
         if t == "final":
             print(f"  final:   {obj['id']} {obj['text']!r}")
         if t == "reply":
-            print(f"  reply:   meter={meter} text={obj['text'][:60]!r} voice={len(obj['voice']['b64'])} b64 chars {obj['reply_format']} timing={obj['timing']}")
+            print(f"  reply:   meter={meter} text={obj['text'][:60]!r} voice={len(obj['voice']['b64'])} b64 chars {obj['reply_format']} timing={obj.get('timing')}")
     print(f"  wall {time.time() - t0:.1f}s, utterance {n * 0.1:.1f}s, backend {sess.recog.backend}")
-    ok = (any(s[0] == "final" for s in seen) and any(s[0] == "reply" for s in seen)
-          and any(s[0] == "partial" for s in seen) and any(s[0] == "hello" for s in seen))
+    kinds = [s[0] for s in seen]
+    greet_ok = (len(seen) > 1 and kinds[0] == "hello" and kinds[1] == "reply"
+                and seen[1][2].get("id") == 0 and seen[1][2].get("greeting") is True
+                and seen[1][1] is None)          # unmetered: no wrapper
+    print(f"  greeting first, id 0, unmetered: {greet_ok} -> {seen[1][2].get('text')!r}" if len(seen) > 1 else "  no greeting")
+    ok = (greet_ok and any(s[0] == "final" for s in seen) and kinds.count("reply") >= 2
+          and any(s[0] == "partial" for s in seen))
     print("SELFTEST", "OK" if ok else "FAILED")
     return 0 if ok else 1
 
