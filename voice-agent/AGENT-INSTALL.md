@@ -443,6 +443,21 @@ was still streaming, the final 0.6 s after the end of speech, the reply after a 
 turn; the plane billed 3.1 s in + 4.8 s out as one utterance and the phone received the frame
 with no wrapper.
 
+## The greeting (2026-09-05) — Local quality says hello on connect
+
+The cloud tiers greet; Local quality never did. Now, on connect, the agent says one of four or
+more short lines in the app's language, with the person's first name where the app sent one, in
+the voice they picked — and it is **unbilled**, because nothing was asked. Clip path: the app
+sends a sealed `ask` of `kind: greeting` whose plaintext is `{"greeting": true, "lang",
+"speaker", "name"}` and gets a voice reply with no `user_text`. Stream: the `start` frame carries
+`greet: true`, `ui_lang` and `name`, and the agent's first frame after `hello` is a `reply` with
+`id: 0`, sent unmetered so the plane bills nothing.
+
+**Under four seconds is a rule, so it is enforced**: up to three lines are tried and the shortest
+spoken one is kept (Kokoro's Japanese ran ten seconds on one short line). Japanese and Chinese
+greet without a Latin name — the synthesiser spells it letter by letter. Measured on the owner's
+agent, one greeting per language: 1.1–3.4 s spoken, under a second to make.
+
 ## Sealed attachments (2026-09-04) — stage 3 of end-to-end encryption
 
 Once an account is sealed (`e2ee` on, a device key on disk) and `e2ee_attachments`
