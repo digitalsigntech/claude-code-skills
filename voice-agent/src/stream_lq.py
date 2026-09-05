@@ -455,6 +455,7 @@ class _ChunkSpeaker:
         self.seen = ""              # the model's text so far
         self.consumed = 0           # chars of `seen` already handed to the worker
         self.halted = False         # a table/fence appeared: stop cutting
+        self.interrupted = False    # the phone stopped playing: send nothing more
         self.seq = 0
         self.secs = 0.0
         self.bytes = 0
@@ -471,7 +472,7 @@ class _ChunkSpeaker:
         full = str(full or "")
         with self.lock:
             self.seen = full
-            if self.halted or self.err:
+            if self.halted or self.err or self.interrupted:
                 return
             if self.consumed == 0:
                 lead = len(full) - len(full.lstrip())
@@ -495,12 +496,38 @@ class _ChunkSpeaker:
                 self.consumed = end
                 pos = end
 
+    def interrupt(self):
+        """The phone stopped playing this answer — the person spoke over it
+        (control `interrupt`, build 356+). What went out stays; nothing else is
+        synthesised or sent for this utterance, and finish() will not fall back
+        to the single blob. Returns the number of chunks that had gone out."""
+        with self.lock:
+            if not self.interrupted:
+                self.interrupted = True
+                try:
+                    while True:
+                        self.q.get_nowait()
+                except queue.Empty:
+                    pass
+                self.q.put(None)
+            return self.seq
+
+    def _stats(self):
+        return {"chunks": self.seq, "audio_seconds_out": round(self.secs, 3),
+                "bytes": self.bytes, "first_audio_s": self.first_audio,
+                "spoke_by": self.spoke_by,
+                **({"interrupted": True} if self.interrupted else {})}
+
     def finish(self, answer, spoken_line):
         """The model is done. Speak whatever was not cut yet, flag it final.
         Returns None when the stream cannot be trusted (the final text does not
         start with what was already spoken) and NO chunk went out — the caller
         then takes the single-blob path. If chunks did go out, the rest is
-        spoken from the final text on a best-effort basis."""
+        spoken from the final text on a best-effort basis. An interrupted
+        answer is never completed and never falls back: the person has moved on."""
+        if self.interrupted:
+            self.worker.join(timeout=30)
+            return self._stats()
         with self.lock:
             prefix = self.seen[:self.consumed]
             base = spoken_line or answer or ""
@@ -519,14 +546,12 @@ class _ChunkSpeaker:
             self.q.put((rem.strip(), True))
             self.q.put(None)
         self.worker.join(timeout=120)
-        return {"chunks": self.seq, "audio_seconds_out": round(self.secs, 3),
-                "bytes": self.bytes, "first_audio_s": self.first_audio,
-                "spoke_by": self.spoke_by}
+        return self._stats()
 
     def _run(self):
         while True:
             item = self.q.get()
-            if item is None:
+            if item is None or self.interrupted:
                 return
             text, final = item
             try:
@@ -536,6 +561,8 @@ class _ChunkSpeaker:
                                                       last=self.lang), self.speaker)
                 if not audio and not final:
                     continue
+                if self.interrupted:            # the phone moved on while this was synthesised
+                    return
                 self.seq += 1
                 frame = {"type": "reply_chunk", "id": self.uid, "seq": self.seq,
                          "final": bool(final), "text": text,
@@ -573,6 +600,7 @@ class StreamSession:
         self.account = account
         self.on_transcript = on_transcript
         self.log = log or (lambda *a: print("[stream]", *a, file=sys.stderr))
+        self.speaking = {}          # str(utterance id) -> _ChunkSpeaker while its answer is spoken
         self.key = None
         self.prefix = os.urandom(4)
         self.counter = 0
@@ -728,6 +756,15 @@ class StreamSession:
             self.dirty.clear()
             self.last_partial = ""
             self.utt_id = None
+        elif t == "interrupt":
+            # build 356+: the person spoke over the answer; the phone stopped
+            # playing and says so, so the worker stops synthesising the rest.
+            sp = self.speaking.get(str(c.get("id")))
+            if sp:
+                n = sp.interrupt()
+                self.log(f"stream {c.get('id')}: interrupted by the phone after {n} chunk(s) — the rest is not synthesised")
+            else:
+                self.log(f"stream: interrupt for {c.get('id')!r} — nothing being spoken under that id")
         elif t == "heard_out":
             self.heard_out = c.get("seconds")
 
@@ -859,6 +896,7 @@ class StreamSession:
                 takes_on_text = False
             if takes_on_text:
                 speaker = _ChunkSpeaker(self, uid, lang, self.speaker, t0)
+                self.speaking[str(uid)] = speaker
             else:
                 self.log("reply_stream requested but the answer path has no on_text — single blob")
 
@@ -892,6 +930,7 @@ class StreamSession:
         if not to_say.strip():
             to_say = "I do not have an answer for that."
         streamed = speaker.finish(answer, spoken_line) if speaker else None
+        self.speaking.pop(str(uid), None)
         if streamed:
             audio, secs_out, out_fmt, out_rate = b"", streamed["audio_seconds_out"], lv.REPLY_FORMAT, 0
             spoke_by = streamed["spoke_by"] or "-"
@@ -911,7 +950,8 @@ class StreamSession:
                  **({"streamed": streamed} if streamed else {}),
                  "audio_seconds": secs_in, "audio_seconds_out": round(secs_out, 3),
                  "peak_dbfs": None if peak == float("-inf") else round(peak, 1),
-                 "reply_format": (f"{out_fmt} streamed {streamed['chunks']} chunks {lv.REPLY_BITRATE} {spoke_by}"
+                 "reply_format": (f"{out_fmt} streamed {streamed['chunks']} chunks"
+                                  f"{' (interrupted)' if streamed.get('interrupted') else ''} {lv.REPLY_BITRATE} {spoke_by}"
                                   if streamed else f"{out_fmt} {out_rate} Hz {lv.REPLY_BITRATE} {spoke_by}"),
                  "timing": {"stt_s": round(t_stt, 2), "think_s": round(t1 - t0 - t_stt, 2),
                             "tts_s": round(time.time() - t1, 2)},
