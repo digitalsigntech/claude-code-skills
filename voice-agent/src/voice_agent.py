@@ -37,6 +37,7 @@ conversation over voice keeps its thread.
 import argparse, base64, calendar, hashlib, json, mimetypes, os, pathlib, re, secrets, \
     shutil, subprocess, sys, threading, time
 import urllib.request
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -2535,6 +2536,28 @@ def e2ee_locked(account):
 
 
 # ---------------------------------------------------------------- server
+def _stream_facts():
+    """`stream: true` on the local row by proof — a GPU backend reported by the
+    resident recogniser, running and answering (#548, amendment B). A CPU-only
+    install never declares it: nothing here is a class, everything is a fact."""
+    try:
+        import stream_lq
+        return stream_lq.facts()
+    except Exception as e:
+        print(f"[voice-agent] stream facts skipped: {e}", file=sys.stderr)
+        return {}
+
+
+def _warm_stream():
+    try:
+        import stream_lq
+        ok = stream_lq.ready()
+        print(f"[voice-agent] stream recogniser {'ready' if ok else 'not available'}: "
+              f"{stream_lq.recogniser().backend}", file=sys.stderr)
+    except Exception as e:
+        print(f"[voice-agent] stream warm-up failed: {e}", file=sys.stderr)
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "voice-agent/1.0"
 
@@ -2549,7 +2572,66 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _stream(self):
+        """Request 487: one WebSocket per session from the plane, carrying a
+        phone's sealed 100 ms audio frames; the answer path is ask(), the same
+        one a clip or a typed question takes. The plane authenticates with the
+        hook secret and names the account in headers — an upgrade has no body."""
+        import hmac as _hmac
+        import ws_min
+        import stream_lq
+        cfg = config()
+        got = (self.headers.get("Authorization") or "")[7:]
+        if not cfg.get("secret") or not _hmac.compare_digest(str(cfg["secret"]), got):
+            self.log_message("stream REJECTED (bad secret)")
+            return self._send(401, {"error": "unauthorized"})
+        if not ws_min.is_upgrade(self.headers):
+            return self._send(426, {"error": "upgrade required"})
+        account = (self.headers.get("X-Voice-Account") or "").strip()[:64] or "default"
+        name = (self.headers.get("X-Voice-Account-Name") or "").strip()[:80] or ""
+        tz = (self.headers.get("X-Voice-Tz") or "").strip()[:64] or None
+        set_caller(account)
+        ws = ws_min.accept(self)
+        self.log_message("stream open (%s)", account)
+
+        def open_envelope(env):
+            priv, mine = agent_keys()
+            theirs = peer_key(account, env.get("pk"))
+            if theirs is None:
+                raise ValueError("no device key for this account")
+            return e2ee_open(env, priv, mine, theirs, direction=DIR_TO_AGENT)
+
+        def on_transcript(text, ts):
+            try:
+                archive(text, "in", sender=person_name(name), kind="voice_transcript", ts=ts)
+            except Exception as e:
+                self.log_message("stream transcript not archived: %.80s", e)
+
+        def answer_fn(text):
+            self.log_message("stream ask from %s: %.60s", name or account, text)
+            res = ask(account, text, name, archive_question=False,
+                      context=time_context(tz) + VOICE_CONTEXT)
+            return str(res.get("answer") or "")
+
+        sess = stream_lq.StreamSession(ws, open_envelope, answer_fn, account=account,
+                                       on_transcript=on_transcript,
+                                       log=lambda m: self.log_message("%s", m))
+        try:
+            sess.run()
+        except ws_min.ConnectionClosed as e:
+            self.log_message("stream closed (%s): %s after %d turn(s)", account, e, sess.turns)
+        except Exception as e:
+            self.log_message("STREAM FAILED (%s): %.200s", account, e)
+        finally:
+            try:
+                ws.close()
+            except Exception:
+                pass
+
     def do_GET(self):
+        if urllib.parse.urlparse(self.path).path.rstrip("/").endswith("/stream") \
+                and "websocket" in (self.headers.get("Upgrade") or "").lower():
+            return self._stream()
         # A liveness probe that needs no secret, for tunnels and load balancers.
         if self.path.rstrip("/") in ("", "/health"):
             return self._send(200, {"service": "voice-agent", "ok": health()["ok"]})
@@ -2870,7 +2952,8 @@ class Handler(BaseHTTPRequestHandler):
                         # engine has none — Turkish is one male voice in the
                         # whole of Piper, and a picker showing four there
                         # would play three lies.
-                        **local_voice.voices()}
+                        **local_voice.voices(),
+                                   **_stream_facts()}
             except Exception as e:
                 self.log_message("local language count skipped: %.80s", e)
             return self._send(200, body)
@@ -3658,6 +3741,7 @@ def serve():
     threading.Thread(target=_message_watcher, daemon=True).start()
     threading.Thread(target=_docs_worker, daemon=True).start()
     threading.Thread(target=_qr_sweeper, daemon=True).start()
+    threading.Thread(target=_warm_stream, daemon=True).start()
     srv.serve_forever()
 
 

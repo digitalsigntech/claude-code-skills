@@ -324,5 +324,7 @@ for a shared demo install, where there is no owner to ask.
 | `src/restart_agent.sh` | Restart without dropping a turn: waits for idle whisper/piper and no ask in flight. |
 | `src/persona-rules.md` | Prompt rules the code does not enforce (never name a file as your source). |
 | `src/voice-agent.service.d.example/lq.conf` | The local tier's environment, by hardware class, as a systemd drop-in. |
+| `src/ws_min.py` | WebSocket (RFC 6455) server and client on the standard library — the stream's transport, also used by the plane. |
+| `src/stream_lq.py` | Real-time streaming: the resident GPU recogniser, the frame codec, the session; `--selftest`, `--facts`. |
 | `src/config.example.json` | Copy to `config.json`. |
 | `src/*.service.example` | systemd units for the adapter and the tunnel. |
