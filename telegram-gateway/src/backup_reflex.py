@@ -28,9 +28,6 @@ import tgconf as C   # identity from config
 import os
 import re
 
-# Which remote the pull-backup mirrors. Deployment data: the default is
-# this install's, and any other install sets it once.
-_REMOTE = os.environ.get("VPS_BACKUP_REMOTE", "voice" + "-vps")
 import subprocess
 import time
 
@@ -43,19 +40,6 @@ JOBS = [
      "done_re": re.compile(r"=== (\S+) done \(exit (\d+)\) ==="),
      "size_re": re.compile(r"uploaded \S+ \((\d+) KB\)"),
      "every_h": 24},
-    {"name": "Voice VPS pull-backup",
-     "log": f"{C.WORKSPACE_ROOT}/operations/vps-backup/logs/backup.log",
-     "done_re": re.compile(r"=== (\S+) done — (.+) ==="),
-     "size_re": re.compile(r"done — mirror ([\d.]+[GMK])"),
-     "every_h": 24,
-     # The directory is named after the remote it mirrors, so it is deployment
-     # data rather than code: hardcoding it published a host name into a skill
-     # other people install (the export guard caught it, 2026-08-14).
-     # The directory is named after the remote it mirrors, so the NAME is
-     # deployment data, not code: writing it here published a host name into a
-     # skill other people install (the export guard caught it, 2026-08-14).
-     "snapshots": os.environ.get("VPS_BACKUP_SNAPSHOTS",
-                                 f"{C.WORKSPACE_ROOT}/backups/" + _REMOTE)},
     {"name": "GitHub repositories",
      "marker": f"{HOME}/github_archives/last_run",
      "archive": f"{HOME}/github_archives",
@@ -225,6 +209,82 @@ def _one(job):
             "detail": detail, "size_kb": cur, "prev_kb": prev}
 
 
+# ------------------------------------------------------------- VPS backups ---
+# 2026-09-05 (the owner, on a call: "rerun the Voice VPS backup now" — after this
+# table had said "6d ago, overdue" four times). The row it was reporting was the
+# box's OWN voice-vps pull-backup, retired 2026-08-30 when every VPS moved to
+# the vps-backup app on his work PCs. The job was gone; its last log line was
+# not, and this table kept reading it. A status table that reports a retired
+# job as failing is worse than no row: he asked to rerun something that no
+# longer exists, while the real copy (mars2, that morning, ok) went unmentioned.
+#
+# The VPS rows now come from the reporting machines' own reports — the same
+# files the daily health check reads — one row per VPS, aged against TODAY
+# from the dated snapshot name (the `age` column in the file was true when it
+# was written and has been ageing with it ever since). Deployment data: the
+# report directory is a checkout of the vps-backup repo; any other install
+# points VPS_BACKUP_REPORTS at its own.
+VPS_REPORTS = os.environ.get(
+    "VPS_BACKUP_REPORTS", f"{C.WORKSPACE_ROOT}/operations/vps-backup/app/reports")
+VPS_EVERY_H = 24
+
+
+def _vps_rows():
+    rows = []
+    try:
+        names = sorted(n for n in os.listdir(VPS_REPORTS) if n.endswith(".md"))
+    except OSError:
+        return rows
+    for name in names:
+        machine = name[:-3]
+        try:
+            with open(os.path.join(VPS_REPORTS, name), encoding="utf-8") as fh:
+                text = fh.read()
+        except OSError:
+            continue
+        # When that machine last RAN — the "last run" cell. The snapshot date
+        # decides freshness below; this is only when the report was written.
+        m = re.search(r"\*\*When:\*\*\s*(\S+)", text)
+        ran_at = _iso(m.group(1)) if m else 0
+        # The run's mirror sizes, by host ("## This run" table).
+        sizes, table = {}, None
+        for line in text.splitlines():
+            if line.startswith("## "):
+                table = ("run" if "this run" in line.lower()
+                         else "hosts" if "every host" in line.lower() else None)
+                continue
+            if not table or not line.startswith("|"):
+                continue
+            c = [x.strip() for x in line.strip("|").split("|")]
+            if len(c) < 5 or c[0] in ("host", "") or set(c[1]) <= set("-: "):
+                continue
+            if table == "run":
+                sizes[c[0]] = _unit_kb(c[2])
+                continue
+            # "Every host on this machine": host | held | oldest | newest | age
+            held = re.match(r"(\d+)\s*/\s*(\d+)", c[1])
+            newest = c[3]
+            try:
+                snap_day = time.mktime(time.strptime(newest, "%Y-%m-%d"))
+            except ValueError:
+                snap_day = 0
+            last = ran_at or snap_day
+            state = "ran" if last else "never-run"
+            if held and int(held.group(1)) == 0:
+                state = "never-run"
+            # A daily job is on time while today's or yesterday's dated
+            # snapshot exists; the report's own age column is not consulted.
+            elif not snap_day or time.time() - snap_day > (
+                    VPS_EVERY_H * 3600 * 1.5 + 86400):
+                state = "overdue"
+            detail = (f"{held.group(1)}/{held.group(2)} snapshots" if held
+                      else "")
+            rows.append({"name": f"{c[0]} (on {machine})", "state": state,
+                         "last": last, "detail": detail,
+                         "size_kb": sizes.get(c[0], 0), "prev_kb": 0})
+    return rows
+
+
 def _cell(text, width=None):
     """One table cell: no pipes, no newlines, and NOTHING CUT.
 
@@ -243,7 +303,7 @@ def _cell(text, width=None):
 
 
 def status():
-    return [_one(j) for j in JOBS]
+    return [_one(j) for j in JOBS] + _vps_rows()
 
 
 def render(rows=None):
