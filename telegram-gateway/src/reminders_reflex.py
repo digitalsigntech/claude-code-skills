@@ -1084,6 +1084,15 @@ if __name__ == "__main__":
     ap.add_argument("--done", action="store_true", help="completed rows only")
     ap.add_argument("--overdue", action="store_true", help="overdue rows only")
     ap.add_argument("--client", default="telegram", choices=["telegram", "ios"])
+    # 2026-09-05 (the owner: "what happened to the pictures that you used to
+    # output with the reminders"). The keyword interceptor that was deleted
+    # that morning had been the thing sending each reminder's photo after the
+    # table; the model path prints the table and nothing else. So the CLI does
+    # the whole job now: --chat sends the photos into that Telegram chat via
+    # sendfile.py, exactly as try_handle() used to.
+    ap.add_argument("--chat", type=int, metavar="CHAT_ID",
+                    help="after the table, send each row's photo into this "
+                         "Telegram chat")
     ap.add_argument("--detect", help="legacy: test the old keyword matcher")
     a = ap.parse_args()
 
@@ -1111,6 +1120,9 @@ if __name__ == "__main__":
         else:
             title, noun = _whose(a.owner), "pending"
     print(render(rows, title=title, noun=noun, client=a.client))
+    if a.chat:
+        n = send_photos(a.chat, rows)
+        print(f"({n} photo(s) sent to chat {a.chat})", file=sys.stderr)
     print(f"\n({(time.time() - t0) * 1000:.0f}ms)", file=sys.stderr)
 
 
