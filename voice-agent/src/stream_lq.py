@@ -120,6 +120,16 @@ def untangle(text):
     return " ".join(out)
 
 
+# whisper names its languages in English; the roster speaks in codes
+WHISPER_LANG = {"english": "en", "russian": "ru", "ukrainian": "uk", "german": "de",
+                "french": "fr", "spanish": "es", "italian": "it", "portuguese": "pt",
+                "polish": "pl", "swedish": "sv", "dutch": "nl", "turkish": "tr",
+                "chinese": "zh", "japanese": "ja", "korean": "ko", "arabic": "ar",
+                "hindi": "hi", "czech": "cs", "greek": "el", "hebrew": "he",
+                "finnish": "fi", "norwegian": "no", "danish": "da", "hungarian": "hu",
+                "romanian": "ro", "vietnamese": "vi", "thai": "th", "indonesian": "id"}
+
+
 # ---------------------------------------------------------- recogniser
 class Recogniser:
     """One resident whisper-server on the GPU, started on first use."""
@@ -206,6 +216,11 @@ class Recogniser:
 
     def decode(self, pcm, lang=None, audio_ctx=None):
         """Text for PCM16/16 kHz mono bytes, via the resident server."""
+        return self.decode_full(pcm, lang, audio_ctx)[0]
+
+    def decode_full(self, pcm, lang=None, audio_ctx=None):
+        """(text, language code heard, probability). With `auto` the server
+        names the language it decoded in — one pass, no second model."""
         if not self.ensure():
             raise RuntimeError("recogniser not running")
         boundary = "----lq" + uuid.uuid4().hex
@@ -217,7 +232,7 @@ class Recogniser:
             w.writeframes(pcm)
         wav_io.seek(0)
         wav = wav_io.read()
-        fields = {"response_format": "json", "temperature": "0",
+        fields = {"response_format": "verbose_json", "temperature": "0",
                   "language": (lang or "auto")}
         if audio_ctx:
             fields["audio_ctx"] = str(int(audio_ctx))
@@ -233,7 +248,14 @@ class Recogniser:
             headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
         with urllib.request.urlopen(req, timeout=120) as r:
             d = json.loads(r.read() or b"{}")
-        return " ".join(str(d.get("text") or "").split())
+        text = " ".join(str(d.get("text") or "").split())
+        name = str(d.get("detected_language") or d.get("language") or "").strip().lower()
+        code = WHISPER_LANG.get(name, name[:2] if name else "")
+        try:
+            prob = float(d.get("detected_language_probability") or 0)
+        except (TypeError, ValueError):
+            prob = 0.0
+        return text, code, prob
 
     def stop(self):
         with self._lock:
@@ -309,7 +331,7 @@ def facts():
 # table-stripping as the single-blob path. Order is guaranteed by ONE worker
 # thread and a sequence number; the app plays in seq order and treats the
 # `final` chunk (or the `reply` frame that follows it) as the end of the turn.
-_SENT_END = re.compile(r'[.!?…]+["”’)\]]*(?=\s)|\n')
+_SENT_END = re.compile(r'[.!?…。！？]+["”’)\]]*(?=\s)|\n')
 _TABLE_OR_FENCE = re.compile(r'(^|\n)\s*(\|.*\||```)', re.S)
 MIN_SENT = int(os.environ.get("LQ_STREAM_MIN_SENT", "24"))
 
@@ -623,7 +645,7 @@ class StreamSession:
             tail = pcm[-(15 * RATE * 2):]                # the last 15 s at most
             try:
                 with self.decode_lock:
-                    text = self.recog.decode(tail, self.lang or "auto",
+                    text = self.recog.decode(tail, self.lang or lv.recent_lang(self.account) or "auto",
                                              audio_ctx_for(len(tail) / (RATE * 2)))
             except Exception as e:
                 self.log(f"partial decode failed: {str(e)[:80]}")
@@ -666,10 +688,18 @@ class StreamSession:
             return self._no_speech(uid, secs_in, peak, "silence")
         try:
             with self.decode_lock:
-                heard = self.recog.decode(pcm, self.lang or "auto", audio_ctx_for(secs_in))
+                heard, heard_code, heard_p = self.recog.decode_full(
+                    pcm, self.lang or "auto", audio_ctx_for(secs_in))
         except Exception as e:
             self._agent({"type": "error", "id": uid, "message": f"recogniser failed: {str(e)[:80]}"})
             return
+        # THE VOICE FOLLOWS THE LANGUAGE HEARD (build 355 sends lang=auto on
+        # every stream, because a pinned language translated Russian into
+        # English). A pinned `lang` wins; otherwise the code the recogniser
+        # decoded in, if this install can speak it; otherwise what this
+        # account spoke last; otherwise English.
+        lang = self.lang or (heard_code if heard_code in lv._voice_locales() else "") \
+            or lv.recent_lang(self.account) or "en"
         user_text = untangle(lv.speech_text(heard))
         t_stt = time.time() - t0
         _why = user_text and lv.hallucination_gate(user_text, secs_in, ctrl.get("prefiltered"), peak)
@@ -686,8 +716,10 @@ class StreamSession:
                 self.on_transcript(user_text, ts)
             except Exception as e:
                 self.log(f"posting the transcript failed: {e}")
-        lv.remember_lang(self.account, self.lang or "")
-        self.answer_q.put((uid, user_text, secs_in, peak, ctrl, t0, t_stt, ts))
+        lv.remember_lang(self.account, lang)
+        if not self.lang:
+            self.log(f"utterance {uid}: heard {heard_code or '?'} (p={heard_p:.2f}) -> speaking {lang}")
+        self.answer_q.put((uid, user_text, secs_in, peak, ctrl, t0, t_stt, ts, lang))
 
     def _answers(self):
         """One model turn at a time, in the order the sentences ended."""
@@ -705,7 +737,8 @@ class StreamSession:
                 except Exception:
                     return
 
-    def _answer(self, uid, user_text, secs_in, peak, ctrl, t0, t_stt, ts):
+    def _answer(self, uid, user_text, secs_in, peak, ctrl, t0, t_stt, ts, lang=None):
+        lang = lang or self.lang or "en"
         # THE SOCKET IS NEVER SILENT WHILE THE MODEL THINKS (2026-09-05, 17:37
         # UTC): the phone closed a working stream 19 s after the final because
         # nothing had arrived since — a model turn on a real question runs
@@ -719,7 +752,7 @@ class StreamSession:
             except (TypeError, ValueError):
                 takes_on_text = False
             if takes_on_text:
-                speaker = _ChunkSpeaker(self, uid, self.lang or "en", self.speaker, t0)
+                speaker = _ChunkSpeaker(self, uid, lang, self.speaker, t0)
             else:
                 self.log("reply_stream requested but the answer path has no on_text — single blob")
 
@@ -760,12 +793,12 @@ class StreamSession:
         else:
             if speaker:
                 self.log(f"stream {uid}: chunking fell back to the single blob")
-            audio, secs_out, out_fmt, out_rate, spoke_by = lv.speak(to_say, self.lang or "en", self.speaker)
+            audio, secs_out, out_fmt, out_rate, spoke_by = lv.speak(to_say, lang, self.speaker)
             voice = {"format": out_fmt, "b64": base64.b64encode(audio).decode()}
         reply = {"type": "reply", "id": uid, "text": answer,
                  **({"speech": spoken_line} if spoken_line else {}),
                  "user_text": user_text,
-                 **({"lang": self.lang} if self.lang else {}),
+                 "lang": lang,
                  **({"speaker": self.speaker} if self.speaker else {}),
                  "voice": voice,
                  **({"streamed": streamed} if streamed else {}),
@@ -783,7 +816,7 @@ class StreamSession:
                  f"model {t1 - t0 - t_stt:.1f}s tts {time.time() - t1:.1f}s, "
                  + (f"first_audio {streamed['first_audio_s']}s in {streamed['chunks']} chunks, "
                     f"{streamed['bytes'] // 1024} KB" if streamed else f"{len(audio) // 1024} KB reply")
-                 + f", lang={self.lang or 'auto'} "
+                 + f", lang={lang}{'' if self.lang else ' (heard)'} "
                  f"speaker={self.speaker or '-'}, peak {peak:.1f} dBFS, "
                  f"prefiltered={ctrl.get('prefiltered')}, reply {reply['reply_format']}, "
                  f"{self.partial_count} partials")
@@ -851,16 +884,23 @@ def _selftest():
         frames.append(phone(KIND_AUDIO, pcm[i:i + step].ljust(step, b"\0")))
         n += 1
     frames.append(phone(KIND_CTRL, json.dumps({"type": "utterance_end", "id": "utt-1", "seconds": round(n * 0.1, 1)}).encode()))
-    # a second sentence straight after the first, while the first is being answered
+    # a second sentence straight after the first, while the first is being answered — in RUSSIAN,
+    # so the language heard, not the language pinned, has to pick the voice
+    ru_a, _, _, _, _ = lv.speak("Покажи мне отчёт за прошлую неделю.", "ru", None)
+    ru_src = os.path.join(d, "ru.m4a"); open(ru_src, "wb").write(ru_a)
+    ru_wav = os.path.join(d, "ru.wav")
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", ru_src, "-ar", "16000", "-ac", "1", ru_wav], check=True)
+    with wave.open(ru_wav) as w:
+        ru_pcm = w.readframes(w.getnframes())
     frames.append(phone(KIND_CTRL, json.dumps({"type": "utterance_start", "id": "utt-2"}).encode()))
-    for i in range(0, len(pcm), step):
-        frames.append(phone(KIND_AUDIO, pcm[i:i + step].ljust(step, b"\0")))
+    for i in range(0, len(ru_pcm), step):
+        frames.append(phone(KIND_AUDIO, ru_pcm[i:i + step].ljust(step, b"\0")))
     frames.append(phone(KIND_CTRL, json.dumps({"type": "utterance_end", "id": "utt-2", "seconds": round(n * 0.1, 1)}).encode()))
     frames.append(phone(KIND_CTRL, json.dumps({"type": "heard_out", "seconds": 1.2}).encode()))
     frames.append("WAIT")
     frames.append("END")
     ws = _FakeWS(frames)
-    start = {"type": "start", "lang": "en", "speaker": "af_heart", "key_b64": base64.b64encode(key).decode(),
+    start = {"type": "start", "lang": "auto", "speaker": "af_heart", "key_b64": base64.b64encode(key).decode(),
              "format": "pcm16", "rate": 16000, "frame_ms": 100, "tz": "America/Toronto",
              "greet": True, "ui_lang": "en", "name": "Alex"}
     def answer_fn(q, on_text=None):
@@ -919,6 +959,9 @@ def _selftest():
                 and order.index(("final", "utt-2")) < order.index(("reply", "utt-1"))
                 and order.index(("reply", "utt-1")) < order.index(("reply", "utt-2")))
     print(f"  second sentence transcribed before the first reply, replies in order: {in_order}")
+    r2 = [s[2] for s in seen if s[0] == "reply" and s[2].get("id") == "utt-2"]
+    lang_ok = bool(r2) and r2[0].get("lang") == "ru" and "ru_RU" in (r2[0].get("reply_format") or "")
+    print(f"  Russian sentence heard as ru and spoken by a Russian voice: {lang_ok} -> {r2[0].get('reply_format') if r2 else None} | final: {[s[2]['text'] for s in seen if s[0]=='final' and s[2].get('id')=='utt-2']}")
     greet_ok = (len(seen) > 1 and kinds[0] == "hello" and kinds[1] == "reply"
                 and seen[1][2].get("id") == 0 and seen[1][2].get("greeting") is True
                 and seen[1][1] is None)          # unmetered: no wrapper
@@ -933,7 +976,7 @@ def _selftest():
     print(f"  streamed: {len(chunks)} chunk(s), first audio at "
           f"{(last[-1].get('streamed') or {}).get('first_audio_s') if last else None}s "
           f"after the utterance end -> {'ok' if stream_ok else 'FAIL'}")
-    ok = (greet_ok and stream_ok and in_order and kinds.count("reply") >= 3
+    ok = (greet_ok and stream_ok and in_order and lang_ok and kinds.count("reply") >= 3
           and any(s[0] == "partial" for s in seen))
     print("SELFTEST", "OK" if ok else "FAILED")
     return 0 if ok else 1
