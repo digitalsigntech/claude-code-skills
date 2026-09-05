@@ -59,9 +59,19 @@ def main():
         if thumb and method == "sendDocument":
             files["thumbnail"] = open(thumb, "rb")
         try:
+            # 2026-09-05: captions render markdown like every other road into
+            # a chat (a scheduled-task result over a camera photo showed raw
+            # ** and backticks). HTML first; a parse/length error retries plain.
+            cap_kw = {}
+            if caption:
+                cap_kw = {"caption": tg_api.md_to_html(caption), "parse_mode": "HTML"}
             r = tg_api._call(method, _files=files, _timeout=120,
-                             chat_id=chat_id,
-                             **({"caption": caption} if caption else {}))
+                             chat_id=chat_id, **cap_kw)
+            if not r.get("ok") and caption and "parse_mode" in cap_kw:
+                for fh in files.values():
+                    fh.seek(0)
+                r = tg_api._call(method, _files=files, _timeout=120,
+                                 chat_id=chat_id, caption=caption)
         finally:
             for fh in files.values():
                 fh.close()
