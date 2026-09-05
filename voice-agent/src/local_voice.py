@@ -414,6 +414,62 @@ PHANTOMS = {
 PHANTOM_MAX_S = float(os.environ.get("LQ_PHANTOM_MAX_S", "1.5"))
 
 
+# ---- scripts: which alphabets a transcript is written in -------------------
+# A transcript in Cyrillic, kana or Hangul on a phone whose own recogniser is
+# English tells us nothing about whether words were spoken — that recogniser
+# hears no words in any of them. The gate below reads the script for that.
+_SCRIPT_RANGES = (
+    ((0x0400, 0x052F), "cyrl"), ((0x3040, 0x30FF), "kana"), ((0x31F0, 0x31FF), "kana"),
+    ((0x3400, 0x4DBF), "cjk"), ((0x4E00, 0x9FFF), "cjk"), ((0xF900, 0xFAFF), "cjk"),
+    ((0xAC00, 0xD7AF), "hang"), ((0x1100, 0x11FF), "hang"), ((0x0600, 0x06FF), "arab"),
+    ((0x0750, 0x077F), "arab"), ((0x0590, 0x05FF), "hebr"), ((0x0E00, 0x0E7F), "thai"),
+    ((0x0900, 0x097F), "deva"), ((0x0370, 0x03FF), "grek"),
+)
+
+
+def _script_of(ch):
+    o = ord(ch)
+    for (lo, hi), name in _SCRIPT_RANGES:
+        if lo <= o <= hi:
+            return name
+    return "latn" if ch.isalpha() else None
+
+
+def scripts_in(text):
+    """{script: letter count} over the text; digits and punctuation ignored."""
+    out = {}
+    for ch in text or "":
+        sc = _script_of(ch)
+        if sc:
+            out[sc] = out.get(sc, 0) + 1
+    return out
+
+
+def top_script(text):
+    sc = scripts_in(text)
+    return max(sc, key=sc.get) if sc else "latn"
+
+
+_STRAY_SCRIPTS = {"hang", "arab", "hebr", "thai", "deva", "grek"}
+
+
+def mixed_scripts(text):
+    """True when a transcript is garbage the recogniser wrote in several
+    alphabets at once — a replacement character, three or more scripts, or a
+    Latin/Cyrillic/CJK text with a stray few letters of Hangul, Arabic, Hebrew,
+    Thai, Devanagari or Greek in it. Real code-switching (an English sentence
+    with a Russian clause) is two scripts, both substantial, and passes."""
+    if "\ufffd" in (text or ""):
+        return True
+    sc = scripts_in(text)
+    if len(sc) >= 3:
+        return True
+    if len(sc) == 2:
+        minor = min(sc, key=sc.get)
+        return minor in _STRAY_SCRIPTS and sc[minor] <= 6
+    return False
+
+
 def phantom_gate(text, seconds, prefiltered=None, peak=None):
     """True when `text` is one of whisper's silence phrases AND the clip is too
     short (< PHANTOM_MAX_S), or the phone's endpointer heard no words
@@ -431,7 +487,7 @@ def phantom_gate(text, seconds, prefiltered=None, peak=None):
     return False
 
 
-def hallucination_gate(text, seconds, prefiltered=None, peak=None):
+def hallucination_gate(text, seconds, prefiltered=None, peak=None, heard=None, phone_lang=None):
     """Whisper's output on audio that held no words — the FULL rule (request
     from the app after the car-cabin session of 2026-09-05):
 
@@ -440,7 +496,13 @@ def hallucination_gate(text, seconds, prefiltered=None, peak=None):
     2. the phone's own recogniser heard NO WORDS (prefiltered is False): the
        transcript is dropped unless it is long and plausible — at least six
        words, spoken at a speech-like rate (0.8–4 words a second), on audio
-       that peaked above −24 dBFS, and not a stock phrase;
+       that peaked above −24 dBFS, and not a stock phrase. When the transcript
+       is in a script the phone's recogniser does not read (Cyrillic on an
+       English phone), or in a language other than the phone's (`heard` vs
+       `phone_lang`), its "no words" is no evidence at all — the phone was
+       always going to hear nothing — so three words at speech rate suffice.
+       Without this a Russian speaker on an English phone is mute (build 356,
+       2026-09-05);
     3. word density: a "sentence" of few words spread over many seconds
        (under 0.5 words a second across 8 s or more) is noise narrated, not
        speech — "I'm going to go ahead and get started" over 30 s is eight
@@ -460,7 +522,10 @@ def hallucination_gate(text, seconds, prefiltered=None, peak=None):
     tl = t.lower().strip(" .,!?-—…\"'")
     if prefiltered is False:
         rate = words / secs if secs > 0 else 0
-        plausible = (words >= 6 and 0.8 <= rate <= 4.0 and tl not in PHANTOMS
+        phone = (phone_lang or "en").strip().lower()[:2] or "en"
+        foreign = top_script(t) != "latn" or bool(heard and heard[:2] != phone)
+        need = 3 if foreign else 6
+        plausible = (words >= need and 0.8 <= rate <= 4.0 and tl not in PHANTOMS
                      and (peak is None or peak == float("-inf") or peak >= -24.0))
         if not plausible:
             return "phone heard no words"
@@ -1580,8 +1645,14 @@ def _run_turn(payload, answer_fn, on_transcript, account, key, raw_audio):
     remember_lang(account, lang or heard_lang)
     user_text = speech_text(heard)
     t_stt = time.time() - t0
-    _why = user_text and hallucination_gate(
-        user_text, secs_in, (payload or {}).get("prefiltered"), peak)
+    if user_text and mixed_scripts(user_text):
+        # Several alphabets in one sentence is the recogniser writing noise,
+        # whatever language it claims to have heard.
+        _why = "mixed scripts"
+    else:
+        _why = user_text and hallucination_gate(
+            user_text, secs_in, (payload or {}).get("prefiltered"), peak,
+            heard=heard_lang, phone_lang=(lang or (payload or {}).get("ui_lang") or None))
     if _why:
         print(f"[lq] phantom dropped ({_why}): {user_text!r} ({secs_in:.1f}s, "
               f"peak {peak:.1f} dBFS, prefiltered="
