@@ -708,6 +708,33 @@ _MARKER = re.compile(r"^\[(camera photo|camera photos|file): ([^\]]+)\]\s*(.*)$"
                      re.S)
 
 
+def archive_amend(old_text, new_text, within_s=180):
+    """Rewrite the newest archive row in this caller's chat whose text is
+    exactly `old_text` (written seconds ago) to `new_text`. Best-effort.
+
+    2026-09-05: an answer archived the moment the model returned and then
+    rewritten before it was sent left the phone with one text and the
+    archive with another, and the app drew the answer twice. The row is
+    what was sent, so a rewrite after archiving amends the row."""
+    d = archive_dir()
+    if not d or not old_text or old_text == new_text:
+        return False
+    try:
+        import sqlite3
+        cx = sqlite3.connect(str(d / "chat.db"), timeout=3)
+        cur = cx.execute(
+            "UPDATE messages SET text=? WHERE id=(SELECT id FROM messages "
+            "WHERE chat_id=? AND text=? AND epoch>? ORDER BY id DESC LIMIT 1)",
+            (new_text, archive_chat_id(), old_text, time.time() - within_s))
+        cx.commit()
+        n = cur.rowcount
+        cx.close()
+        return n == 1
+    except Exception as e:
+        print(f"[voice-agent] archive amend skipped: {e}", file=sys.stderr)
+        return False
+
+
 def archive_file(paths, caption, sender):
     """One archive row for an upload, carrying the filenames in its text.
 
@@ -3322,6 +3349,7 @@ class Handler(BaseHTTPRequestHandler):
                         "I could not change that reminder — nothing in the "
                         "store moved, so it is still set as it was. Say the "
                         "new time again and I will try once more.")
+                    archive_amend(ans, res["answer"])   # the row is what was sent
             # #370: THE BANNER FOR THE FAMILY HE ACTUALLY SEES. The plane
             # fires the answer push and cannot read anything; the preview has
             # to be sealed here and carried through. A separate key from
