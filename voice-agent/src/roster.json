@@ -1,352 +1,757 @@
 {
-  "_why": "Named speakers per language for the LQ tier (#417). anna/maria are female, tom/leo male; a language fills the roles it has voices for. Gender is not guessed from the voice's name — hz is the measured median F0 of a sentence in that language (voice/realtime/pitch.py), because ru_RU-dmitri has a male name and a female pitch and nobody here can check Turkish by ear.",
-  "en": {
-    "anna": {
-      "file": "en_US-lessac-medium.onnx",
-      "path": "en/en_US/lessac/medium/en_US-lessac-medium.onnx",
-      "gender": "F",
-      "hz": 193.4,
-      "kokoro": "af_heart"
-    },
-    "maria": {
-      "file": "en_US-amy-medium.onnx",
-      "path": "en/en_US/amy/medium/en_US-amy-medium.onnx",
-      "gender": "F",
-      "hz": 202.3,
-      "kokoro": "af_bella"
-    },
-    "tom": {
-      "file": "en_US-joe-medium.onnx",
-      "path": "en/en_US/joe/medium/en_US-joe-medium.onnx",
-      "gender": "M",
-      "hz": 101.6,
-      "kokoro": "am_michael"
-    },
-    "leo": {
-      "file": "en_US-ryan-medium.onnx",
-      "path": "en/en_US/ryan/medium/en_US-ryan-medium.onnx",
-      "gender": "M",
-      "hz": 162.1,
-      "kokoro": "am_adam"
-    }
+ "_engines": {
+  "_why": "Which synthesiser speaks each language. The owner's rule (2026-09-04, second decision): Kokoro wherever it supports the language, Piper only where it does not. He was told the cost first — French drops from four voices to one and loses every male voice, Spanish four to three, Italian three to two — and chose the sound. Piper keeps de pl sv nl tr ru uk.",
+  "en": "kokoro",
+  "ja": "kokoro",
+  "pt": "kokoro",
+  "zh": "kokoro",
+  "de": "piper",
+  "es": "kokoro",
+  "fr": "kokoro",
+  "it": "kokoro",
+  "nl": "piper",
+  "pl": "piper",
+  "ru": "piper",
+  "sv": "piper",
+  "tr": "piper",
+  "uk": "piper"
+ },
+ "en": {
+  "af_alloy": {
+   "kokoro": "af_alloy",
+   "gender": "F",
+   "name": "Alloy",
+   "accent": "American"
   },
-  "fr": {
-    "anna": {
-      "file": "fr_FR-siwis-medium.onnx",
-      "path": "fr/fr_FR/siwis/medium/fr_FR-siwis-medium.onnx",
-      "gender": "F",
-      "hz": 216.2,
-      "kokoro": "ff_siwis"
-    },
-    "maria": {
-      "file": "fr_FR-upmc-medium.onnx",
-      "path": "fr/fr_FR/upmc/medium/fr_FR-upmc-medium.onnx",
-      "speaker": 0,
-      "gender": "F",
-      "hz": 227.3
-    },
-    "tom": {
-      "file": "fr_FR-tom-medium.onnx",
-      "path": "fr/fr_FR/tom/medium/fr_FR-tom-medium.onnx",
-      "gender": "M",
-      "hz": 134.7
-    },
-    "leo": {
-      "file": "fr_FR-upmc-medium.onnx",
-      "path": "fr/fr_FR/upmc/medium/fr_FR-upmc-medium.onnx",
-      "speaker": 1,
-      "gender": "M",
-      "hz": 131.2
-    }
+  "af_aoede": {
+   "kokoro": "af_aoede",
+   "gender": "F",
+   "name": "Aoede",
+   "accent": "American"
   },
-  "es": {
-    "anna": {
-      "file": "es_ES-sharvard-medium.onnx",
-      "path": "es/es_ES/sharvard/medium/es_ES-sharvard-medium.onnx",
-      "speaker": 1,
-      "gender": "F",
-      "hz": 202.3,
-      "kokoro": "ef_dora"
-    },
-    "maria": {
-      "file": "es_MX-claude-high.onnx",
-      "path": "es/es_MX/claude/high/es_MX-claude-high.onnx",
-      "gender": "F",
-      "hz": 186.9
-    },
-    "tom": {
-      "file": "es_ES-davefx-medium.onnx",
-      "path": "es/es_ES/davefx/medium/es_ES-davefx-medium.onnx",
-      "gender": "M",
-      "hz": 114.8,
-      "kokoro": "em_alex"
-    },
-    "leo": {
-      "file": "es_ES-sharvard-medium.onnx",
-      "path": "es/es_ES/sharvard/medium/es_ES-sharvard-medium.onnx",
-      "speaker": 0,
-      "gender": "M",
-      "hz": 121.8,
-      "kokoro": "em_santa"
-    }
+  "af_bella": {
+   "kokoro": "af_bella",
+   "gender": "F",
+   "name": "Bella",
+   "accent": "American",
+   "file": "en_US-amy-medium.onnx",
+   "path": "en/en_US/amy/medium/en_US-amy-medium.onnx",
+   "hz": 202.3
   },
-  "de": {
-    "anna": {
-      "file": "de_DE-ramona-low.onnx",
-      "path": "de/de_DE/ramona/low/de_DE-ramona-low.onnx",
-      "gender": "F",
-      "hz": 202.5
-    },
-    "maria": {
-      "file": "de_DE-kerstin-low.onnx",
-      "path": "de/de_DE/kerstin/low/de_DE-kerstin-low.onnx",
-      "gender": "F",
-      "hz": 166.7
-    },
-    "tom": {
-      "file": "de_DE-thorsten-medium.onnx",
-      "path": "de/de_DE/thorsten/medium/de_DE-thorsten-medium.onnx",
-      "gender": "M",
-      "hz": 107.6
-    },
-    "leo": {
-      "file": "de_DE-karlsson-low.onnx",
-      "path": "de/de_DE/karlsson/low/de_DE-karlsson-low.onnx",
-      "gender": "M",
-      "hz": 125.0
-    }
+  "af_heart": {
+   "kokoro": "af_heart",
+   "gender": "F",
+   "name": "Heart",
+   "accent": "American",
+   "file": "en_US-lessac-medium.onnx",
+   "path": "en/en_US/lessac/medium/en_US-lessac-medium.onnx",
+   "hz": 193.4
   },
-  "it": {
-    "anna": {
-      "file": "it_IT-paola-medium.onnx",
-      "path": "it/it_IT/paola/medium/it_IT-paola-medium.onnx",
-      "gender": "F",
-      "hz": 208.0,
-      "kokoro": "if_sara"
-    },
-    "maria": {
-      "file": "it_IT-serena-medium.onnx",
-      "path": "it/it_IT/serena/medium/it_IT-serena-medium.onnx",
-      "gender": "F",
-      "hz": 212.0
-    },
-    "tom": {
-      "file": "it_IT-riccardo-x_low.onnx",
-      "path": "it/it_IT/riccardo/x_low/it_IT-riccardo-x_low.onnx",
-      "gender": "M",
-      "hz": 150.2,
-      "kokoro": "im_nicola"
-    }
+  "af_jessica": {
+   "kokoro": "af_jessica",
+   "gender": "F",
+   "name": "Jessica",
+   "accent": "American"
   },
-  "pt": {
-    "anna": {
-      "file": "pt_PT-tugão-medium.onnx",
-      "path": "pt/pt_PT/tugão/medium/pt_PT-tugão-medium.onnx",
-      "gender": "F",
-      "hz": 190.1,
-      "kokoro": "pf_dora"
-    },
-    "tom": {
-      "file": "pt_BR-cadu-medium.onnx",
-      "path": "pt/pt_BR/cadu/medium/pt_BR-cadu-medium.onnx",
-      "gender": "M",
-      "hz": 125.3,
-      "kokoro": "pm_alex"
-    },
-    "leo": {
-      "file": "pt_BR-jeff-medium.onnx",
-      "path": "pt/pt_BR/jeff/medium/pt_BR-jeff-medium.onnx",
-      "gender": "M",
-      "hz": 137.0,
-      "kokoro": "pm_santa"
-    }
+  "af_kore": {
+   "kokoro": "af_kore",
+   "gender": "F",
+   "name": "Kore",
+   "accent": "American"
   },
-  "pl": {
-    "anna": {
-      "file": "pl_PL-gosia-medium.onnx",
-      "path": "pl/pl_PL/gosia/medium/pl_PL-gosia-medium.onnx",
-      "gender": "F",
-      "hz": 216.2
-    },
-    "tom": {
-      "file": "pl_PL-darkman-medium.onnx",
-      "path": "pl/pl_PL/darkman/medium/pl_PL-darkman-medium.onnx",
-      "gender": "M",
-      "hz": 117.9
-    },
-    "leo": {
-      "file": "pl_PL-bass-high.onnx",
-      "path": "pl/pl_PL/bass/high/pl_PL-bass-high.onnx",
-      "gender": "M",
-      "hz": 84.3
-    }
+  "af_nicole": {
+   "kokoro": "af_nicole",
+   "gender": "F",
+   "name": "Nicole",
+   "accent": "American"
   },
-  "sv": {
-    "anna": {
-      "file": "sv_SE-lisa-medium.onnx",
-      "path": "sv/sv_SE/lisa/medium/sv_SE-lisa-medium.onnx",
-      "gender": "F",
-      "hz": 191.7
-    },
-    "maria": {
-      "file": "sv_SE-alma-medium.onnx",
-      "path": "sv/sv_SE/alma/medium/sv_SE-alma-medium.onnx",
-      "gender": "F",
-      "hz": 180.7
-    },
-    "tom": {
-      "file": "sv_SE-nst-medium.onnx",
-      "path": "sv/sv_SE/nst/medium/sv_SE-nst-medium.onnx",
-      "gender": "M",
-      "hz": 74.5
-    }
+  "af_nova": {
+   "kokoro": "af_nova",
+   "gender": "F",
+   "name": "Nova",
+   "accent": "American"
   },
-  "nl": {
-    "anna": {
-      "file": "nl_BE-nathalie-medium.onnx",
-      "path": "nl/nl_BE/nathalie/medium/nl_BE-nathalie-medium.onnx",
-      "gender": "F",
-      "hz": 185.3
-    },
-    "maria": {
-      "file": "nl_NL-mls-medium.onnx",
-      "path": "nl/nl_NL/mls/medium/nl_NL-mls-medium.onnx",
-      "speaker": 2,
-      "gender": "F",
-      "hz": 212.0
-    },
-    "tom": {
-      "file": "nl_BE-rdh-medium.onnx",
-      "path": "nl/nl_BE/rdh/medium/nl_BE-rdh-medium.onnx",
-      "gender": "M",
-      "hz": 102.1
-    },
-    "leo": {
-      "file": "nl_NL-ronnie-medium.onnx",
-      "path": "nl/nl_NL/ronnie/medium/nl_NL-ronnie-medium.onnx",
-      "gender": "M",
-      "hz": 135.3
-    }
+  "af_river": {
+   "kokoro": "af_river",
+   "gender": "F",
+   "name": "River",
+   "accent": "American"
   },
-  "tr": {
-    "tom": {
-      "file": "tr_TR-dfki-medium.onnx",
-      "path": "tr/tr_TR/dfki/medium/tr_TR-dfki-medium.onnx",
-      "gender": "M",
-      "hz": 113.1
-    }
+  "af_sarah": {
+   "kokoro": "af_sarah",
+   "gender": "F",
+   "name": "Sarah",
+   "accent": "American"
   },
-  "ru": {
-    "anna": {
-      "file": "ru_RU-irina-medium.onnx",
-      "path": "ru/ru_RU/irina/medium/ru_RU-irina-medium.onnx",
-      "gender": "F",
-      "hz": 173.6
-    },
-    "tom": {
-      "file": "ru_RU-ruslan-medium.onnx",
-      "path": "ru/ru_RU/ruslan/medium/ru_RU-ruslan-medium.onnx",
-      "gender": "M",
-      "hz": 114.2
-    },
-    "leo": {
-      "file": "ru_RU-denis-medium.onnx",
-      "path": "ru/ru_RU/denis/medium/ru_RU-denis-medium.onnx",
-      "gender": "M",
-      "hz": 151.0
-    }
+  "af_sky": {
+   "kokoro": "af_sky",
+   "gender": "F",
+   "name": "Sky",
+   "accent": "American"
   },
-  "uk": {
-    "anna": {
-      "file": "uk_UA-ukrainian_tts-medium.onnx",
-      "path": "uk/uk_UA/ukrainian_tts/medium/uk_UA-ukrainian_tts-medium.onnx",
-      "speaker": 0,
-      "gender": "F",
-      "hz": 310.6
-    },
-    "maria": {
-      "file": "uk_UA-ukrainian_tts-medium.onnx",
-      "path": "uk/uk_UA/ukrainian_tts/medium/uk_UA-ukrainian_tts-medium.onnx",
-      "speaker": 2,
-      "gender": "F",
-      "hz": 201.4
-    },
-    "tom": {
-      "file": "uk_UA-ukrainian_tts-medium.onnx",
-      "path": "uk/uk_UA/ukrainian_tts/medium/uk_UA-ukrainian_tts-medium.onnx",
-      "speaker": 1,
-      "gender": "M",
-      "hz": 126.0
-    },
-    "leo": {
-      "file": "uk_UA-oleksa-high.onnx",
-      "path": "uk/uk_UA/oleksa/high/uk_UA-oleksa-high.onnx",
-      "gender": "M",
-      "hz": 144.1
-    }
+  "bf_alice": {
+   "kokoro": "bf_alice",
+   "gender": "F",
+   "name": "Alice",
+   "accent": "British"
   },
-  "zh": {
-    "anna": {
-      "file": "zh_CN-huayan-medium.onnx",
-      "path": "zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx",
-      "gender": "F",
-      "hz": 237.1,
-      "kokoro": "zf_xiaoxiao"
-    },
-    "maria": {
-      "file": "zh_CN-xiao_ya-medium.onnx",
-      "path": "zh/zh_CN/xiao_ya/medium/zh_CN-xiao_ya-medium.onnx",
-      "gender": "F",
-      "hz": 310.6,
-      "kokoro": "zf_xiaoni"
-    },
-    "tom": {
-      "file": "zh_CN-chaowen-medium.onnx",
-      "path": "zh/zh_CN/chaowen/medium/zh_CN-chaowen-medium.onnx",
-      "gender": "M",
-      "hz": 160.9,
-      "kokoro": "zm_yunxi"
-    },
-    "leo": {
-      "kokoro": "zm_yunyang"
-    }
+  "bf_emma": {
+   "kokoro": "bf_emma",
+   "gender": "F",
+   "name": "Emma",
+   "accent": "British"
   },
-  "ja": {
-    "anna": {
-      "file": "ja_JA-hi_fi_captain-medium.onnx",
-      "path": "ja/ja_JA/hi_fi_captain/medium/ja_JA-hi_fi_captain-medium.onnx",
-      "speaker": 0,
-      "gender": "F",
-      "hz": 266.7,
-      "kokoro": "jf_alpha"
-    },
-    "tom": {
-      "file": "ja_JA-hi_fi_captain-medium.onnx",
-      "path": "ja/ja_JA/hi_fi_captain/medium/ja_JA-hi_fi_captain-medium.onnx",
-      "speaker": 1,
-      "gender": "M",
-      "hz": 152.4,
-      "kokoro": "jm_kumo"
-    },
-    "maria": {
-      "kokoro": "jf_nezumi"
-    }
+  "bf_isabella": {
+   "kokoro": "bf_isabella",
+   "gender": "F",
+   "name": "Isabella",
+   "accent": "British"
   },
-  "_engines": {
-    "_why": "Which synthesiser speaks each language. The owner's rule (2026-09-04, second decision): Kokoro wherever it supports the language, Piper only where it does not. He was told the cost first — French drops from four voices to one and loses every male voice, Spanish four to three, Italian three to two — and chose the sound. Piper keeps de pl sv nl tr ru uk.",
-    "en": "kokoro",
-    "ja": "kokoro",
-    "pt": "kokoro",
-    "zh": "kokoro",
-    "de": "piper",
-    "es": "kokoro",
-    "fr": "kokoro",
-    "it": "kokoro",
-    "nl": "piper",
-    "pl": "piper",
-    "ru": "piper",
-    "sv": "piper",
-    "tr": "piper",
-    "uk": "piper"
+  "bf_lily": {
+   "kokoro": "bf_lily",
+   "gender": "F",
+   "name": "Lily",
+   "accent": "British"
+  },
+  "am_adam": {
+   "kokoro": "am_adam",
+   "gender": "M",
+   "name": "Adam",
+   "accent": "American",
+   "file": "en_US-ryan-medium.onnx",
+   "path": "en/en_US/ryan/medium/en_US-ryan-medium.onnx",
+   "hz": 162.1
+  },
+  "am_echo": {
+   "kokoro": "am_echo",
+   "gender": "M",
+   "name": "Echo",
+   "accent": "American"
+  },
+  "am_eric": {
+   "kokoro": "am_eric",
+   "gender": "M",
+   "name": "Eric",
+   "accent": "American"
+  },
+  "am_fenrir": {
+   "kokoro": "am_fenrir",
+   "gender": "M",
+   "name": "Fenrir",
+   "accent": "American"
+  },
+  "am_liam": {
+   "kokoro": "am_liam",
+   "gender": "M",
+   "name": "Liam",
+   "accent": "American"
+  },
+  "am_michael": {
+   "kokoro": "am_michael",
+   "gender": "M",
+   "name": "Michael",
+   "accent": "American",
+   "file": "en_US-joe-medium.onnx",
+   "path": "en/en_US/joe/medium/en_US-joe-medium.onnx",
+   "hz": 101.6
+  },
+  "am_onyx": {
+   "kokoro": "am_onyx",
+   "gender": "M",
+   "name": "Onyx",
+   "accent": "American"
+  },
+  "am_puck": {
+   "kokoro": "am_puck",
+   "gender": "M",
+   "name": "Puck",
+   "accent": "American"
+  },
+  "am_santa": {
+   "kokoro": "am_santa",
+   "gender": "M",
+   "name": "Santa",
+   "accent": "American"
+  },
+  "bm_daniel": {
+   "kokoro": "bm_daniel",
+   "gender": "M",
+   "name": "Daniel",
+   "accent": "British"
+  },
+  "bm_fable": {
+   "kokoro": "bm_fable",
+   "gender": "M",
+   "name": "Fable",
+   "accent": "British"
+  },
+  "bm_george": {
+   "kokoro": "bm_george",
+   "gender": "M",
+   "name": "George",
+   "accent": "British"
+  },
+  "bm_lewis": {
+   "kokoro": "bm_lewis",
+   "gender": "M",
+   "name": "Lewis",
+   "accent": "British"
+  },
+  "maria": {
+   "alias": "af_bella"
+  },
+  "anna": {
+   "alias": "af_heart"
+  },
+  "leo": {
+   "alias": "am_adam"
+  },
+  "tom": {
+   "alias": "am_michael"
   }
+ },
+ "fr": {
+  "ff_siwis": {
+   "kokoro": "ff_siwis",
+   "gender": "F",
+   "name": "Siwis",
+   "file": "fr_FR-siwis-medium.onnx",
+   "path": "fr/fr_FR/siwis/medium/fr_FR-siwis-medium.onnx",
+   "hz": 216.2
+  },
+  "anna": {
+   "alias": "ff_siwis"
+  },
+  "maria": {
+   "alias": "ff_siwis"
+  },
+  "tom": {
+   "alias": "ff_siwis"
+  },
+  "leo": {
+   "alias": "ff_siwis"
+  }
+ },
+ "es": {
+  "ef_dora": {
+   "kokoro": "ef_dora",
+   "gender": "F",
+   "name": "Dora",
+   "file": "es_ES-sharvard-medium.onnx",
+   "path": "es/es_ES/sharvard/medium/es_ES-sharvard-medium.onnx",
+   "speaker": 1,
+   "hz": 202.3
+  },
+  "em_alex": {
+   "kokoro": "em_alex",
+   "gender": "M",
+   "name": "Alex",
+   "file": "es_ES-davefx-medium.onnx",
+   "path": "es/es_ES/davefx/medium/es_ES-davefx-medium.onnx",
+   "hz": 114.8
+  },
+  "em_santa": {
+   "kokoro": "em_santa",
+   "gender": "M",
+   "name": "Santa",
+   "file": "es_ES-sharvard-medium.onnx",
+   "path": "es/es_ES/sharvard/medium/es_ES-sharvard-medium.onnx",
+   "speaker": 0,
+   "hz": 121.8
+  },
+  "anna": {
+   "alias": "ef_dora"
+  },
+  "tom": {
+   "alias": "em_alex"
+  },
+  "leo": {
+   "alias": "em_santa"
+  },
+  "maria": {
+   "alias": "ef_dora"
+  }
+ },
+ "de": {
+  "de_DE-eva_k-x_low": {
+   "file": "de_DE-eva_k-x_low.onnx",
+   "path": "de/de_DE/eva_k/x_low/de_DE-eva_k-x_low.onnx",
+   "name": "Eva K",
+   "gender": "F"
+  },
+  "de_DE-kerstin-low": {
+   "file": "de_DE-kerstin-low.onnx",
+   "path": "de/de_DE/kerstin/low/de_DE-kerstin-low.onnx",
+   "name": "Kerstin",
+   "gender": "F",
+   "hz": 166.7
+  },
+  "de_DE-ramona-low": {
+   "file": "de_DE-ramona-low.onnx",
+   "path": "de/de_DE/ramona/low/de_DE-ramona-low.onnx",
+   "name": "Ramona",
+   "gender": "F",
+   "hz": 202.5
+  },
+  "de_DE-karlsson-low": {
+   "file": "de_DE-karlsson-low.onnx",
+   "path": "de/de_DE/karlsson/low/de_DE-karlsson-low.onnx",
+   "name": "Karlsson",
+   "gender": "M",
+   "hz": 125.0
+  },
+  "de_DE-pavoque-low": {
+   "file": "de_DE-pavoque-low.onnx",
+   "path": "de/de_DE/pavoque/low/de_DE-pavoque-low.onnx",
+   "name": "Pavoque",
+   "gender": "M"
+  },
+  "de_DE-thorsten-high": {
+   "file": "de_DE-thorsten-high.onnx",
+   "path": "de/de_DE/thorsten/high/de_DE-thorsten-high.onnx",
+   "name": "Thorsten",
+   "gender": "M"
+  },
+  "maria": {
+   "alias": "de_DE-kerstin-low"
+  },
+  "anna": {
+   "alias": "de_DE-ramona-low"
+  },
+  "leo": {
+   "alias": "de_DE-karlsson-low"
+  },
+  "tom": {
+   "alias": "de_DE-thorsten-high"
+  }
+ },
+ "it": {
+  "if_sara": {
+   "kokoro": "if_sara",
+   "gender": "F",
+   "name": "Sara",
+   "file": "it_IT-paola-medium.onnx",
+   "path": "it/it_IT/paola/medium/it_IT-paola-medium.onnx",
+   "hz": 208.0
+  },
+  "im_nicola": {
+   "kokoro": "im_nicola",
+   "gender": "M",
+   "name": "Nicola",
+   "file": "it_IT-riccardo-x_low.onnx",
+   "path": "it/it_IT/riccardo/x_low/it_IT-riccardo-x_low.onnx",
+   "hz": 150.2
+  },
+  "anna": {
+   "alias": "if_sara"
+  },
+  "tom": {
+   "alias": "im_nicola"
+  },
+  "maria": {
+   "alias": "if_sara"
+  }
+ },
+ "pt": {
+  "pf_dora": {
+   "kokoro": "pf_dora",
+   "gender": "F",
+   "name": "Dora",
+   "accent": "Brazilian",
+   "file": "pt_PT-tugão-medium.onnx",
+   "path": "pt/pt_PT/tugão/medium/pt_PT-tugão-medium.onnx",
+   "hz": 190.1
+  },
+  "pm_alex": {
+   "kokoro": "pm_alex",
+   "gender": "M",
+   "name": "Alex",
+   "accent": "Brazilian",
+   "file": "pt_BR-cadu-medium.onnx",
+   "path": "pt/pt_BR/cadu/medium/pt_BR-cadu-medium.onnx",
+   "hz": 125.3
+  },
+  "pm_santa": {
+   "kokoro": "pm_santa",
+   "gender": "M",
+   "name": "Santa",
+   "accent": "Brazilian",
+   "file": "pt_BR-jeff-medium.onnx",
+   "path": "pt/pt_BR/jeff/medium/pt_BR-jeff-medium.onnx",
+   "hz": 137.0
+  },
+  "anna": {
+   "alias": "pf_dora"
+  },
+  "tom": {
+   "alias": "pm_alex"
+  },
+  "leo": {
+   "alias": "pm_santa"
+  }
+ },
+ "pl": {
+  "pl_PL-gosia-medium": {
+   "file": "pl_PL-gosia-medium.onnx",
+   "path": "pl/pl_PL/gosia/medium/pl_PL-gosia-medium.onnx",
+   "name": "Gosia",
+   "gender": "F",
+   "hz": 216.2
+  },
+  "pl_PL-bass-high": {
+   "file": "pl_PL-bass-high.onnx",
+   "path": "pl/pl_PL/bass/high/pl_PL-bass-high.onnx",
+   "name": "Bass",
+   "gender": "M",
+   "hz": 84.3
+  },
+  "pl_PL-darkman-medium": {
+   "file": "pl_PL-darkman-medium.onnx",
+   "path": "pl/pl_PL/darkman/medium/pl_PL-darkman-medium.onnx",
+   "name": "Darkman",
+   "gender": "M",
+   "hz": 117.9
+  },
+  "pl_PL-mc_speech-medium": {
+   "file": "pl_PL-mc_speech-medium.onnx",
+   "path": "pl/pl_PL/mc_speech/medium/pl_PL-mc_speech-medium.onnx",
+   "name": "MC Speech",
+   "gender": "M"
+  },
+  "pl_PL-mls_6892-low": {
+   "file": "pl_PL-mls_6892-low.onnx",
+   "path": "pl/pl_PL/mls_6892/low/pl_PL-mls_6892-low.onnx",
+   "name": "MLS 6892",
+   "gender": "M",
+   "hz": 160.0
+  },
+  "anna": {
+   "alias": "pl_PL-gosia-medium"
+  },
+  "leo": {
+   "alias": "pl_PL-bass-high"
+  },
+  "tom": {
+   "alias": "pl_PL-darkman-medium"
+  }
+ },
+ "sv": {
+  "sv_SE-alma-medium": {
+   "file": "sv_SE-alma-medium.onnx",
+   "path": "sv/sv_SE/alma/medium/sv_SE-alma-medium.onnx",
+   "name": "Alma",
+   "gender": "F",
+   "hz": 180.7
+  },
+  "sv_SE-lisa-medium": {
+   "file": "sv_SE-lisa-medium.onnx",
+   "path": "sv/sv_SE/lisa/medium/sv_SE-lisa-medium.onnx",
+   "name": "Lisa",
+   "gender": "F",
+   "hz": 191.7
+  },
+  "sv_SE-nst-medium": {
+   "file": "sv_SE-nst-medium.onnx",
+   "path": "sv/sv_SE/nst/medium/sv_SE-nst-medium.onnx",
+   "name": "Nst",
+   "gender": "M",
+   "hz": 74.5
+  },
+  "maria": {
+   "alias": "sv_SE-alma-medium"
+  },
+  "anna": {
+   "alias": "sv_SE-lisa-medium"
+  },
+  "tom": {
+   "alias": "sv_SE-nst-medium"
+  }
+ },
+ "nl": {
+  "nl_BE-nathalie-medium": {
+   "file": "nl_BE-nathalie-medium.onnx",
+   "path": "nl/nl_BE/nathalie/medium/nl_BE-nathalie-medium.onnx",
+   "name": "Nathalie",
+   "gender": "F",
+   "accent": "Belgian",
+   "hz": 185.3
+  },
+  "nl_NL-mls_5809-low": {
+   "file": "nl_NL-mls_5809-low.onnx",
+   "path": "nl/nl_NL/mls_5809/low/nl_NL-mls_5809-low.onnx",
+   "name": "MLS 5809",
+   "gender": "F",
+   "accent": "Dutch",
+   "hz": 207.8
+  },
+  "nl_NL-mls_7432-low": {
+   "file": "nl_NL-mls_7432-low.onnx",
+   "path": "nl/nl_NL/mls_7432/low/nl_NL-mls_7432-low.onnx",
+   "name": "MLS 7432",
+   "gender": "F",
+   "accent": "Dutch",
+   "hz": 216.2
+  },
+  "nl_BE-rdh-medium": {
+   "file": "nl_BE-rdh-medium.onnx",
+   "path": "nl/nl_BE/rdh/medium/nl_BE-rdh-medium.onnx",
+   "name": "RDH",
+   "gender": "M",
+   "accent": "Belgian",
+   "hz": 102.1
+  },
+  "nl_NL-alex-medium": {
+   "file": "nl_NL-alex-medium.onnx",
+   "path": "nl/nl_NL/alex/medium/nl_NL-alex-medium.onnx",
+   "name": "Alex",
+   "gender": "M",
+   "accent": "Dutch"
+  },
+  "nl_NL-pim-medium": {
+   "file": "nl_NL-pim-medium.onnx",
+   "path": "nl/nl_NL/pim/medium/nl_NL-pim-medium.onnx",
+   "name": "Pim",
+   "gender": "M",
+   "accent": "Dutch"
+  },
+  "nl_NL-ronnie-medium": {
+   "file": "nl_NL-ronnie-medium.onnx",
+   "path": "nl/nl_NL/ronnie/medium/nl_NL-ronnie-medium.onnx",
+   "name": "Ronnie",
+   "gender": "M",
+   "accent": "Dutch",
+   "hz": 135.3
+  },
+  "anna": {
+   "alias": "nl_BE-nathalie-medium"
+  },
+  "tom": {
+   "alias": "nl_BE-rdh-medium"
+  },
+  "leo": {
+   "alias": "nl_NL-ronnie-medium"
+  },
+  "maria": {
+   "alias": "nl_NL-mls_5809-low"
+  }
+ },
+ "tr": {
+  "tr_TR-dfki-medium": {
+   "file": "tr_TR-dfki-medium.onnx",
+   "path": "tr/tr_TR/dfki/medium/tr_TR-dfki-medium.onnx",
+   "name": "Dfki",
+   "gender": "M",
+   "hz": 113.1
+  },
+  "tom": {
+   "alias": "tr_TR-dfki-medium"
+  }
+ },
+ "ru": {
+  "ru_RU-irina-medium": {
+   "file": "ru_RU-irina-medium.onnx",
+   "path": "ru/ru_RU/irina/medium/ru_RU-irina-medium.onnx",
+   "name": "Irina",
+   "gender": "F",
+   "spoken": "Ирина",
+   "hz": 173.6
+  },
+  "ru_RU-denis-medium": {
+   "file": "ru_RU-denis-medium.onnx",
+   "path": "ru/ru_RU/denis/medium/ru_RU-denis-medium.onnx",
+   "name": "Denis",
+   "gender": "M",
+   "spoken": "Денис",
+   "hz": 151.0
+  },
+  "ru_RU-dmitri-medium": {
+   "file": "ru_RU-dmitri-medium.onnx",
+   "path": "ru/ru_RU/dmitri/medium/ru_RU-dmitri-medium.onnx",
+   "name": "Dmitri",
+   "gender": "M",
+   "spoken": "Дмитрий"
+  },
+  "ru_RU-ruslan-medium": {
+   "file": "ru_RU-ruslan-medium.onnx",
+   "path": "ru/ru_RU/ruslan/medium/ru_RU-ruslan-medium.onnx",
+   "name": "Ruslan",
+   "gender": "M",
+   "spoken": "Руслан",
+   "hz": 114.2
+  },
+  "anna": {
+   "alias": "ru_RU-irina-medium"
+  },
+  "leo": {
+   "alias": "ru_RU-denis-medium"
+  },
+  "tom": {
+   "alias": "ru_RU-ruslan-medium"
+  }
+ },
+ "uk": {
+  "uk_UA-ukrainian_tts-medium-lada": {
+   "file": "uk_UA-ukrainian_tts-medium.onnx",
+   "path": "uk/uk_UA/ukrainian_tts/medium/uk_UA-ukrainian_tts-medium.onnx",
+   "speaker": 0,
+   "gender": "F",
+   "hz": 310.6,
+   "name": "Lada",
+   "spoken": "Лада"
+  },
+  "uk_UA-tetiana-high": {
+   "file": "uk_UA-tetiana-high.onnx",
+   "path": "uk/uk_UA/tetiana/high/uk_UA-tetiana-high.onnx",
+   "name": "Tetiana",
+   "gender": "F",
+   "spoken": "Тетяна"
+  },
+  "uk_UA-mykyta-high": {
+   "file": "uk_UA-mykyta-high.onnx",
+   "path": "uk/uk_UA/mykyta/high/uk_UA-mykyta-high.onnx",
+   "name": "Mykyta",
+   "gender": "M",
+   "spoken": "Микита"
+  },
+  "uk_UA-oleksa-high": {
+   "file": "uk_UA-oleksa-high.onnx",
+   "path": "uk/uk_UA/oleksa/high/uk_UA-oleksa-high.onnx",
+   "name": "Oleksa",
+   "gender": "M",
+   "spoken": "Олекса",
+   "hz": 144.1
+  },
+  "anna": {
+   "alias": "uk_UA-ukrainian_tts-medium-lada"
+  },
+  "maria": {
+   "alias": "uk_UA-tetiana-high"
+  },
+  "tom": {
+   "alias": "uk_UA-mykyta-high"
+  },
+  "leo": {
+   "alias": "uk_UA-oleksa-high"
+  }
+ },
+ "zh": {
+  "zf_xiaobei": {
+   "kokoro": "zf_xiaobei",
+   "gender": "F",
+   "name": "Xiaobei",
+   "spoken": "小北"
+  },
+  "zf_xiaoni": {
+   "kokoro": "zf_xiaoni",
+   "gender": "F",
+   "name": "Xiaoni",
+   "spoken": "小妮",
+   "file": "zh_CN-xiao_ya-medium.onnx",
+   "path": "zh/zh_CN/xiao_ya/medium/zh_CN-xiao_ya-medium.onnx",
+   "hz": 310.6
+  },
+  "zf_xiaoxiao": {
+   "kokoro": "zf_xiaoxiao",
+   "gender": "F",
+   "name": "Xiaoxiao",
+   "spoken": "晓晓",
+   "file": "zh_CN-huayan-medium.onnx",
+   "path": "zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx",
+   "hz": 237.1
+  },
+  "zf_xiaoyi": {
+   "kokoro": "zf_xiaoyi",
+   "gender": "F",
+   "name": "Xiaoyi",
+   "spoken": "小艺"
+  },
+  "zm_yunjian": {
+   "kokoro": "zm_yunjian",
+   "gender": "M",
+   "name": "Yunjian",
+   "spoken": "云健"
+  },
+  "zm_yunxi": {
+   "kokoro": "zm_yunxi",
+   "gender": "M",
+   "name": "Yunxi",
+   "spoken": "云希",
+   "file": "zh_CN-chaowen-medium.onnx",
+   "path": "zh/zh_CN/chaowen/medium/zh_CN-chaowen-medium.onnx",
+   "hz": 160.9
+  },
+  "zm_yunxia": {
+   "kokoro": "zm_yunxia",
+   "gender": "M",
+   "name": "Yunxia",
+   "spoken": "云夏"
+  },
+  "zm_yunyang": {
+   "kokoro": "zm_yunyang",
+   "gender": "M",
+   "name": "Yunyang",
+   "spoken": "云扬"
+  },
+  "maria": {
+   "alias": "zf_xiaoni"
+  },
+  "anna": {
+   "alias": "zf_xiaoxiao"
+  },
+  "tom": {
+   "alias": "zm_yunxi"
+  },
+  "leo": {
+   "alias": "zm_yunyang"
+  }
+ },
+ "ja": {
+  "jf_alpha": {
+   "kokoro": "jf_alpha",
+   "gender": "F",
+   "name": "Alpha",
+   "spoken": "アルファ",
+   "file": "ja_JA-hi_fi_captain-medium.onnx",
+   "path": "ja/ja_JA/hi_fi_captain/medium/ja_JA-hi_fi_captain-medium.onnx",
+   "speaker": 0,
+   "hz": 266.7
+  },
+  "jf_gongitsune": {
+   "kokoro": "jf_gongitsune",
+   "gender": "F",
+   "name": "Gongitsune",
+   "spoken": "ごんぎつね"
+  },
+  "jf_nezumi": {
+   "kokoro": "jf_nezumi",
+   "gender": "F",
+   "name": "Nezumi",
+   "spoken": "ねずみ"
+  },
+  "jf_tebukuro": {
+   "kokoro": "jf_tebukuro",
+   "gender": "F",
+   "name": "Tebukuro",
+   "spoken": "てぶくろ"
+  },
+  "jm_kumo": {
+   "kokoro": "jm_kumo",
+   "gender": "M",
+   "name": "Kumo",
+   "spoken": "くも",
+   "file": "ja_JA-hi_fi_captain-medium.onnx",
+   "path": "ja/ja_JA/hi_fi_captain/medium/ja_JA-hi_fi_captain-medium.onnx",
+   "speaker": 1,
+   "hz": 152.4
+  },
+  "anna": {
+   "alias": "jf_alpha"
+  },
+  "maria": {
+   "alias": "jf_nezumi"
+  },
+  "tom": {
+   "alias": "jm_kumo"
+  }
+ }
 }

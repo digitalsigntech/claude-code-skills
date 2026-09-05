@@ -77,6 +77,8 @@ def main():
     seen, total = set(), 0
     for code in want:
         for vid, e in roster[code].items():
+            if e.get("alias") or not e.get("path"):
+                continue              # an alias, or a Kokoro-only voice
             for path, name in ((e["path"], e["file"]),
                                (e["path"] + ".json", e["file"] + ".json")):
                 if name in seen:
