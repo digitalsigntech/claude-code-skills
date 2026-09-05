@@ -212,7 +212,7 @@ def _one(job):
 # ------------------------------------------------------------- VPS backups ---
 # 2026-09-05 (the owner, on a call: "rerun the Voice VPS backup now" — after this
 # table had said "6d ago, overdue" four times). The row it was reporting was the
-# box's OWN voice-vps pull-backup, retired 2026-08-30 when every VPS moved to
+# box's OWN pull-backup of the voice VPS, retired 2026-08-30 when every VPS moved to
 # the vps-backup app on his work PCs. The job was gone; its last log line was
 # not, and this table kept reading it. A status table that reports a retired
 # job as failing is worse than no row: he asked to rerun something that no
