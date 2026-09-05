@@ -28,9 +28,12 @@ resident with the audio context sized to the utterance. The two changes turn a
 2.5 s recogniser leg into half a second and make partials possible at all.
 """
 import base64
+import inspect
 import json
 import math
 import os
+import queue
+import re
 import struct
 import subprocess
 import sys
@@ -289,6 +292,146 @@ def facts():
 
 
 # --------------------------------------------------------------- session
+# ------------------------------------------------------- streamed reply ---
+# WHY THE REPLY WAS ONE BLOB, AND WHAT THIS CHANGES (2026-09-05). Measured on
+# the afternoon's turns: recogniser under a second, model 6–25 s, synthesis
+# 0.5–7 s — and the phone heard nothing until all of it was done, because the
+# whole answer was synthesised as one file after the model's last token. The
+# model's text arrives as deltas (bridge._stream_run → on_text); this class
+# cuts that text at sentence ends as it grows, speaks each sentence the moment
+# it is complete, and sends it down the stream as a `reply_chunk`. The first
+# sentence is in the phone's ear while the model is still writing the third.
+#
+# What it deliberately does NOT do: split inside a number ("1.5 s"), speak a
+# fragment shorter than MIN_SENT chars (it waits for the next boundary), or
+# keep going once a table row or a code fence appears — those belong on the
+# screen, and the remainder after the model finishes goes through the same
+# table-stripping as the single-blob path. Order is guaranteed by ONE worker
+# thread and a sequence number; the app plays in seq order and treats the
+# `final` chunk (or the `reply` frame that follows it) as the end of the turn.
+_SENT_END = re.compile(r'[.!?…]+["”’)\]]*(?=\s)|\n')
+_TABLE_OR_FENCE = re.compile(r'(^|\n)\s*(\|.*\||```)', re.S)
+MIN_SENT = int(os.environ.get("LQ_STREAM_MIN_SENT", "24"))
+
+
+def _strip_tables(text):
+    """The remainder after a table appeared: prose lines only."""
+    out, fence = [], False
+    for ln in (text or "").splitlines():
+        if lv._CODE_FENCE.match(ln):
+            fence = not fence
+            continue
+        if fence or lv._TABLE_ROW.match(ln):
+            continue
+        out.append(ln)
+    return "\n".join(out).strip()
+
+
+class _ChunkSpeaker:
+    def __init__(self, session, uid, lang, speaker, t0):
+        self.s, self.uid, self.lang, self.speaker, self.t0 = session, uid, lang, speaker, t0
+        self.seen = ""              # the model's text so far
+        self.consumed = 0           # chars of `seen` already handed to the worker
+        self.halted = False         # a table/fence appeared: stop cutting
+        self.seq = 0
+        self.secs = 0.0
+        self.bytes = 0
+        self.first_audio = None     # seconds from t0 to the first chunk sent
+        self.spoke_by = ""
+        self.err = None
+        self.q = queue.Queue()
+        self.lock = threading.Lock()
+        self.worker = threading.Thread(target=self._run, daemon=True)
+        self.worker.start()
+
+    # called from the model thread on every delta with the FULL text so far
+    def feed(self, full):
+        full = str(full or "")
+        with self.lock:
+            self.seen = full
+            if self.halted or self.err:
+                return
+            if self.consumed == 0:
+                lead = len(full) - len(full.lstrip())
+                if full.lstrip()[:len(lv.READ_IN_FULL)].lower() == lv.READ_IN_FULL:
+                    self.consumed = lead + len(lv.READ_IN_FULL)
+            if _TABLE_OR_FENCE.search(full[self.consumed:]):
+                self.halted = True
+                return
+            pos = self.consumed
+            while True:
+                m = _SENT_END.search(full, pos)
+                if not m:
+                    break
+                end = m.end()
+                sent = full[self.consumed:end].strip()
+                if len(sent) < MIN_SENT and m.group(0) != "\n":
+                    pos = end                       # too short alone: extend
+                    continue
+                if sent:
+                    self.q.put((sent, False))
+                self.consumed = end
+                pos = end
+
+    def finish(self, answer, spoken_line):
+        """The model is done. Speak whatever was not cut yet, flag it final.
+        Returns None when the stream cannot be trusted (the final text does not
+        start with what was already spoken) and NO chunk went out — the caller
+        then takes the single-blob path. If chunks did go out, the rest is
+        spoken from the final text on a best-effort basis."""
+        with self.lock:
+            prefix = self.seen[:self.consumed]
+            base = spoken_line or answer or ""
+            if base.startswith(prefix):
+                rem = base[len(prefix):]
+            elif (answer or "").startswith(prefix):
+                rem = answer[len(prefix):]
+            elif self.seq == 0 and self.q.empty():
+                self.q.put(None)
+                return None
+            else:
+                self.s.log(f"stream {self.uid}: final text does not extend the spoken "
+                           f"prefix ({self.consumed} chars) — remainder skipped")
+                rem = ""
+            rem = _strip_tables(rem) if (self.halted or lv._TABLE_ROW.search(rem or "")) else rem
+            self.q.put((rem.strip(), True))
+            self.q.put(None)
+        self.worker.join(timeout=120)
+        return {"chunks": self.seq, "audio_seconds_out": round(self.secs, 3),
+                "bytes": self.bytes, "first_audio_s": self.first_audio,
+                "spoke_by": self.spoke_by}
+
+    def _run(self):
+        while True:
+            item = self.q.get()
+            if item is None:
+                return
+            text, final = item
+            try:
+                say = lv._speakable(text) if text else ""
+                audio, secs, fmt, rate, who = (b"", 0.0, lv.REPLY_FORMAT, 0, "") if not say.strip() \
+                    else lv.speak(say, self.lang or "en", self.speaker)
+                if not audio and not final:
+                    continue
+                self.seq += 1
+                frame = {"type": "reply_chunk", "id": self.uid, "seq": self.seq,
+                         "final": bool(final), "text": text,
+                         "voice": {"format": fmt, "b64": base64.b64encode(audio).decode()},
+                         "audio_seconds_out": round(secs, 3)}
+                self.s._agent(frame)
+                if self.first_audio is None and audio:
+                    self.first_audio = round(time.time() - self.t0, 2)
+                self.secs += secs
+                self.bytes += len(audio)
+                if who:
+                    self.spoke_by = who
+            except Exception as e:                                # noqa: BLE001
+                self.err = e
+                self.s.log(f"stream {self.uid}: chunk {self.seq + 1} failed: {e}")
+                if final:
+                    return
+
+
 class StreamSession:
     """One phone's socket, from the sealed `start` to the close.
 
@@ -327,6 +470,14 @@ class StreamSession:
         self.turns = 0
         self.partial_count = 0
         self.recog = recogniser()
+        # RECOGNISE NOW, ANSWER IN ORDER (2026-09-05, 20:25 UTC). Two sentences
+        # back to back: the second one's transcript waited behind the first
+        # one's whole model turn, because one thread did both. Recognition is
+        # half a second and happens in the reading thread the moment the
+        # utterance ends; the model turn and the voice go through this queue,
+        # one at a time, in the order the sentences were spoken.
+        self.answer_q = queue.Queue()
+        self.answer_thread = None
 
     # ---- sending
     def _agent(self, obj, meter=None):
@@ -360,6 +511,13 @@ class StreamSession:
         if self.lang == "auto":
             self.lang = ""
         self.speaker = str(start.get("speaker") or "").strip().lower()[:64]
+        # STREAMED REPLY AUDIO is opt-in per stream (2026-09-05, the owner:
+        # "organise streaming back"). An app that sends reply_stream:true gets
+        # the answer as it is produced — a `reply_chunk` frame per sentence,
+        # synthesised the moment the sentence is complete — and a final `reply`
+        # frame with the text and no voice. An app that does not ask gets the
+        # single-blob reply exactly as before; nothing changes under it.
+        self.reply_stream = bool(start.get("reply_stream"))
         if not self.recog.ensure():
             self._agent({"type": "error", "message": "recogniser not running"})
             raise RuntimeError("recogniser not running")
@@ -369,8 +527,9 @@ class StreamSession:
                      "partial_every_ms": PARTIAL_MS,
                      "progress_every_s": PROGRESS_S,
                      "max_utterance_s": MAX_UTTERANCE_S,
-                     "frame_ms": FRAME_MS})
-        self.log(f"stream open: lang={self.lang or 'auto'} speaker={self.speaker or '-'} "
+                     "frame_ms": FRAME_MS,
+                     "reply_stream": self.reply_stream})
+        self.log(f"stream open: lang={self.lang or 'auto'} speaker={self.speaker or '-'} reply_stream={self.reply_stream} "
                  f"backend={self.recog.backend}")
         if start.get("greet"):
             # Request 489: the greeting is an id-0 reply right after the hello,
@@ -385,6 +544,8 @@ class StreamSession:
                 self.log(f"greeting failed: {str(e)[:100]}")
         worker = threading.Thread(target=self._partials, daemon=True)
         worker.start()
+        self.answer_thread = threading.Thread(target=self._answers, daemon=True)
+        self.answer_thread.start()
         try:
             while True:
                 op, data = self.ws.recv(timeout=900)
@@ -435,7 +596,7 @@ class StreamSession:
             self.last_partial = ""
             self.utt_id = None
             try:
-                self._finish(uid, pcm, frames, c)
+                self._recognise(uid, pcm, frames, c)
             finally:
                 self.ending.clear()
         elif t == "utterance_cancel":
@@ -477,17 +638,32 @@ class StreamSession:
                              "id": self.utt_id if self.utt_id is not None else f"u{self.utt_seq + 1}",
                              "text": text})
 
-    def _finish(self, uid, pcm, frames, ctrl):
+    def _no_speech(self, uid, secs_in, peak, reason, heard=""):
+        """Every no-speech says why (2026-09-05: utterance 4 of a stream
+        vanished from the phone with no line here to explain it)."""
+        self.log(f"no speech ({reason}): utterance {uid}, {secs_in}s, peak "
+                 f"{'-inf' if peak == float('-inf') else round(peak, 1)} dBFS"
+                 + (f", heard {heard[:40]!r}" if heard else ""))
+        self._agent({"type": "no_speech", "id": uid,
+                     "peak_dbfs": None if peak == float("-inf") else round(peak, 1),
+                     **({"heard_marker": heard[:40]} if heard else {})},
+                    meter={"id": uid, "audio_seconds": secs_in,
+                           "audio_seconds_out": 0.0, "no_speech": True})
+
+    def _recognise(self, uid, pcm, frames, ctrl):
+        """The reading thread's half of an utterance: decode, gate, `final`,
+        then hand the sentence to the answer queue — half a second, so the
+        next sentence's frames are read the moment this returns."""
         t0 = time.time()
         secs_in = round(frames * FRAME_MS / 1000.0, 3)
         declared = ctrl.get("seconds")
         if isinstance(declared, (int, float)) and abs(declared - secs_in) > max(0.5, 0.25 * secs_in):
             self.log(f"utterance {uid}: phone says {declared}s, {secs_in}s of frames arrived")
         peak = pcm_peak_dbfs(pcm)
-        if not pcm or peak < lv.SILENCE_PEAK_DBFS:
-            self._agent({"type": "no_speech", "id": uid, "peak_dbfs": None if peak == float("-inf") else round(peak, 1)},
-                        meter={"id": uid, "audio_seconds": secs_in, "audio_seconds_out": 0.0, "no_speech": True})
-            return
+        if not pcm:
+            return self._no_speech(uid, secs_in, peak, "no frames")
+        if peak < lv.SILENCE_PEAK_DBFS:
+            return self._no_speech(uid, secs_in, peak, "silence")
         try:
             with self.decode_lock:
                 heard = self.recog.decode(pcm, self.lang or "auto", audio_ctx_for(secs_in))
@@ -500,11 +676,9 @@ class StreamSession:
         if _why:
             self.log(f"phantom dropped ({_why}): {user_text!r} ({secs_in}s, peak {peak:.1f} dBFS, "
                      f"prefiltered={ctrl.get('prefiltered')})")
-            heard, user_text = user_text, ""
+            return self._no_speech(uid, secs_in, peak, _why, heard=user_text)
         if not user_text:
-            self._agent({"type": "no_speech", "id": uid, "heard_marker": heard[:40]},
-                        meter={"id": uid, "audio_seconds": secs_in, "audio_seconds_out": 0.0, "no_speech": True})
-            return
+            return self._no_speech(uid, secs_in, peak, "no words", heard=heard)
         ts = time.time()
         self._agent({"type": "final", "id": uid, "text": user_text})
         if self.on_transcript:
@@ -513,16 +687,48 @@ class StreamSession:
             except Exception as e:
                 self.log(f"posting the transcript failed: {e}")
         lv.remember_lang(self.account, self.lang or "")
+        self.answer_q.put((uid, user_text, secs_in, peak, ctrl, t0, t_stt, ts))
+
+    def _answers(self):
+        """One model turn at a time, in the order the sentences ended."""
+        while not self.stop.is_set():
+            try:
+                item = self.answer_q.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            try:
+                self._answer(*item)
+            except Exception as e:
+                self.log(f"answer failed for utterance {item[0]}: {str(e)[:120]}")
+                try:
+                    self._agent({"type": "error", "id": item[0], "message": str(e)[:160]})
+                except Exception:
+                    return
+
+    def _answer(self, uid, user_text, secs_in, peak, ctrl, t0, t_stt, ts):
         # THE SOCKET IS NEVER SILENT WHILE THE MODEL THINKS (2026-09-05, 17:37
         # UTC): the phone closed a working stream 19 s after the final because
         # nothing had arrived since — a model turn on a real question runs
         # 10–30 s. A `progress` frame every few seconds says the reply is on
         # its way, and gives the app something to draw.
         box = {}
+        speaker = None
+        if self.reply_stream:
+            try:
+                takes_on_text = "on_text" in inspect.signature(self.answer_fn).parameters
+            except (TypeError, ValueError):
+                takes_on_text = False
+            if takes_on_text:
+                speaker = _ChunkSpeaker(self, uid, self.lang or "en", self.speaker, t0)
+            else:
+                self.log("reply_stream requested but the answer path has no on_text — single blob")
 
         def _think():
             try:
-                box["answer"] = str(self.answer_fn(user_text) or "")
+                if speaker:
+                    box["answer"] = str(self.answer_fn(user_text, on_text=speaker.feed) or "")
+                else:
+                    box["answer"] = str(self.answer_fn(user_text) or "")
             except Exception as e:                                 # noqa: BLE001
                 box["error"] = e
 
@@ -546,16 +752,27 @@ class StreamSession:
         to_say = lv._speakable(spoken_line or answer or "")
         if not to_say.strip():
             to_say = "I do not have an answer for that."
-        audio, secs_out, out_fmt, out_rate, spoke_by = lv.speak(to_say, self.lang or "en", self.speaker)
+        streamed = speaker.finish(answer, spoken_line) if speaker else None
+        if streamed:
+            audio, secs_out, out_fmt, out_rate = b"", streamed["audio_seconds_out"], lv.REPLY_FORMAT, 0
+            spoke_by = streamed["spoke_by"] or "-"
+            voice = None                       # every byte of audio went as chunks
+        else:
+            if speaker:
+                self.log(f"stream {uid}: chunking fell back to the single blob")
+            audio, secs_out, out_fmt, out_rate, spoke_by = lv.speak(to_say, self.lang or "en", self.speaker)
+            voice = {"format": out_fmt, "b64": base64.b64encode(audio).decode()}
         reply = {"type": "reply", "id": uid, "text": answer,
                  **({"speech": spoken_line} if spoken_line else {}),
                  "user_text": user_text,
                  **({"lang": self.lang} if self.lang else {}),
                  **({"speaker": self.speaker} if self.speaker else {}),
-                 "voice": {"format": out_fmt, "b64": base64.b64encode(audio).decode()},
+                 "voice": voice,
+                 **({"streamed": streamed} if streamed else {}),
                  "audio_seconds": secs_in, "audio_seconds_out": round(secs_out, 3),
                  "peak_dbfs": None if peak == float("-inf") else round(peak, 1),
-                 "reply_format": f"{out_fmt} {out_rate} Hz {lv.REPLY_BITRATE} {spoke_by}",
+                 "reply_format": (f"{out_fmt} streamed {streamed['chunks']} chunks {lv.REPLY_BITRATE} {spoke_by}"
+                                  if streamed else f"{out_fmt} {out_rate} Hz {lv.REPLY_BITRATE} {spoke_by}"),
                  "timing": {"stt_s": round(t_stt, 2), "think_s": round(t1 - t0 - t_stt, 2),
                             "tts_s": round(time.time() - t1, 2)},
                  "ts": ts}
@@ -564,7 +781,9 @@ class StreamSession:
                                   "audio_seconds_out": round(secs_out, 3)})
         self.log(f"stream turn {uid}: {secs_in}s in, {secs_out:.1f}s out, stt {t_stt:.2f}s "
                  f"model {t1 - t0 - t_stt:.1f}s tts {time.time() - t1:.1f}s, "
-                 f"{len(audio) // 1024} KB reply, lang={self.lang or 'auto'} "
+                 + (f"first_audio {streamed['first_audio_s']}s in {streamed['chunks']} chunks, "
+                    f"{streamed['bytes'] // 1024} KB" if streamed else f"{len(audio) // 1024} KB reply")
+                 + f", lang={self.lang or 'auto'} "
                  f"speaker={self.speaker or '-'}, peak {peak:.1f} dBFS, "
                  f"prefiltered={ctrl.get('prefiltered')}, reply {reply['reply_format']}, "
                  f"{self.partial_count} partials")
@@ -590,6 +809,9 @@ class _FakeWS:
         if item == "END":
             import ws_min
             raise ws_min.ConnectionClosed("done")
+        if item == "WAIT":
+            time.sleep(16)                       # let both queued answers finish
+            return self.recv(timeout)
         if isinstance(item, tuple) and item[0] == 2 and item[1][0] == KIND_AUDIO:
             time.sleep(self.pace)
         return item
@@ -629,14 +851,34 @@ def _selftest():
         frames.append(phone(KIND_AUDIO, pcm[i:i + step].ljust(step, b"\0")))
         n += 1
     frames.append(phone(KIND_CTRL, json.dumps({"type": "utterance_end", "id": "utt-1", "seconds": round(n * 0.1, 1)}).encode()))
+    # a second sentence straight after the first, while the first is being answered
+    frames.append(phone(KIND_CTRL, json.dumps({"type": "utterance_start", "id": "utt-2"}).encode()))
+    for i in range(0, len(pcm), step):
+        frames.append(phone(KIND_AUDIO, pcm[i:i + step].ljust(step, b"\0")))
+    frames.append(phone(KIND_CTRL, json.dumps({"type": "utterance_end", "id": "utt-2", "seconds": round(n * 0.1, 1)}).encode()))
     frames.append(phone(KIND_CTRL, json.dumps({"type": "heard_out", "seconds": 1.2}).encode()))
+    frames.append("WAIT")
     frames.append("END")
     ws = _FakeWS(frames)
     start = {"type": "start", "lang": "en", "speaker": "af_heart", "key_b64": base64.b64encode(key).decode(),
              "format": "pcm16", "rate": 16000, "frame_ms": 100, "tz": "America/Toronto",
              "greet": True, "ui_lang": "en", "name": "Alex"}
-    sess = StreamSession(ws, lambda env: json.dumps(start),
-                         lambda q: (time.sleep(5), f"You asked: {q} The dock opens at two thirty.")[1],
+    def answer_fn(q, on_text=None):
+        # The model, as the bridge delivers it: the full text so far on each
+        # delta, a few words at a time, with a think before the first one.
+        full = (f"You asked: {q} The dock opens at two thirty. "
+                "The pallets go out on the afternoon truck, so be there by two. "
+                "I have put it on your list.")
+        time.sleep(2)
+        if on_text:
+            words = full.split(" ")
+            for i in range(1, len(words) + 1):
+                on_text(" ".join(words[:i]))
+                time.sleep(0.12)
+        return full
+
+    start["reply_stream"] = True
+    sess = StreamSession(ws, lambda env: json.dumps(start), answer_fn,
                          account="selftest", on_transcript=lambda t, ts: print("  transcript:", t))
     t0 = time.time()
     try:
@@ -662,15 +904,36 @@ def _selftest():
             print(f"  partial: {obj['id']} {obj['text']!r}")
         if t == "final":
             print(f"  final:   {obj['id']} {obj['text']!r}")
+        if t == "reply_chunk":
+            print(f"  chunk {obj['seq']}{' FINAL' if obj.get('final') else ''}: {obj['text'][:50]!r} "
+                  f"{obj['audio_seconds_out']}s audio")
         if t == "reply":
-            print(f"  reply:   meter={meter} text={obj['text'][:60]!r} voice={len(obj['voice']['b64'])} b64 chars {obj['reply_format']} timing={obj.get('timing')}")
+            v = obj.get("voice")
+            print(f"  reply:   meter={meter} text={obj['text'][:60]!r} voice={len(v['b64']) if v else None} "
+                  f"b64 chars {obj['reply_format']} timing={obj.get('timing')} streamed={obj.get('streamed')}")
     print(f"  wall {time.time() - t0:.1f}s, utterance {n * 0.1:.1f}s, backend {sess.recog.backend}")
     kinds = [s[0] for s in seen]
+    order = [(s[0], s[2].get("id")) for s in seen if s[0] in ("final", "reply")]
+    print(f"  order of finals and replies: {order}")
+    in_order = (("final", "utt-2") in order and ("reply", "utt-1") in order and ("reply", "utt-2") in order
+                and order.index(("final", "utt-2")) < order.index(("reply", "utt-1"))
+                and order.index(("reply", "utt-1")) < order.index(("reply", "utt-2")))
+    print(f"  second sentence transcribed before the first reply, replies in order: {in_order}")
     greet_ok = (len(seen) > 1 and kinds[0] == "hello" and kinds[1] == "reply"
                 and seen[1][2].get("id") == 0 and seen[1][2].get("greeting") is True
                 and seen[1][1] is None)          # unmetered: no wrapper
     print(f"  greeting first, id 0, unmetered: {greet_ok} -> {seen[1][2].get('text')!r}" if len(seen) > 1 else "  no greeting")
-    ok = (greet_ok and any(s[0] == "final" for s in seen) and kinds.count("reply") >= 2
+    # judged on the FIRST sentence: the second queues behind it by design
+    chunks = [o for k, _m, o in seen if k == "reply_chunk" and o.get("id") == "utt-1"]
+    last = [o for k, _m, o in seen if k == "reply" and o.get("id") == "utt-1"]
+    stream_ok = (len(chunks) >= 2 and chunks[-1].get("final") is True
+                 and [c["seq"] for c in chunks] == list(range(1, len(chunks) + 1))
+                 and bool(last) and last[-1].get("voice") is None
+                 and (last[-1].get("streamed") or {}).get("chunks") == len(chunks))
+    print(f"  streamed: {len(chunks)} chunk(s), first audio at "
+          f"{(last[-1].get('streamed') or {}).get('first_audio_s') if last else None}s "
+          f"after the utterance end -> {'ok' if stream_ok else 'FAIL'}")
+    ok = (greet_ok and stream_ok and in_order and kinds.count("reply") >= 3
           and any(s[0] == "partial" for s in seen))
     print("SELFTEST", "OK" if ok else "FAILED")
     return 0 if ok else 1
