@@ -42,7 +42,11 @@ The voice plane holds one webhook per account. This adapter is that webhook:
   treats presence in this feed as presence in the conversation, and it is right to.
 - **`capabilities`** — tells the plane what this agent supports, from what is actually
   configured. Claiming `branding` and then 404-ing it makes the plane ask a question it
-  already knows the answer to.
+  already knows the answer to. Three are claimed only when proven: `voice_local` (the local
+  tier, with the languages it can actually speak and the voices per language), `e2ee-v1` (a
+  device key on disk, the library imports, the operator turned it on) and `sealed-attachments`
+  (sealed account + `e2ee_attachments` in config). The app switches behaviour on each the moment
+  it is listed, so a claim that is not backed is a broken feature, not an optimistic one.
 
 ### What `posted` means, and why it is worth being strict about
 
@@ -310,5 +314,15 @@ for a shared demo install, where there is no owner to ask.
 | `src/conformance.py` | Checks this install against every message the plane can send. |
 | `src/devices.py` | The list of devices allowed to read this account's sealed mail; `list`, `approve`, `revoke`. |
 | `src/e2ee_v2.py` | Envelope v2 — one message wrapped separately for every approved device; `--vectors`, `--selftest`. |
+| `src/local_voice.py` | The local tier: whisper.cpp in, Kokoro/Piper out, normaliser, spoken cap, replay cache; `--probe`, `--verify-voices`. |
+| `src/roster.json` | Four voice ids per language, which engine speaks each language, Kokoro voice ids. |
+| `src/install_voices.py` | Fetches the Piper voices the roster needs, per language; synthesises one word with each. |
+| `src/install_kokoro.sh` | Kokoro in its own venv, model + voices by hash; `--check`. Prints the service environment. |
+| `src/loopback_check.py` | The ear: speak a sentence, let the recogniser read it back, report the match. |
+| `src/test_say_text.py` | The normaliser's cases (what the synthesiser is handed, not how it sounds). |
+| `src/gpu_bench.py`, `src/tts_bench.py` | Which recogniser beats small-on-CPU here; Piper vs Kokoro on the same sentences. |
+| `src/restart_agent.sh` | Restart without dropping a turn: waits for idle whisper/piper and no ask in flight. |
+| `src/persona-rules.md` | Prompt rules the code does not enforce (never name a file as your source). |
+| `src/voice-agent.service.d.example/lq.conf` | The local tier's environment, by hardware class, as a systemd drop-in. |
 | `src/config.example.json` | Copy to `config.json`. |
 | `src/*.service.example` | systemd units for the adapter and the tunnel. |
