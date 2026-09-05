@@ -413,6 +413,48 @@ PHANTOMS = {
 }
 PHANTOM_MAX_S = float(os.environ.get("LQ_PHANTOM_MAX_S", "1.5"))
 
+# FRAGMENTS: the one or two function words whisper writes on a breath, a
+# rustle or a quiet room ("you", "and", "I") — never an answer to anything.
+# Dropped only when the audio is also weak: quiet next to the speaker's own
+# recent level, or seconds of audio for a single word. A real "yes", "no",
+# "stop", "go" is not in this set and always passes. (2026-09-05:
+# three fragments in a row at -13..-15 dBFS were each answered with "say that
+# again".)
+FILLERS = {
+    "i", "you", "and", "the", "a", "an", "of", "to", "in", "on", "it", "is",
+    "that", "this", "but", "or", "so", "oh", "ah", "eh", "uh", "um", "hmm", "mm",
+    "he", "she", "we", "they", "was", "for", "with", "me", "my", "at", "by", "be",
+    "the the", "and and", "you you", "i i",
+    # Russian
+    "и", "а", "я", "ты", "но", "в", "на", "не", "то", "это", "ну", "э", "м",
+    "вот", "так", "что", "как", "он", "она", "мы", "вы", "у", "с", "к", "по",
+    # German
+    "und", "ich", "der", "die", "das", "äh", "ähm", "also", "aber", "oder",
+    "es", "du", "wir", "sie", "zu", "mit", "ein", "eine",
+}
+# One word (or two) sitting on this much audio is noise narrated, not speech.
+FRAGMENT_MIN_S = float(os.environ.get("LQ_FRAGMENT_MIN_S", "2.5"))
+# Below this absolute peak a fragment is dropped whatever the recent level.
+FRAGMENT_QUIET_DBFS = float(os.environ.get("LQ_FRAGMENT_QUIET_DBFS", "-12"))
+# A fragment this far under the speaker's recent accepted peaks is "quiet".
+QUIET_BELOW_RECENT_DB = float(os.environ.get("LQ_QUIET_BELOW_RECENT_DB", "6"))
+
+
+def _tokens(text):
+    return [w for w in re.split(r"[\s.,!?;:\-—…\"'()]+", (text or "").lower()) if w]
+
+
+def quiet_for(peak, recent):
+    """True when `peak` sits QUIET_BELOW_RECENT_DB or more under the median
+    of the speaker's recent accepted peaks; False when there are fewer than
+    three of them (nothing to compare with)."""
+    pk = [p for p in (recent or []) if p is not None and p != float("-inf")]
+    if len(pk) < 3 or peak is None or peak == float("-inf"):
+        return False
+    pk.sort()
+    med = pk[len(pk) // 2]
+    return peak < med - QUIET_BELOW_RECENT_DB
+
 
 # ---- scripts: which alphabets a transcript is written in -------------------
 # A transcript in Cyrillic, kana or Hangul on a phone whose own recogniser is
@@ -487,7 +529,8 @@ def phantom_gate(text, seconds, prefiltered=None, peak=None):
     return False
 
 
-def hallucination_gate(text, seconds, prefiltered=None, peak=None, heard=None, phone_lang=None):
+def hallucination_gate(text, seconds, prefiltered=None, peak=None, heard=None, phone_lang=None,
+                       quiet=False):
     """Whisper's output on audio that held no words — the FULL rule (request
     from the app after the car-cabin session of 2026-09-05):
 
@@ -506,7 +549,15 @@ def hallucination_gate(text, seconds, prefiltered=None, peak=None, heard=None, p
     3. word density: a "sentence" of few words spread over many seconds
        (under 0.5 words a second across 8 s or more) is noise narrated, not
        speech — "I'm going to go ahead and get started" over 30 s is eight
-       words at 0.27 a second.
+       words at 0.27 a second;
+    4. a repeated word: one word three or more times and nothing else, when
+       it is a filler ("I. I. I. I. I. I."), or five or more times whatever
+       the word — the recogniser stuttering on noise. "no no no" passes;
+    5. a filler fragment: one or two FILLERS ("you", "and", "I") on weak
+       audio — `quiet` (under the speaker's recent level, see quiet_for),
+       or a peak under FRAGMENT_QUIET_DBFS, or FRAGMENT_MIN_S or more of
+       audio for that one word, or a phone that heard no words. A filler
+       at normal level on a short clip still passes.
 
     Returns the reason (a short string) when the transcript should be treated
     as no-speech, else "". Whisper's own no_speech_prob was measured at 0.0
@@ -531,6 +582,13 @@ def hallucination_gate(text, seconds, prefiltered=None, peak=None, heard=None, p
             return "phone heard no words"
     if secs >= 8.0 and words / secs < 0.5:
         return f"{words} words over {secs:.0f}s"
+    toks = _tokens(t)
+    if len(set(toks)) == 1 and (len(toks) >= 5 or (len(toks) >= 3 and toks[0] in FILLERS)):
+        return "repeated word"
+    if toks and len(toks) <= 2 and all(w in FILLERS for w in toks):
+        weak_peak = peak is not None and peak != float("-inf") and peak < FRAGMENT_QUIET_DBFS
+        if quiet or weak_peak or secs >= FRAGMENT_MIN_S or prefiltered is False:
+            return "filler fragment"
     return ""
 
 

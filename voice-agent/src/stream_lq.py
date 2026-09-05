@@ -569,6 +569,9 @@ class StreamSession:
         # utterance ends; the model turn and the voice go through this queue,
         # one at a time, in the order the sentences were spoken.
         self.answer_q = queue.Queue()
+        # Peaks of the utterances that were answered, newest last: the level
+        # a filler fragment is judged "quiet" against (lv.quiet_for).
+        self.levels = []
         self.answer_thread = None
 
     # ---- sending
@@ -786,7 +789,8 @@ class StreamSession:
         _why = user_text and lv.hallucination_gate(
             user_text, secs_in, ctrl.get("prefiltered"), peak,
             heard=(heard_code if heard_p >= 0.6 else None),
-            phone_lang=str(self.start.get("ui_lang") or "")[:2] or None)
+            phone_lang=str(self.start.get("ui_lang") or "")[:2] or None,
+            quiet=lv.quiet_for(peak, self.levels))
         if _why:
             self.log(f"phantom dropped ({_why}): {user_text!r} ({secs_in}s, peak {peak:.1f} dBFS, "
                      f"prefiltered={ctrl.get('prefiltered')})")
@@ -804,6 +808,7 @@ class StreamSession:
             except Exception as e:
                 self.log(f"posting the transcript failed: {e}")
         lv.remember_lang(self.account, lang)
+        self.levels = (self.levels + [peak])[-8:]
         if not self.lang:
             self.log(f"utterance {uid}: heard {heard_code or '?'} (p={heard_p:.2f}) -> speaking {lang}")
         self.answer_q.put((uid, user_text, secs_in, peak, ctrl, t0, t_stt, ts, lang))
