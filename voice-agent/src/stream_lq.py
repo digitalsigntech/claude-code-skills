@@ -418,10 +418,15 @@ class StreamSession:
             return
         t = c.get("type")
         if t == "utterance_start":
-            self.utt_id = str(c.get("id") or "")
+            self.utt_id = c.get("id")            # the phone's id, its own type
         elif t == "utterance_end":
             self.ending.set()
-            uid = str(c.get("id") or self.utt_id or f"u{self.utt_seq + 1}")
+            # THE ID IS ECHOED AS SENT — an int stays an int, a string a string
+            # — because the app matches frames to sentences by it, and a
+            # stringified 3 is not the 3 it is waiting for. Only when the phone
+            # sent none does the agent name the utterance itself ("u<n>").
+            uid = c.get("id") if c.get("id") is not None else (
+                self.utt_id if self.utt_id is not None else f"u{self.utt_seq + 1}")
             self.utt_seq += 1
             pcm = bytes(self.buf)
             self.buf = bytearray()
@@ -468,7 +473,8 @@ class StreamSession:
             if text and text != self.last_partial:
                 self.last_partial = text
                 self.partial_count += 1
-                self._agent({"type": "partial", "id": self.utt_id or f"u{self.utt_seq + 1}",
+                self._agent({"type": "partial",
+                             "id": self.utt_id if self.utt_id is not None else f"u{self.utt_seq + 1}",
                              "text": text})
 
     def _finish(self, uid, pcm, frames, ctrl):
