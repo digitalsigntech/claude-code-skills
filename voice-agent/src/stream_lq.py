@@ -120,6 +120,106 @@ def untangle(text):
     return " ".join(out)
 
 
+# SCRIPTS, for two checks whisper cannot do for itself (2026-09-05, 21:24 UTC:
+# an English sentence came back as "the,amel, Adam, little, 향, ٰس …" with
+# English at p=0.91, and was then SPOKEN in that non-language). A transcript
+# whose letters span several scripts is a garbled decode, not a sentence; and
+# the voice that reads an answer is chosen from the answer's own script, not
+# from a recogniser's guess about the question.
+import unicodedata as _ud
+
+
+def _script_of(ch):
+    o = ord(ch)
+    if 0x0400 <= o <= 0x052F:
+        return "cyrl"
+    if 0x3040 <= o <= 0x30FF:
+        return "kana"
+    if 0x4E00 <= o <= 0x9FFF or 0x3400 <= o <= 0x4DBF:
+        return "cjk"
+    if 0xAC00 <= o <= 0xD7AF or 0x1100 <= o <= 0x11FF:
+        return "hang"
+    if 0x0600 <= o <= 0x06FF or 0x0750 <= o <= 0x077F:
+        return "arab"
+    if 0x0590 <= o <= 0x05FF:
+        return "hebr"
+    if 0x0E00 <= o <= 0x0E7F:
+        return "thai"
+    if 0x0900 <= o <= 0x097F:
+        return "deva"
+    if 0x0370 <= o <= 0x03FF:
+        return "grek"
+    if ch.isalpha():
+        return "latn"
+    return None
+
+
+def scripts_in(text):
+    """{script: letter count} for the letters of `text`."""
+    out = {}
+    for ch in text or "":
+        sc = _script_of(ch)
+        if sc:
+            out[sc] = out.get(sc, 0) + 1
+    return out
+
+
+def mixed_scripts(text):
+    """True for whisper's salad, false for a person switching language.
+
+    "Now I'd like to see, если мы можем переключиться" is Latin and Cyrillic
+    in one breath and was answered correctly; "the,amel, Adam, 향, ٰس …" is
+    Latin with a stray Hangul letter, two Arabic ones and a replacement
+    character, and was garbage. So: a replacement character, THREE or more
+    scripts, or a minority script that is a few stray letters of a script
+    nobody in this roster speaks (Hangul, Arabic, Hebrew, Thai, Devanagari,
+    Greek) inside another script's sentence — any of those is garbled. Two
+    real scripts side by side, each with real words, is not."""
+    t = text or ""
+    if "\ufffd" in t:
+        return True
+    sc = scripts_in(t)
+    if "kana" in sc and "cjk" in sc:
+        sc["cjk"] = sc.pop("kana") + sc["cjk"]
+    if len(sc) >= 3:
+        return True
+    if len(sc) == 2:
+        top = max(sc, key=sc.get)
+        other = [k for k in sc if k != top][0]
+        if other in ("hang", "arab", "hebr", "thai", "deva", "grek") and sc[other] <= 6:
+            return True
+    return False
+
+
+LATIN_LANGS = {"en", "fr", "es", "de", "it", "pt", "pl", "sv", "nl", "tr"}
+
+
+def voice_lang_for(text, heard=None, heard_p=0.0, pinned=None, last=None, ui=None):
+    """The language a voice should read `text` in. Pinned wins. Otherwise the
+    text's own script decides the family, and within a family the best
+    witness: a confidently heard language, then the account's last, then the
+    app's language, then English. Never a language this install cannot speak."""
+    can = lv._voice_locales()
+    if pinned and pinned in can:
+        return pinned
+    sc = scripts_in(text)
+    if "kana" in sc and "cjk" in sc:
+        sc["cjk"] = sc.pop("kana") + sc["cjk"]
+    top = max(sc, key=sc.get) if sc else "latn"
+    family = {"cyrl": ("ru", "uk"), "cjk": ("zh", "ja"), "kana": ("ja",),
+              "latn": tuple(sorted(LATIN_LANGS))}.get(top, ())
+    if top == "kana" or ("kana" in scripts_in(text) and top == "cjk"):
+        family = ("ja", "zh")
+    witnesses = [(heard if heard_p >= 0.6 else None), last, ui, "en"]
+    for w in witnesses:
+        if w and w in family and w in can:
+            return w
+    for w in family:
+        if w in can:
+            return w
+    return last if last in can else "en"
+
+
 # whisper names its languages in English; the roster speaks in codes
 WHISPER_LANG = {"english": "en", "russian": "ru", "ukrainian": "uk", "german": "de",
                 "french": "fr", "spanish": "es", "italian": "it", "portuguese": "pt",
@@ -432,7 +532,8 @@ class _ChunkSpeaker:
             try:
                 say = lv._speakable(text) if text else ""
                 audio, secs, fmt, rate, who = (b"", 0.0, lv.REPLY_FORMAT, 0, "") if not say.strip() \
-                    else lv.speak(say, self.lang or "en", self.speaker)
+                    else lv.speak(say, voice_lang_for(say, pinned=self.s.lang or None,
+                                                      last=self.lang), self.speaker)
                 if not audio and not final:
                     continue
                 self.seq += 1
@@ -698,10 +799,12 @@ class StreamSession:
         # English). A pinned `lang` wins; otherwise the code the recogniser
         # decoded in, if this install can speak it; otherwise what this
         # account spoke last; otherwise English.
-        lang = self.lang or (heard_code if heard_code in lv._voice_locales() else "") \
-            or lv.recent_lang(self.account) or "en"
         user_text = untangle(lv.speech_text(heard))
         t_stt = time.time() - t0
+        if user_text and mixed_scripts(user_text):
+            self.log(f"garbled decode (mixed scripts, heard {heard_code or '?'} p={heard_p:.2f}): "
+                     f"{user_text[:60]!r} ({secs_in}s, peak {peak:.1f} dBFS)")
+            return self._no_speech(uid, secs_in, peak, "mixed scripts", heard=user_text)
         _why = user_text and lv.hallucination_gate(user_text, secs_in, ctrl.get("prefiltered"), peak)
         if _why:
             self.log(f"phantom dropped ({_why}): {user_text!r} ({secs_in}s, peak {peak:.1f} dBFS, "
@@ -709,6 +812,9 @@ class StreamSession:
             return self._no_speech(uid, secs_in, peak, _why, heard=user_text)
         if not user_text:
             return self._no_speech(uid, secs_in, peak, "no words", heard=heard)
+        lang = voice_lang_for(user_text, heard_code, heard_p, pinned=self.lang,
+                              last=lv.recent_lang(self.account),
+                              ui=str(self.start.get("ui_lang") or "")[:2] or None)
         ts = time.time()
         self._agent({"type": "final", "id": uid, "text": user_text})
         if self.on_transcript:
@@ -793,6 +899,7 @@ class StreamSession:
         else:
             if speaker:
                 self.log(f"stream {uid}: chunking fell back to the single blob")
+            lang = voice_lang_for(to_say, pinned=self.lang or None, last=lang)
             audio, secs_out, out_fmt, out_rate, spoke_by = lv.speak(to_say, lang, self.speaker)
             voice = {"format": out_fmt, "b64": base64.b64encode(audio).decode()}
         reply = {"type": "reply", "id": uid, "text": answer,
@@ -906,9 +1013,15 @@ def _selftest():
     def answer_fn(q, on_text=None):
         # The model, as the bridge delivers it: the full text so far on each
         # delta, a few words at a time, with a think before the first one.
-        full = (f"You asked: {q} The dock opens at two thirty. "
-                "The pallets go out on the afternoon truck, so be there by two. "
-                "I have put it on your list.")
+        if scripts_in(q).get("cyrl"):
+            # The model answers in the language it was asked in; the voice follows the answer.
+            full = (f"Вы спросили: {q} Док открывается в половине третьего. "
+                    "Паллеты уходят дневным грузовиком, так что будьте там к двум. "
+                    "Я добавил это в ваш список.")
+        else:
+            full = (f"You asked: {q} The dock opens at two thirty. "
+                    "The pallets go out on the afternoon truck, so be there by two. "
+                    "I have put it on your list.")
         time.sleep(2)
         if on_text:
             words = full.split(" ")
