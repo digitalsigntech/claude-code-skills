@@ -413,6 +413,37 @@ PHANTOMS = {
 }
 PHANTOM_MAX_S = float(os.environ.get("LQ_PHANTOM_MAX_S", "1.5"))
 
+# VIDEO OUTROS: what whisper writes on breath and room tone in a language
+# nobody in the room speaks — the closing line of a subtitled video, in the
+# languages its training data was subtitled in. Nobody says these to an
+# assistant, so they are no speech at ANY length or level (2026-09-05: a
+# 'ご視聴ありがとうございました' — "thank you for watching" in Japanese — passed
+# the gate at p=0.36 and was answered).
+OUTROS = {
+    "ご視聴ありがとうございました", "ご視聴ありがとうございます", "ご視聴ありがとう",
+    "最後までご視聴いただきありがとうございました", "チャンネル登録お願いします",
+    "字幕", "感谢观看", "谢谢观看", "谢谢大家", "请不吝点赞 订阅 转发 打赏支持明镜与点点栏目",
+    "시청해 주셔서 감사합니다", "시청해주셔서 감사합니다", "구독과 좋아요 부탁드립니다",
+    "спасибо за просмотр", "продолжение следует", "субтитры сделал dimatorzok",
+    "подписывайтесь на канал", "редактор субтитров а.семкин корректор а.егорова",
+    "vielen dank fürs zuschauen", "danke fürs zuschauen", "untertitelung des zdf",
+    "untertitel im auftrag des zdf", "untertitelung aufgrund der schwierigkeit",
+    "merci d'avoir regardé", "sous-titres réalisés par la communauté d'amara.org",
+    "sous-titrage société radio-canada", "gracias por ver el video", "gracias por ver",
+    "subtítulos realizados por la comunidad de amara.org", "obrigado por assistir",
+    "legendas pela comunidade amara.org", "grazie per aver guardato", "sottotitoli creati dalla comunità amara.org",
+    "thanks for watching", "thank you for watching", "subtitles by the amara.org community",
+}
+
+
+def is_outro(text):
+    t = " ".join((text or "").lower().split()).strip(" .,!?-—…\"'()[]")
+    if not t:
+        return False
+    if t in OUTROS or "amara.org" in t:
+        return True
+    return any(o in t for o in OUTROS if len(o) >= 12)
+
 # FRAGMENTS: the one or two function words whisper writes on a breath, a
 # rustle or a quiet room ("you", "and", "I") — never an answer to anything.
 # Dropped only when the audio is also weak: quiet next to the speaker's own
@@ -553,6 +584,10 @@ def hallucination_gate(text, seconds, prefiltered=None, peak=None, heard=None, p
     4. a repeated word: one word three or more times and nothing else, when
        it is a filler ("I. I. I. I. I. I."), or five or more times whatever
        the word — the recogniser stuttering on noise. "no no no" passes;
+    6. a video outro (OUTROS): the closing line of a subtitled video in any
+       language — "ご視聴ありがとうございました", "Спасибо за просмотр",
+       "Sous-titres réalisés par la communauté d'Amara.org" — at any length
+       or level;
     5. a filler fragment: one or two FILLERS ("you", "and", "I") on weak
        audio — `quiet` (under the speaker's recent level, see quiet_for),
        or a peak under FRAGMENT_QUIET_DBFS, or FRAGMENT_MIN_S or more of
@@ -568,6 +603,8 @@ def hallucination_gate(text, seconds, prefiltered=None, peak=None, heard=None, p
         return ""
     words = len(t.split())
     secs = float(seconds or 0)
+    if is_outro(t):
+        return "video outro"
     if phantom_gate(t, secs, prefiltered, peak):
         return "stock phrase"
     tl = t.lower().strip(" .,!?-—…\"'")
