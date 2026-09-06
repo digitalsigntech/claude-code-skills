@@ -440,13 +440,19 @@ OUTROS = {
 }
 
 
+# These match only a WHOLE transcript: "please subscribe me to the newsletter"
+# is a request, not an outro.
+OUTRO_WHOLE_ONLY = {"please subscribe", "like and subscribe", "please like and subscribe",
+                    "subscribe to my channel"}
+
+
 def is_outro(text):
     t = " ".join((text or "").lower().split()).strip(" .,!?-—…\"'()[]")
     if not t:
         return False
     if t in OUTROS or "amara.org" in t:
         return True
-    return any(o in t for o in OUTROS if len(o) >= 12)
+    return any(o in t for o in OUTROS if len(o) >= 12 and o not in OUTRO_WHOLE_ONLY)
 
 # FRAGMENTS: the one or two function words whisper writes on a breath, a
 # rustle or a quiet room ("you", "and", "I") — never an answer to anything.
