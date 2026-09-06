@@ -829,7 +829,8 @@ class StreamSession:
             user_text, secs_in, ctrl.get("prefiltered"), peak,
             heard=(heard_code if heard_p >= 0.6 else None),
             phone_lang=str(self.start.get("ui_lang") or "")[:2] or None,
-            quiet=lv.quiet_for(peak, self.levels))
+            quiet=lv.quiet_for(peak, self.levels),
+            known_langs=(self.lang, lv.recent_lang(self.account)))
         if _why:
             self.log(f"phantom dropped ({_why}): {user_text!r} ({secs_in}s, peak {peak:.1f} dBFS, "
                      f"prefiltered={ctrl.get('prefiltered')})")

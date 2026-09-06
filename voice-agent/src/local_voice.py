@@ -446,6 +446,37 @@ OUTRO_WHOLE_ONLY = {"please subscribe", "like and subscribe", "please like and s
                     "subscribe to my channel"}
 
 
+# Which script a language is written in — for the stray-script rule below.
+_LANG_SCRIPT = {"ja": "kana", "zh": "cjk", "ko": "hang", "ar": "arab", "fa": "arab", "ur": "arab",
+                "he": "hebr", "th": "thai", "hi": "deva", "mr": "deva", "ne": "deva", "el": "grek",
+                "ru": "cyrl", "uk": "cyrl", "bg": "cyrl", "sr": "cyrl", "be": "cyrl", "kk": "cyrl"}
+
+
+def stray_script(text, known_langs=()):
+    """True when a one- or two-word transcript is written in a script that none
+    of `known_langs` (the phone's language, what the account spoke lately)
+    uses — "はい" on a phone that speaks English and Russian is the recogniser
+    naming a breath in Japanese, not a word anybody said (2026-09-05). A
+    Cyrillic "да" on an English phone whose owner spoke Russian passes."""
+    t = " ".join((text or "").split())
+    if not t or len(t.split()) > 2:
+        return False
+    sc = top_script(t)
+    if sc == "latn":
+        return False
+    if sc == "kana":
+        sc_ok = {"kana", "cjk"}
+    else:
+        sc_ok = {sc}
+    for code in known_langs or ():
+        c = (code or "").strip().lower()[:2]
+        if c and _LANG_SCRIPT.get(c) in sc_ok:
+            return False
+        if c == "ja" and sc in ("kana", "cjk"):
+            return False
+    return True
+
+
 def is_outro(text):
     t = " ".join((text or "").lower().split()).strip(" .,!?-—…\"'()[]")
     if not t:
@@ -571,7 +602,7 @@ def phantom_gate(text, seconds, prefiltered=None, peak=None):
 
 
 def hallucination_gate(text, seconds, prefiltered=None, peak=None, heard=None, phone_lang=None,
-                       quiet=False):
+                       quiet=False, known_langs=()):
     """Whisper's output on audio that held no words — the FULL rule (request
     from the app after the car-cabin session of 2026-09-05):
 
@@ -598,6 +629,9 @@ def hallucination_gate(text, seconds, prefiltered=None, peak=None, heard=None, p
        language — "ご視聴ありがとうございました", "Спасибо за просмотр",
        "Sous-titres réalisés par la communauté d'Amara.org" — at any length
        or level;
+    7. a stray script: one or two words in an alphabet that neither the
+       phone's language nor the account's recent languages use ("はい" on
+       an English/Russian account) — stray_script;
     5. a filler fragment: one or two FILLERS ("you", "and", "I") on weak
        audio — `quiet` (under the speaker's recent level, see quiet_for),
        or a peak under FRAGMENT_QUIET_DBFS, or FRAGMENT_MIN_S or more of
@@ -615,6 +649,8 @@ def hallucination_gate(text, seconds, prefiltered=None, peak=None, heard=None, p
     secs = float(seconds or 0)
     if is_outro(t):
         return "video outro"
+    if stray_script(t, tuple(known_langs or ()) + ((phone_lang,) if phone_lang else ())):
+        return "stray script"
     if phantom_gate(t, secs, prefiltered, peak):
         return "stock phrase"
     tl = t.lower().strip(" .,!?-—…\"'")
@@ -1757,7 +1793,8 @@ def _run_turn(payload, answer_fn, on_transcript, account, key, raw_audio):
     else:
         _why = user_text and hallucination_gate(
             user_text, secs_in, (payload or {}).get("prefiltered"), peak,
-            heard=heard_lang, phone_lang=(lang or (payload or {}).get("ui_lang") or None))
+            heard=heard_lang, phone_lang=(lang or (payload or {}).get("ui_lang") or None),
+            known_langs=(recent_lang(account),))
     if _why:
         print(f"[lq] phantom dropped ({_why}): {user_text!r} ({secs_in:.1f}s, "
               f"peak {peak:.1f} dBFS, prefiltered="
