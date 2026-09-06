@@ -433,6 +433,10 @@ OUTROS = {
     "subtítulos realizados por la comunidad de amara.org", "obrigado por assistir",
     "legendas pela comunidade amara.org", "grazie per aver guardato", "sottotitoli creati dalla comunità amara.org",
     "thanks for watching", "thank you for watching", "subtitles by the amara.org community",
+    # The whole transcript being ONLY one of these is no speech at any length
+    # or level too (build 358, 2026-09-06): the outro nobody says to an assistant.
+    "thank you", "thanks", "please subscribe", "like and subscribe", "please like and subscribe",
+    "subscribe to my channel", "altyazı m.k", "altyazı", "altyazı m. k",
 }
 
 
