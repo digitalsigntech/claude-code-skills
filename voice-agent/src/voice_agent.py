@@ -483,7 +483,7 @@ def _looks_like_envelope(text):
 
 
 def archive(text, direction, sender, account_name="", mirror=True,
-            kind="text", ts=None):
+            kind="text", ts=None, turn_id=None):
     # `kind` and `ts` exist for LQ (#396). A transcribed line and a typed one
     # read identically once they are rows, and later — deciding what to re-run,
     # what to trust, what to show — the difference matters: one was heard by a
@@ -534,7 +534,10 @@ def archive(text, direction, sender, account_name="", mirror=True,
                           # bare `except` below and the row would simply never
                           # be written, silently, which is the exact failure
                           # this project keeps paying for.
-                          **({"epoch": ts} if ts else {}))
+                          **({"epoch": ts} if ts else {}),
+                          # Request 497: the turn's identity, in the column the
+                          # archive already has and no voice row used.
+                          **({"session_id": f"turn:{turn_id}"} if turn_id else {}))
             except Exception:
                 pass
     # A guest's words go nowhere near the owner's Telegram.
@@ -721,6 +724,30 @@ _MARKER = re.compile(r"^\[(camera photo|camera photos|file): ([^\]]+)\]\s*(.*)$"
                      re.S)
 
 
+def archive_tag(text, turn_id, within_s=180):
+    """Stamp the turn id on the newest untagged archive row with exactly this
+    text (request 497): ask() archives the answer before the id can travel
+    with it. Best-effort."""
+    d = archive_dir()
+    if not d or not text or not turn_id:
+        return False
+    try:
+        import sqlite3
+        cx = sqlite3.connect(str(d / "chat.db"), timeout=3)
+        cur = cx.execute(
+            "UPDATE messages SET session_id=? WHERE id=(SELECT id FROM messages "
+            "WHERE chat_id=? AND text=? AND epoch>? AND session_id IS NULL "
+            "ORDER BY id DESC LIMIT 1)",
+            (f"turn:{turn_id}", archive_chat_id(), text, time.time() - within_s))
+        cx.commit()
+        n = cur.rowcount
+        cx.close()
+        return n == 1
+    except Exception as e:
+        print(f"[voice-agent] archive turn tag skipped: {e}", file=sys.stderr)
+        return False
+
+
 def archive_amend(old_text, new_text, within_s=180):
     """Rewrite the newest archive row in this caller's chat whose text is
     exactly `old_text` (written seconds ago) to `new_text`. Best-effort.
@@ -893,7 +920,7 @@ def _archive_history(limit, since):
         cx = sqlite3.connect(f"file:{d / 'chat.db'}?mode=ro", uri=True, timeout=3)
         if is_guest():
             rows = cx.execute(
-                "SELECT epoch, sender, text, direction FROM messages "
+                "SELECT epoch, sender, text, direction, session_id FROM messages "
                 "WHERE epoch > ? AND chat_id = ? ORDER BY epoch DESC LIMIT ?",
                 (since, guest_chat_id(), limit)).fetchall()
         else:
@@ -908,7 +935,7 @@ def _archive_history(limit, since):
             # Telegram chat id never reaches there. So the boundary is derived
             # from the code that mints them rather than from a list to maintain.
             rows = cx.execute(
-                "SELECT epoch, sender, text, direction FROM messages "
+                "SELECT epoch, sender, text, direction, session_id FROM messages "
                 "WHERE epoch > ? AND chat_id > ? ORDER BY epoch DESC LIMIT ?",
                 (since, GUEST_CHAT_FLOOR, limit)).fetchall()
         cx.close()
@@ -929,7 +956,7 @@ def _archive_history(limit, since):
     except Exception:
         state = {}
     msgs = []
-    for ep, sender, text, direction in reversed(rows):
+    for ep, sender, text, direction, _sid in reversed(rows):
         if not isinstance(ep, (int, float)) or ep <= 0 or not text:
             continue
         # Direction is the authoritative field: keying on the sender's name puts
@@ -948,6 +975,8 @@ def _archive_history(limit, since):
              "ts": float(ep)}
         if float(ep) in state:
             m["mirrored"] = state[float(ep)]
+        if str(_sid or "").startswith("turn:"):
+            m["turn_id"] = str(_sid)[5:]          # request 497
         # A row that names files carries their tokens, so a restored chat shows
         # the picture instead of the words "[camera photo: …]". Same fields the
         # box sends: `token` flat for one file, `tokens` for an album.
@@ -2634,17 +2663,20 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("no device key for this account")
             return e2ee_open(env, priv, mine, theirs, direction=DIR_TO_AGENT)
 
-        def on_transcript(text, ts):
+        def on_transcript(text, ts, turn_id=None):
             try:
-                archive(text, "in", sender=person_name(name), kind="voice_transcript", ts=ts)
+                archive(text, "in", sender=person_name(name), kind="voice_transcript", ts=ts,
+                        turn_id=turn_id)
             except Exception as e:
                 self.log_message("stream transcript not archived: %.80s", e)
 
-        def answer_fn(text):
+        def answer_fn(text, turn_id=None):
             self.log_message("stream ask from %s: %.60s", name or account, text)
             res = ask(account, text, name, archive_question=False,
                       context=time_context(tz) + VOICE_CONTEXT)
-            return str(res.get("answer") or "")
+            ans = str(res.get("answer") or "")
+            archive_tag(ans, turn_id)          # request 497: ask() archived it without the id
+            return ans
 
         sess = stream_lq.StreamSession(ws, open_envelope, answer_fn, account=account,
                                        on_transcript=on_transcript,
@@ -2784,6 +2816,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             keep = d.get("archive") is not False
 
+            # Request 497: the clip's turn id is the app's own request id when
+            # it sends one, else minted here; on both rows and in the reply.
+            turn_id = str(d.get("task_id") or d.get("turn_id") or "")[:64] or ("ask-" + os.urandom(6).hex())
+
             def on_transcript(text, ts):
                 # HIS WORDS GO UP THE MOMENT THEY EXIST, before the model is
                 # asked anything — the answer can take seconds and a screen
@@ -2793,7 +2829,7 @@ class Handler(BaseHTTPRequestHandler):
                 # carries a typed one.
                 if keep:
                     archive(text, "in", sender=person_name(name),
-                            kind="voice_transcript", ts=ts)
+                            kind="voice_transcript", ts=ts, turn_id=turn_id)
 
             def answer_fn(text):
                 self.log_message("voice ask from %s: %.60s",
@@ -2806,7 +2842,10 @@ class Handler(BaseHTTPRequestHandler):
                 res = ask(account, text, name, archive_question=False,
                           archive_turn=keep,
                           context=time_context(d.get("tz")) + VOICE_CONTEXT)
-                return str(res.get("answer") or "")
+                ans = str(res.get("answer") or "")
+                if keep:
+                    archive_tag(ans, turn_id)   # request 497
+                return ans
 
             # The phone's endpointer verdict rides beside the envelope; the
             # phantom gate in the turn wants it (a "Thank you" the phone did
@@ -2879,6 +2918,7 @@ class Handler(BaseHTTPRequestHandler):
                  and out["peak_dbfs"] < -40) else ""))
         LAST_APP_TURN[account] = time.time()
         body = json.dumps({"text": out["text"], "user_text": out["user_text"],
+                           "turn_id": turn_id,              # request 497
                            # Present only when the answer's body belongs on the
                            # screen rather than in the ear; the app mutes the
                            # karaoke when it differs from `text`.
@@ -3064,22 +3104,28 @@ class Handler(BaseHTTPRequestHandler):
                         if not isinstance(row, dict) or "text" not in row:
                             continue
                         _paths = row.pop("_paths", None)
+                        _meta = {}
                         if _paths and config().get("e2ee_attachments"):
-                            _meta = json.dumps({
+                            _meta.update({
                                 "caption": "",
                                 "filename": row.get("filename", ""),
                                 "attachments": [
                                     sealed_ref(p) for p in _paths
                                     if os.path.exists(p) and
                                     os.path.getsize(p) <= SEALED_BLOB_MAX]})
-                            row["meta_sealed"] = (
-                                seal_for_devices(_meta, account=account)
-                                or e2ee_seal(_meta, priv, mine, theirs,
-                                             direction=DIR_TO_PHONE))
                             # The name lives inside the seal now (build 343
                             # reads meta_sealed.filename first); the clear
                             # copy stays only on rows that carry no seal.
                             row.pop("filename", None)
+                        # request 497: the identity travels inside the seal
+                        if row.get("turn_id"):
+                            _meta["turn_id"] = row.pop("turn_id")
+                        if _meta:
+                            _m = json.dumps(_meta)
+                            row["meta_sealed"] = (
+                                seal_for_devices(_m, account=account)
+                                or e2ee_seal(_m, priv, mine, theirs,
+                                             direction=DIR_TO_PHONE))
                         row["sealed"] = (
                             seal_for_devices(str(row.get("text") or ""),
                                              account=account)

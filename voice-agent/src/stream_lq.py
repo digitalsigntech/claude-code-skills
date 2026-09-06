@@ -538,7 +538,7 @@ class _ChunkSpeaker:
                 if self.interrupted:            # the phone moved on while this was synthesised
                     return
                 self.seq += 1
-                frame = {"type": "reply_chunk", "id": self.uid, "seq": self.seq,
+                frame = {"type": "reply_chunk", "id": self.uid, "turn_id": self.s.turn_id(self.uid), "seq": self.seq,
                          "final": bool(final), "text": text,
                          "voice": {"format": fmt, "b64": base64.b64encode(audio).decode()},
                          "audio_seconds_out": round(secs, 3)}
@@ -571,6 +571,14 @@ class StreamSession:
         self.ws = ws
         self.open_envelope = open_envelope
         self.answer_fn = answer_fn
+        # Request 497 (2026-09-06): ONE IDENTITY FOR ONE TURN. The phone's
+        # utterance id restarts with every stream, so the turn id is the
+        # stream's own tag plus the utterance id — the same string on the
+        # final, the chunks, the reply, and the archive rows the agent writes
+        # for that turn, so the app can pair a voiced line with its history
+        # row by identity rather than by text (the texts differ: the archive
+        # keeps paragraph breaks, the chunks are sentences).
+        self.sid = uuid.uuid4().hex[:8]
         self.account = account
         self.on_transcript = on_transcript
         self.log = log or (lambda *a: print("[stream]", *a, file=sys.stderr))
@@ -780,13 +788,27 @@ class StreamSession:
                              "id": self.utt_id if self.utt_id is not None else f"u{self.utt_seq + 1}",
                              "text": text})
 
+    def turn_id(self, uid):
+        return f"{self.sid}:{uid}"
+
+    @staticmethod
+    def _kw(fn, **kw):
+        """Only the keywords `fn` accepts — an older callback keeps working."""
+        try:
+            params = inspect.signature(fn).parameters
+        except (TypeError, ValueError):
+            return {}
+        if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()):
+            return kw
+        return {k: v for k, v in kw.items() if k in params}
+
     def _no_speech(self, uid, secs_in, peak, reason, heard=""):
         """Every no-speech says why (2026-09-05: utterance 4 of a stream
         vanished from the phone with no line here to explain it)."""
         self.log(f"no speech ({reason}): utterance {uid}, {secs_in}s, peak "
                  f"{'-inf' if peak == float('-inf') else round(peak, 1)} dBFS"
                  + (f", heard {heard[:40]!r}" if heard else ""))
-        self._agent({"type": "no_speech", "id": uid,
+        self._agent({"type": "no_speech", "id": uid, "turn_id": self.turn_id(uid),
                      "peak_dbfs": None if peak == float("-inf") else round(peak, 1),
                      **({"heard_marker": heard[:40]} if heard else {})},
                     meter={"id": uid, "audio_seconds": secs_in,
@@ -841,10 +863,10 @@ class StreamSession:
                               last=lv.recent_lang(self.account),
                               ui=str(self.start.get("ui_lang") or "")[:2] or None)
         ts = time.time()
-        self._agent({"type": "final", "id": uid, "text": user_text})
+        self._agent({"type": "final", "id": uid, "turn_id": self.turn_id(uid), "text": user_text})
         if self.on_transcript:
             try:
-                self.on_transcript(user_text, ts)
+                self.on_transcript(user_text, ts, **self._kw(self.on_transcript, turn_id=self.turn_id(uid)))
             except Exception as e:
                 self.log(f"posting the transcript failed: {e}")
         lv.remember_lang(self.account, lang)
@@ -886,15 +908,19 @@ class StreamSession:
             if takes_on_text:
                 speaker = _ChunkSpeaker(self, uid, lang, self.speaker, t0)
                 self.speaking[str(uid)] = speaker
-            else:
-                self.log("reply_stream requested but the answer path has no on_text — single blob")
+            # An answer path without on_text (the skill agent's ask() returns
+            # the whole text at once) is chunked AFTER the model returns: the
+            # first sentence is synthesised and sent while the rest is still
+            # being made — on a CPU install that is the difference between the
+            # first sound at 1.5 s and at 7 s (request 495, measured on the second install).
 
         def _think():
             try:
                 if speaker:
-                    box["answer"] = str(self.answer_fn(user_text, on_text=speaker.feed) or "")
+                    box["answer"] = str(self.answer_fn(user_text, on_text=speaker.feed,
+                                                       **self._kw(self.answer_fn, turn_id=self.turn_id(uid))) or "")
                 else:
-                    box["answer"] = str(self.answer_fn(user_text) or "")
+                    box["answer"] = str(self.answer_fn(user_text, **self._kw(self.answer_fn, turn_id=self.turn_id(uid))) or "")
             except Exception as e:                                 # noqa: BLE001
                 box["error"] = e
 
@@ -915,6 +941,10 @@ class StreamSession:
         answer, speak_all = lv.read_in_full(answer)
         t1 = time.time()
         spoken_line = "" if speak_all else lv.speech_for(answer or "")
+        if self.reply_stream and speaker is None and not spoken_line and (answer or "").strip():
+            speaker = _ChunkSpeaker(self, uid, lang, self.speaker, t0)
+            self.speaking[str(uid)] = speaker
+            speaker.feed(answer)               # every sentence at once; spoken one by one
         to_say = lv._speakable(spoken_line or answer or "")
         if not to_say.strip():
             to_say = "I do not have an answer for that."
@@ -930,7 +960,7 @@ class StreamSession:
             lang = voice_lang_for(to_say, pinned=self.lang or None, last=lang)
             audio, secs_out, out_fmt, out_rate, spoke_by = lv.speak(to_say, lang, self.speaker)
             voice = {"format": out_fmt, "b64": base64.b64encode(audio).decode()}
-        reply = {"type": "reply", "id": uid, "text": answer,
+        reply = {"type": "reply", "id": uid, "turn_id": self.turn_id(uid), "text": answer,
                  **({"speech": spoken_line} if spoken_line else {}),
                  "user_text": user_text,
                  "lang": lang,
@@ -1044,6 +1074,8 @@ def _selftest():
     def answer_fn(q, on_text=None):
         # The model, as the bridge delivers it: the full text so far on each
         # delta, a few words at a time, with a think before the first one.
+        # LQ_SELFTEST_NO_ON_TEXT=1 makes it the skill agent's shape instead:
+        # the whole answer at once, nothing in between.
         if scripts_in(q).get("cyrl"):
             # The model answers in the language it was asked in; the voice follows the answer.
             full = (f"Вы спросили: {q} Док открывается в половине третьего. "
@@ -1053,7 +1085,7 @@ def _selftest():
             full = (f"You asked: {q} The dock opens at two thirty. "
                     "The pallets go out on the afternoon truck, so be there by two. "
                     "I have put it on your list.")
-        time.sleep(2)
+        time.sleep(4)          # long enough that the second sentence is decoded before this answer ends
         if on_text:
             words = full.split(" ")
             for i in range(1, len(words) + 1):
@@ -1062,6 +1094,10 @@ def _selftest():
         return full
 
     start["reply_stream"] = True
+    if os.environ.get("LQ_SELFTEST_NO_ON_TEXT"):
+        _full_fn = answer_fn
+        answer_fn = lambda q: _full_fn(q)      # noqa: E731 — the skill agent's shape: no on_text at all
+
     sess = StreamSession(ws, lambda env: json.dumps(start), answer_fn,
                          account="selftest", on_transcript=lambda t, ts: print("  transcript:", t))
     t0 = time.time()
@@ -1071,6 +1107,7 @@ def _selftest():
         print("  session ended:", type(e).__name__, e)
     # decode what the "phone" got
     seen = []
+    stamps = []
     for kind, item in ws.sent:
         if kind == "text":
             meta = json.loads(item)
@@ -1078,10 +1115,12 @@ def _selftest():
             k, nonce, payload = open_frame(key, frame)
             obj = json.loads(payload)
             seen.append((obj["type"], {kk: meta[kk] for kk in meta if kk != "frame"}, obj))
+            stamps.append(round(time.time() - t0, 2))
         else:
             k, nonce, payload = open_frame(key, item)
             obj = json.loads(payload)
             seen.append((obj["type"], None, obj))
+            stamps.append(round(time.time() - t0, 2))
     print(f"  frames from agent: {[s[0] for s in seen]}")
     for t, meter, obj in seen:
         if t == "partial":
@@ -1099,6 +1138,7 @@ def _selftest():
     kinds = [s[0] for s in seen]
     order = [(s[0], s[2].get("id")) for s in seen if s[0] in ("final", "reply")]
     print(f"  order of finals and replies: {order}")
+    print("  timeline:", [(k, o.get("id"), st) for (k, _m, o), st in zip(seen, stamps) if k in ("final", "reply", "reply_chunk", "partial")][:16])
     # With the resident recogniser the second sentence is transcribed before
     # the first reply (the #586 split). A CPU install decodes serially at the
     # clip path's speed, so there only the ORDER of the replies is promised.
@@ -1126,7 +1166,11 @@ def _selftest():
     print(f"  streamed: {len(chunks)} chunk(s), first audio at "
           f"{(last[-1].get('streamed') or {}).get('first_audio_s') if last else None}s "
           f"after the utterance end -> {'ok' if stream_ok else 'FAIL'}")
-    ok = (greet_ok and stream_ok and in_order and lang_ok and kinds.count("reply") >= 3
+    # request 497: every frame of a turn carries the same turn id, ending in the utterance id
+    tids = [(o.get("id"), o.get("turn_id")) for k, _m, o in seen if k in ("final", "reply", "reply_chunk") and o.get("id") != 0]
+    tid_ok = bool(tids) and all(t and str(t).endswith(f":{i}") for i, t in tids) and len({t.split(":")[0] for _i, t in tids}) == 1
+    print(f"  turn ids on final/reply/reply_chunk: {tid_ok} -> {sorted({t for _i, t in tids})}")
+    ok = (greet_ok and stream_ok and in_order and lang_ok and tid_ok and kinds.count("reply") >= 3
           and (any(s[0] == "partial" for s in seen) or not sess.partials)
           and (not any(s[0] == "partial" for s in seen) or sess.partials))
     print("SELFTEST", "OK" if ok else "FAILED")
