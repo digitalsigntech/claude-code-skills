@@ -629,6 +629,9 @@ def hallucination_gate(text, seconds, prefiltered=None, peak=None, heard=None, p
        language — "ご視聴ありがとうございました", "Спасибо за просмотр",
        "Sous-titres réalisés par la communauté d'Amara.org" — at any length
        or level;
+    8. a filler run: three or more tokens that are all FILLERS ("in a, a,
+       a, a"), or one token five or more times making up most of a longer
+       transcript ("no a a a a a a");
     7. a stray script: one or two words in an alphabet that neither the
        phone's language nor the account's recent languages use ("はい" on
        an English/Russian account) — stray_script;
@@ -667,6 +670,13 @@ def hallucination_gate(text, seconds, prefiltered=None, peak=None, heard=None, p
         return f"{words} words over {secs:.0f}s"
     toks = _tokens(t)
     if len(set(toks)) == 1 and (len(toks) >= 5 or (len(toks) >= 3 and toks[0] in FILLERS)):
+        return "repeated word"
+    # "in a, a, a, a, a, a, a, a" (2026-09-06): three or more tokens that are
+    # ALL fillers is the same stutter with one extra word in it.
+    if len(toks) >= 3 and all(w in FILLERS for w in toks):
+        return "filler run"
+    # One token making up most of a longer transcript, five or more times.
+    if len(toks) >= 5 and max(toks.count(w) for w in set(toks)) >= max(5, 0.7 * len(toks)):
         return "repeated word"
     if toks and len(toks) <= 2 and all(w in FILLERS for w in toks):
         weak_peak = peak is not None and peak != float("-inf") and peak < FRAGMENT_QUIET_DBFS
