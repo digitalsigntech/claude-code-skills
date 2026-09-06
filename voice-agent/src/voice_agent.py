@@ -3569,6 +3569,13 @@ LAST_APP_TURN = {}
 APP_TURN_QUIET_S = 120
 
 
+_ATT_MARKER = re.compile(r"^\s*\[(?:sent file|file|camera photos?|took a camera photo)[^\]]*\]\s*")
+
+
+def _strip_marker(text):
+    return _ATT_MARKER.sub("", str(text or "")).strip()
+
+
 def _notify_plane(account, kind=NOTIFY_KIND, **extra):
     """Ask the plane to nudge this account's phones. Authenticated with this
     agent's own secret, which the plane scopes to this account alone."""
@@ -3617,7 +3624,11 @@ def _message_watcher():
         newest = max(r[0] for r in rows)
         # The app's own voice lines are already on his screen; announcing them
         # would be the notification equivalent of the duplicate bubble.
-        worth = [r for r in rows if (r[1] or "") != "voice"]
+        # Never a voice turn (the app's own bubbles) and never a fired reminder
+        # or scheduled-task result: fire_reminders pushes those itself, with the
+        # picture (request 493, 2026-09-06 — one firing, two pushes).
+        worth = [r for r in rows if (r[1] or "") != "voice"
+                 and not _strip_marker(r[3]).startswith("⏰")]
         last = newest
         st = load(STATE, {})
         st["notify_seen_epoch"] = newest
@@ -3638,8 +3649,9 @@ def _message_watcher():
             # the conversation living in Apple's queue.
             env = None
             try:
-                newest_text = str((worth[-1][3] if len(worth[-1]) > 3
-                                   else "") or "")
+                # The words without the attachment marker: a banner never
+                # reads "[camera photo: 20260816-095110.jpg]".
+                newest_text = _strip_marker(worth[-1][3] if len(worth[-1]) > 3 else "")
                 env = push_preview_envelope(acct, newest_text)
             except Exception as e:
                 print(f"[voice-agent] preview seal failed for {acct}: {e}",
