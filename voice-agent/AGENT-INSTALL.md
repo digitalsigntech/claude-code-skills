@@ -431,6 +431,21 @@ under the stream key; the agent answers with kind 3 under its own nonce prefix. 
 partial_every_ms, max_utterance_s}` before any audio, `partial {id,text}`, `final {id,text}`,
 `reply {…as a clip reply…, audio_seconds, audio_seconds_out}`, `no_speech {id}`, `error`. `prefiltered: false` means the phone's own recogniser heard no words; the agent then keeps the transcript only if it is plausible speech (0.8–4 words/s, peak above −24 dBFS, not a stock phrase) of at least six words — or three when the transcript is in a script or language the phone's recogniser does not read (Cyrillic on an English phone), because that phone hears no words in it by construction. A transcript mixing scripts is treated as no speech. A FRAGMENT — one or two function words ("you", "and", "I"; `FILLERS` in local_voice.py) — is no speech when the audio is weak: quiet next to the speaker's recent accepted peaks (6 dB under their median, `quiet_for`), under −12 dBFS, 2.5 s or more of audio for that word, or `prefiltered: false`; a filler at normal level on a short clip still passes, and "yes"/"no"/"stop"/"go" are never fillers. The closing line of a subtitled video in any language ("ご視聴ありがとうございました", "Спасибо за просмотр", anything naming amara.org; `OUTROS`) is no speech at any length or level. One or two words in an alphabet that neither the phone's language nor the account's recent languages use ("はい" on an English/Russian account; `stray_script`) are no speech. One word repeated and nothing else (a filler three times, any word five times), three or more tokens that are all fillers ("in a, a, a, a"), or one token five or more times making up most of a longer transcript, is the recogniser stuttering on noise and is dropped; "no no no" passes.
 
+**One turn, one id (request 497, 2026-09-06).** Every `final`, `reply_chunk`, `reply` and
+`no_speech` frame carries `turn_id` — `<stream tag>:<utterance id>`, the same string for the whole
+turn — and the agent stamps the same id on BOTH archive rows of that turn (the transcript and the
+answer; `session_id = "turn:<id>"` in the archive), so history rows come back with
+`meta_sealed.turn_id` (or a clear `turn_id` on an unsealed account). A clip turn's id is the
+app's own `task_id` when it sends one, else minted (`ask-…`), and travels in the sealed reply as
+`turn_id`. The app pairs a voiced line with its history row by identity, never by text: the two
+texts legitimately differ (the archive keeps the paragraph breaks, the chunks are sentences).
+
+**An answer path without `on_text` still streams the reply.** The skill's `ask()` returns the
+whole answer at once; the session then feeds it to the chunk speaker after the model returns, so
+the first sentence is synthesised and sent while the rest is still being made — on a two-core CPU
+install the first sound arrives ~1.5 s after the model instead of after the whole synthesis.
+`LQ_SELFTEST_NO_ON_TEXT=1 python3 src/stream_lq.py --selftest` proves that shape.
+
 **The plane is opaque to words, not to seconds.** A metered agent frame (reply, no_speech)
 travels to the plane as JSON text `{"frame": <base64>, "id", "audio_seconds",
 "audio_seconds_out"}`; the plane bills the clear fields exactly as it bills a clip and forwards
