@@ -390,7 +390,7 @@ Below `LQ_DETECT_MIN_P` (0.85) the detector is not believed and the turn falls b
 two-pass `auto` — slower and correct. No `ggml-base.bin`, same fallback. Nothing breaks by skipping
 this; turns in an unknown language just cost four seconds more.
 
-## Real-time streaming (2026-09-05) — GPU installs only, declared by proof
+## Real-time streaming (2026-09-05; split 2026-09-06) — the socket for every install, live partials for GPU installs, both declared by proof
 
 Local quality sends one sealed clip per sentence. Streaming sends the sentence AS IT IS
 SPOKEN: the phone streams 100 ms frames of PCM16/16 kHz over one WebSocket per session, a
@@ -399,10 +399,19 @@ the screen, decodes it once more with full context when the person pauses, and t
 the ordinary one — the same answer path, the same spoken cap, the same synthesiser — delivered
 as a `reply` shaped exactly like a clip reply.
 
-**The gate is a fact.** The local row says `"stream": true` only when the recogniser binary
-reports a GPU backend (`ggml_vulkan`, CUDA, Metal) and a resident `whisper-server` is up and
-answering. A CPU-only install starts the server once, reads "cpu", stops it and never declares
-the flag: `small` on two cores is 7 s a clip and no streaming makes that converse.
+**Two capabilities, both facts (request 495).** `"stream": true` — the agent holds the
+socket, decodes each utterance ONCE when `utterance_end` arrives (the clip path's decoder and
+cost, minus the upload wait) and answers sentence by sentence in `reply_chunk` frames; any
+install with `whisper-cli` and a model has it, and the `hello` says `partials: false`.
+`"stream_partials": true` — live partial transcripts while the person speaks, from a resident
+`whisper-server` re-decoding the open utterance every 700 ms; only when that server reports a
+GPU backend (`ggml_vulkan`, CUDA, Metal). A CPU-only install starts the server once, reads
+"cpu", stops it and never declares partials — but it does stream, because nothing in the
+sentence-by-sentence reply needs a GPU. Measured on a two-core CPU install (Kokoro, a
+three-sentence answer): one blob 6.9 s before the first sound, per sentence **1.5 s** to the
+first sound and 6.5 s in total — the split costs nothing there; Piper: 2.4 s blob, 1.2 s first
+sound, 4.3 s total. The socket costs one reader thread and one answer worker per session, no
+resident model. `LQ_STREAM_NO_GPU=1` makes a GPU install behave as a CPU one for a test.
 
 **Why resident, why a sized window — measured.** Whisper's cost is a padded 30-second encoder
 window plus a model load per invocation, not the audio length. On an AMD iGPU (Vulkan),

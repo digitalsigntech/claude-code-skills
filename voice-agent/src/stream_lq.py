@@ -245,7 +245,7 @@ class Recogniser:
         that will never stream is 500 MB of RAM doing nothing on a two-core
         box, and every capability probe must not pay a model load to learn
         the same answer again."""
-        if getattr(self, "_no_gpu", False):
+        if getattr(self, "_no_gpu", False) or os.environ.get("LQ_STREAM_NO_GPU"):
             return False
         if not self.ensure():
             return False
@@ -255,16 +255,19 @@ class Recogniser:
         self.stop()
         return False
 
+    def cli_available(self):
+        """A one-shot decoder exists (whisper-cli + model): enough to hold a
+        stream and transcribe each utterance once when it ends. That is the
+        clip path's cost with the upload wait removed — no GPU in it."""
+        return bool(lv.WHISPER_BIN and os.path.exists(lv.WHISPER_BIN)
+                    and self.model and os.path.exists(self.model))
+
     def decode(self, pcm, lang=None, audio_ctx=None):
         """Text for PCM16/16 kHz mono bytes, via the resident server."""
         return self.decode_full(pcm, lang, audio_ctx)[0]
 
-    def decode_full(self, pcm, lang=None, audio_ctx=None):
-        """(text, language code heard, probability). With `auto` the server
-        names the language it decoded in — one pass, no second model."""
-        if not self.ensure():
-            raise RuntimeError("recogniser not running")
-        boundary = "----lq" + uuid.uuid4().hex
+    @staticmethod
+    def _wav(pcm):
         wav_io = tempfile.SpooledTemporaryFile(max_size=1 << 20)
         with wave.open(wav_io, "wb") as w:
             w.setnchannels(1)
@@ -272,7 +275,29 @@ class Recogniser:
             w.setframerate(RATE)
             w.writeframes(pcm)
         wav_io.seek(0)
-        wav = wav_io.read()
+        return wav_io.read()
+
+    def decode_cpu(self, pcm, lang=None, hint=""):
+        """(text, code, probability) through the clip path's one-shot decoder
+        (request 495: CPU agents stream too). whisper-cli reports the language
+        it auto-detected without a probability; a named language counts as
+        heard, an unnamed one as unknown."""
+        heard, _secs, _peak, code = lv.transcribe(self._wav(pcm), ".wav",
+                                                  (lang if lang and lang != "auto" else None), hint)
+        text = " ".join(str(heard or "").split())
+        code = (code or "").strip().lower()[:2]
+        return text, code, (1.0 if code else 0.0)
+
+    def decode_full(self, pcm, lang=None, audio_ctx=None, hint=""):
+        """(text, language code heard, probability). With `auto` the server
+        names the language it decoded in — one pass, no second model. Without
+        a GPU server the one-shot decoder answers instead."""
+        if not self.ready():
+            return self.decode_cpu(pcm, lang, hint)
+        if not self.ensure():
+            raise RuntimeError("recogniser not running")
+        boundary = "----lq" + uuid.uuid4().hex
+        wav = self._wav(pcm)
         fields = {"response_format": "verbose_json", "temperature": "0",
                   "language": (lang or "auto")}
         if audio_ctx:
@@ -345,13 +370,21 @@ def ready():
 
 
 def facts():
-    """What the local row says about streaming — by proof, not by class."""
+    """What the local row says about streaming — by proof, not by class.
+
+    Request 495 (2026-09-06): two capabilities. `stream` — the agent holds the
+    socket, decodes each utterance once when it ends and answers in
+    `reply_chunk` frames; any install with a decoder has it. `stream_partials`
+    — live partial transcripts while the person speaks; only a resident GPU
+    recogniser can afford them."""
     r = recogniser()
-    ok = ready()
+    gpu = ready()
+    ok = gpu or r.cli_available()
     return {"stream": bool(ok),
+            "stream_partials": bool(gpu),
             **({"stream_recogniser": os.path.basename(r.model),
-                "stream_backend": r.backend,
-                "stream_partial_ms": PARTIAL_MS} if ok else {})}
+                "stream_backend": r.backend if gpu else "cpu"} if ok else {}),
+            **({"stream_partial_ms": PARTIAL_MS} if gpu else {})}
 
 
 # --------------------------------------------------------------- session
@@ -613,19 +646,24 @@ class StreamSession:
         # frame with the text and no voice. An app that does not ask gets the
         # single-blob reply exactly as before; nothing changes under it.
         self.reply_stream = bool(start.get("reply_stream"))
-        if not self.recog.ensure():
+        # Request 495: partials need the resident GPU recogniser; the socket
+        # itself needs only a decoder. A CPU install streams without partials.
+        self.partials = bool(self.recog.ready())
+        if not self.partials and not self.recog.cli_available():
             self._agent({"type": "error", "message": "recogniser not running"})
             raise RuntimeError("recogniser not running")
+        backend = self.recog.backend if self.partials else "cpu"
         self._agent({"type": "hello",
                      "recogniser": os.path.basename(self.recog.model),
-                     "backend": self.recog.backend,
-                     "partial_every_ms": PARTIAL_MS,
+                     "backend": backend,
+                     "partials": self.partials,
+                     **({"partial_every_ms": PARTIAL_MS} if self.partials else {}),
                      "progress_every_s": PROGRESS_S,
                      "max_utterance_s": MAX_UTTERANCE_S,
                      "frame_ms": FRAME_MS,
                      "reply_stream": self.reply_stream})
         self.log(f"stream open: lang={self.lang or 'auto'} speaker={self.speaker or '-'} reply_stream={self.reply_stream} "
-                 f"backend={self.recog.backend}")
+                 f"backend={backend} partials={self.partials}")
         if start.get("greet"):
             # Request 489: the greeting is an id-0 reply right after the hello,
             # in the app's language, by first name, in the picked voice —
@@ -637,7 +675,7 @@ class StreamSession:
                 self.log(f"greeting: {g['text']!r} ({g['audio_seconds_out']}s, {g['reply_format']})")
             except Exception as e:
                 self.log(f"greeting failed: {str(e)[:100]}")
-        worker = threading.Thread(target=self._partials, daemon=True)
+        worker = threading.Thread(target=self._partials if self.partials else (lambda: None), daemon=True)
         worker.start()
         self.answer_thread = threading.Thread(target=self._answers, daemon=True)
         self.answer_thread.start()
@@ -771,7 +809,8 @@ class StreamSession:
         try:
             with self.decode_lock:
                 heard, heard_code, heard_p = self.recog.decode_full(
-                    pcm, self.lang or "auto", audio_ctx_for(secs_in))
+                    pcm, self.lang or "auto", audio_ctx_for(secs_in),
+                    hint=lv.recent_lang(self.account))
         except Exception as e:
             self._agent({"type": "error", "id": uid, "message": f"recogniser failed: {str(e)[:80]}"})
             return
@@ -982,7 +1021,9 @@ def _selftest():
     frames.append(phone(KIND_CTRL, json.dumps({"type": "utterance_end", "id": "utt-1", "seconds": round(n * 0.1, 1)}).encode()))
     # a second sentence straight after the first, while the first is being answered — in RUSSIAN,
     # so the language heard, not the language pinned, has to pick the voice
-    ru_a, _, _, _, _ = lv.speak("Покажи мне отчёт за прошлую неделю.", "ru", None)
+    # Long enough for the one-shot decoder to IDENTIFY it (SHORT_CLIP_S):
+    # a CPU install continues a shorter sentence in the last language heard.
+    ru_a, _, _, _, _ = lv.speak("Покажи мне, пожалуйста, отчёт о продажах за прошлую неделю и за этот месяц.", "ru", None)
     ru_src = os.path.join(d, "ru.m4a"); open(ru_src, "wb").write(ru_a)
     ru_wav = os.path.join(d, "ru.wav")
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", ru_src, "-ar", "16000", "-ac", "1", ru_wav], check=True)
@@ -1057,10 +1098,16 @@ def _selftest():
     kinds = [s[0] for s in seen]
     order = [(s[0], s[2].get("id")) for s in seen if s[0] in ("final", "reply")]
     print(f"  order of finals and replies: {order}")
-    in_order = (("final", "utt-2") in order and ("reply", "utt-1") in order and ("reply", "utt-2") in order
-                and order.index(("final", "utt-2")) < order.index(("reply", "utt-1"))
-                and order.index(("reply", "utt-1")) < order.index(("reply", "utt-2")))
-    print(f"  second sentence transcribed before the first reply, replies in order: {in_order}")
+    # With the resident recogniser the second sentence is transcribed before
+    # the first reply (the #586 split). A CPU install decodes serially at the
+    # clip path's speed, so there only the ORDER of the replies is promised.
+    replies_in_order = (("final", "utt-2") in order and ("reply", "utt-1") in order and ("reply", "utt-2") in order
+                        and order.index(("final", "utt-2")) < order.index(("reply", "utt-2"))
+                        and order.index(("reply", "utt-1")) < order.index(("reply", "utt-2")))
+    early = replies_in_order and order.index(("final", "utt-2")) < order.index(("reply", "utt-1"))
+    in_order = early if sess.partials else replies_in_order
+    print(f"  second sentence transcribed before the first reply: {early}; replies in order: {replies_in_order}"
+          f" -> {'ok' if in_order else 'FAIL'} ({'partials' if sess.partials else 'no partials'})")
     r2 = [s[2] for s in seen if s[0] == "reply" and s[2].get("id") == "utt-2"]
     lang_ok = bool(r2) and r2[0].get("lang") == "ru" and "ru_RU" in (r2[0].get("reply_format") or "")
     print(f"  Russian sentence heard as ru and spoken by a Russian voice: {lang_ok} -> {r2[0].get('reply_format') if r2 else None} | final: {[s[2]['text'] for s in seen if s[0]=='final' and s[2].get('id')=='utt-2']}")
@@ -1079,7 +1126,8 @@ def _selftest():
           f"{(last[-1].get('streamed') or {}).get('first_audio_s') if last else None}s "
           f"after the utterance end -> {'ok' if stream_ok else 'FAIL'}")
     ok = (greet_ok and stream_ok and in_order and lang_ok and kinds.count("reply") >= 3
-          and any(s[0] == "partial" for s in seen))
+          and (any(s[0] == "partial" for s in seen) or not sess.partials)
+          and (not any(s[0] == "partial" for s in seen) or sess.partials))
     print("SELFTEST", "OK" if ok else "FAILED")
     return 0 if ok else 1
 
