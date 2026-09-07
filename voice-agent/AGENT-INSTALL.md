@@ -446,6 +446,31 @@ the first sentence is synthesised and sent while the rest is still being made �
 install the first sound arrives ~1.5 s after the model instead of after the whole synthesis.
 `LQ_SELFTEST_NO_ON_TEXT=1 python3 src/stream_lq.py --selftest` proves that shape.
 
+**Phone tools on the local path (request 499, 2026-09-06).** The app declares its tools —
+the same JSON-schema list the cloud engines get — in the stream `start` (`tools: [...]`, once per
+stream) or in a clip ask (`tools` once, then `tools_rev` alone: the agent caches the list per
+account by revision and serves a bare `tools_rev` from the cache). The model here has no tool API
+of its own, so the declarations become a block in the SYSTEM context (`local_voice.tools_context`)
+and a call is ONE marker line the model puts at the end of its answer:
+`[tool_call] {"name": "set_appearance", "arguments": {"mode": "dark"}}`. The agent strips it
+(`split_tool_call`; the chunk speaker halts before it, so it is never spoken), sends the call —
+on the stream a `tool_call {id, turn_id, call_id, name, arguments}` frame after the lead-in's
+chunks (which are not marked `final`), on the clip path `tool_calls: [...]` inside the reply body
+beside the lead-in's text and voice — and waits. The phone answers `tool_result {turn_id,
+call_id, output}`: a control frame on the stream (`LQ_STREAM_TOOL_WAIT_S`, 30 s, with `progress`
+frames while waiting), or `POST ask kind: tool_result` with the sealed plaintext
+`{"tool_result": {turn_id, call_id, name, output}, lang, speaker[, tools|tools_rev]}` on the clip
+path. Then the model is asked to continue with a `[tool_result] <name> -> <output>` line in the
+SAME session: on the stream the continuation comes as more `reply_chunk` frames under the same
+id and turn id with `seq` carrying on, then ONE closing `reply` whose `text` is the lead-in and
+the continuation, with `tool_calls: [{call_id, name, arguments, output | timed_out}]`; on the
+clip path the continuation is a FRESH voice reply keyed by the same `turn_id` with
+`continuation: true` and `call_id` — an HTTP reply that has ended cannot be reopened. Up to three
+calls per turn (`MAX_TOOL_HOPS`). Tools on the stream need `reply_stream: true` (the lead-in and
+the continuation are chunks); a call from a model on a stream without it, or without a
+declaration, is dropped from the text and logged. `LQ_SELFTEST_TOOLS=1 python3 src/stream_lq.py
+--selftest` drives the whole loop with a fake phone.
+
 **The plane is opaque to words, not to seconds.** A metered agent frame (reply, no_speech)
 travels to the plane as JSON text `{"frame": <base64>, "id", "audio_seconds",
 "audio_seconds_out"}`; the plane bills the clear fields exactly as it bills a clip and forwards
