@@ -409,6 +409,30 @@ _SENT_END = re.compile(r'[.!?…。！？]+["”’)\]]*(?=\s)|\n')
 _TABLE_OR_FENCE = re.compile(r'(^|\n)\s*(\|.*\||```|\[tool_call\])', re.S)   # a tool-call line is never spoken
 MIN_SENT = int(os.environ.get("LQ_STREAM_MIN_SENT", "24"))
 TOOL_WAIT_S = float(os.environ.get("LQ_STREAM_TOOL_WAIT_S", "30"))   # request 499: how long a tool result may take
+TAIL_WINDOW_S = float(os.environ.get("LQ_STREAM_TAIL_WINDOW_S", "4"))  # after an interrupt / the end of playback
+TAIL_MIN_WORDS = int(os.environ.get("LQ_STREAM_TAIL_MIN_WORDS", "8"))
+
+
+def tail_verdict(since_s, words, heard_p, heard_text):
+    """Why an utterance that STARTED within TAIL_WINDOW_S of an interrupt or
+    of the end of playback is no speech — or "" when it stands.
+
+    2026-09-07 02:19 UTC (request 501): right after he pressed Interrupt on a
+    68 s reply, a 4.1 s, -16 dBFS utterance decoded as "It's just a different
+    one" at p=0.63 — and the phone had heard words in it too, so every gate
+    passed it. Nobody said it: it is the cut-off reply's tail in the room. In
+    that window a wordless-on-phone utterance needs TAIL_MIN_WORDS, and any
+    utterance under that many words needs the recogniser to be sure of its
+    language (p >= 0.7) — a real "no, stop" is short but confident."""
+    if since_s is None or since_s < 0 or since_s > TAIL_WINDOW_S:
+        return ""
+    if words >= TAIL_MIN_WORDS:
+        return ""
+    if not (heard_text or "").strip():
+        return f"interrupt tail: {words} words, phone heard none, {since_s:.1f}s after"
+    if heard_p < 0.7:
+        return f"interrupt tail: {words} words at p={heard_p:.2f}, {since_s:.1f}s after"
+    return ""
 
 
 def _strip_tables(text):
@@ -606,6 +630,12 @@ class StreamSession:
         self.frames = 0
         self.utt_id = None
         self.utt_seq = 0
+        # Request 501: when the phone last interrupted a reply or finished
+        # playing one, and when the open utterance started — an utterance that
+        # starts in the tail of a reply is the room hearing the speaker.
+        self.last_interrupt = 0.0
+        self.last_heard_out = 0.0
+        self.utt_started = 0.0
         self.seen_nonces = set()
         self.dirty = threading.Event()
         self.stop = threading.Event()
@@ -736,6 +766,7 @@ class StreamSession:
         t = c.get("type")
         if t == "utterance_start":
             self.utt_id = c.get("id")            # the phone's id, its own type
+            self.utt_started = time.time()
         elif t == "utterance_end":
             self.ending.set()
             # THE ID IS ECHOED AS SENT — an int stays an int, a string a string
@@ -764,6 +795,7 @@ class StreamSession:
         elif t == "interrupt":
             # build 356+: the person spoke over the answer; the phone stopped
             # playing and says so, so the worker stops synthesising the rest.
+            self.last_interrupt = time.time()
             sp = self.speaking.get(str(c.get("id")))
             if sp:
                 n = sp.interrupt()
@@ -772,6 +804,7 @@ class StreamSession:
                 self.log(f"stream: interrupt for {c.get('id')!r} — nothing being spoken under that id")
         elif t == "heard_out":
             self.heard_out = c.get("seconds")
+            self.last_heard_out = time.time()
         elif t == "tool_result":
             # request 499: the phone ran the tool; the turn waiting on it continues
             q = self.tool_q.get(str(c.get("call_id") or ""))
@@ -824,12 +857,15 @@ class StreamSession:
             return kw
         return {k: v for k, v in kw.items() if k in params}
 
-    def _no_speech(self, uid, secs_in, peak, reason, heard=""):
+    def _no_speech(self, uid, secs_in, peak, reason, heard="", ctrl=None):
         """Every no-speech says why (2026-09-05: utterance 4 of a stream
         vanished from the phone with no line here to explain it)."""
+        ht = str((ctrl or {}).get("heard_text") or "")
         self.log(f"no speech ({reason}): utterance {uid}, {secs_in}s, peak "
                  f"{'-inf' if peak == float('-inf') else round(peak, 1)} dBFS"
-                 + (f", heard {heard[:40]!r}" if heard else ""))
+                 + (f", heard {heard[:40]!r}" if heard else "")
+                 + (f", phone heard {ht[:40]!r}" if ht else "")
+                 + (f", prefiltered={(ctrl or {}).get('prefiltered')}" if ctrl else ""))
         self._agent({"type": "no_speech", "id": uid, "turn_id": self.turn_id(uid),
                      "peak_dbfs": None if peak == float("-inf") else round(peak, 1),
                      **({"heard_marker": heard[:40]} if heard else {})},
@@ -868,7 +904,7 @@ class StreamSession:
         if user_text and mixed_scripts(user_text):
             self.log(f"garbled decode (mixed scripts, heard {heard_code or '?'} p={heard_p:.2f}): "
                      f"{user_text[:60]!r} ({secs_in}s, peak {peak:.1f} dBFS)")
-            return self._no_speech(uid, secs_in, peak, "mixed scripts", heard=user_text)
+            return self._no_speech(uid, secs_in, peak, "mixed scripts", heard=user_text, ctrl=ctrl)
         _why = user_text and lv.hallucination_gate(
             user_text, secs_in, ctrl.get("prefiltered"), peak,
             heard=(heard_code if heard_p >= 0.6 else None),
@@ -878,9 +914,17 @@ class StreamSession:
         if _why:
             self.log(f"phantom dropped ({_why}): {user_text!r} ({secs_in}s, peak {peak:.1f} dBFS, "
                      f"prefiltered={ctrl.get('prefiltered')})")
-            return self._no_speech(uid, secs_in, peak, _why, heard=user_text)
+            return self._no_speech(uid, secs_in, peak, _why, heard=user_text, ctrl=ctrl)
         if not user_text:
-            return self._no_speech(uid, secs_in, peak, "no words", heard=heard)
+            return self._no_speech(uid, secs_in, peak, "no words", heard=heard, ctrl=ctrl)
+        # request 501: the tail of an interrupted or just-finished reply
+        started = self.utt_started or (time.time() - secs_in)
+        since = started - max(self.last_interrupt, self.last_heard_out) if (self.last_interrupt or self.last_heard_out) else None
+        _tail = tail_verdict(since, len(user_text.split()), heard_p, ctrl.get("heard_text"))
+        if _tail:
+            self.log(f"phantom dropped ({_tail}): {user_text!r} ({secs_in}s, peak {peak:.1f} dBFS, "
+                     f"heard {heard_code or '?'} p={heard_p:.2f}, prefiltered={ctrl.get('prefiltered')})")
+            return self._no_speech(uid, secs_in, peak, _tail, heard=user_text, ctrl=ctrl)
         lang = voice_lang_for(user_text, heard_code, heard_p, pinned=self.lang,
                               last=lv.recent_lang(self.account),
                               ui=str(self.start.get("ui_lang") or "")[:2] or None)
@@ -1105,7 +1149,9 @@ class StreamSession:
                     f"{streamed['bytes'] // 1024} KB" if streamed else f"{len(audio) // 1024} KB reply")
                  + f", lang={lang}{'' if self.lang else ' (heard)'} "
                  f"speaker={self.speaker or '-'}, peak {peak:.1f} dBFS, "
-                 f"prefiltered={ctrl.get('prefiltered')}, reply {reply['reply_format']}, "
+                 f"prefiltered={ctrl.get('prefiltered')}"
+                 + (f" phone_heard={str(ctrl.get('heard_text'))[:40]!r}" if ctrl.get("heard_text") else "")
+                 + f", reply {reply['reply_format']}, "
                  f"{self.partial_count} partials")
         self.partial_count = 0
 
