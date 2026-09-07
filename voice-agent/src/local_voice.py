@@ -1533,8 +1533,41 @@ _TOOL_CALL_RE = re.compile(r"^[ \t]*\[tool_call\][ \t]*(\{.*\})[ \t]*$", re.M)
 MAX_TOOL_HOPS = 3
 
 
-def tools_context(tools, max_chars=16000):
-    """The system-context block for a declared tool list, or "" without one."""
+TOOL_DESC_CHARS = 280        # per tool: the first sentences of its description
+TOOLS_CONTEXT_CHARS = 60000  # the whole block; 69 tools at 280 chars is ~25 KB
+
+
+def _short_desc(desc, limit=TOOL_DESC_CHARS):
+    """The first sentence(s) of a description, whole, under the limit."""
+    d = " ".join(str(desc or "").split())
+    if len(d) <= limit:
+        return d
+    cut = d[:limit]
+    for mark in (". ", "! ", "? "):
+        i = cut.rfind(mark)
+        if i >= limit // 3:
+            return cut[:i + 1]
+    return cut.rstrip() + "…"
+
+
+def tools_context_stats(tools):
+    """(block, {"tools": n, "chars": len, "truncated": bool}) — for the log."""
+    block = tools_context(tools)
+    n = sum(1 for t in (tools or []) if isinstance(t, dict) and t.get("name"))
+    listed = sum(1 for t in (tools or []) if isinstance(t, dict) and t.get("name")
+                 and f"\n- {t['name']}(" in block)
+    return block, {"tools": n, "listed": listed, "chars": len(block), "truncated": listed < n}
+
+
+def tools_context(tools, max_chars=TOOLS_CONTEXT_CHARS):
+    """The system-context block for a declared tool list, or "" without one.
+
+    2026-09-07: the app's declarations are the cloud engines' JSON — 69 tools
+    with long descriptions, ~45 KB — and a 16 KB cap here cut the list a third
+    of the way in, so `set_appearance` never reached the model and "switch to
+    dark mode" got "I don't have a tool for that". Descriptions are shortened
+    to their first sentences and the block is capped where nothing real is
+    lost; a truncation is logged by the caller, never silent."""
     if not isinstance(tools, list) or not tools:
         return ""
     lines = ["PHONE TOOLS. The person is talking to you through an app that can act on "
@@ -1553,7 +1586,7 @@ def tools_context(tools, max_chars=16000):
         name = str(t.get("name") or "").strip()
         if not name:
             continue
-        desc = " ".join(str(t.get("description") or "").split())
+        desc = _short_desc(t.get("description"))
         params = t.get("parameters") if isinstance(t.get("parameters"), dict) else {}
         props = params.get("properties") if isinstance(params.get("properties"), dict) else {}
         req = set(params.get("required") or [])

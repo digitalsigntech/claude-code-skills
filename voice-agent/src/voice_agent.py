@@ -2513,7 +2513,10 @@ def _tools_block(tools):
         return ""
     try:
         import local_voice
-        return "\n\n" + local_voice.tools_context(tools)
+        block, st = local_voice.tools_context_stats(tools)
+        print(f"[voice-agent] tools in context: {st['listed']}/{st['tools']} tools, {st['chars']} chars"
+              + (" — TRUNCATED" if st["truncated"] else ""), file=sys.stderr)
+        return "\n\n" + block
     except Exception as e:
         print(f"[voice-agent] tools context skipped: {e}", file=sys.stderr)
         return ""
