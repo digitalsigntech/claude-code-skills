@@ -2481,6 +2481,56 @@ def _check_fabrication(log_message, text, account):
         log_message("FABRICATION %s", json.dumps(verdict))
 
 
+# Request 499: the app's tool declarations, cached per account by revision so
+# a clip ask can send `tools_rev` alone once the agent has the list.
+TOOLS_BY_ACCOUNT = {}
+
+
+def _tools_for(account, *sources):
+    """The tool list for this turn: a fresh `tools` list in any source wins
+    and is cached under its `tools_rev` (or a hash); a `tools_rev` alone is
+    served from the cache; nothing declared means no tools."""
+    import hashlib
+    for src in sources:
+        if isinstance(src, dict) and isinstance(src.get("tools"), list) and src.get("tools"):
+            tools = src["tools"]
+            rev = str(src.get("tools_rev") or hashlib.sha1(
+                json.dumps(tools, sort_keys=True).encode()).hexdigest()[:12])
+            TOOLS_BY_ACCOUNT[account] = (rev, tools)
+            return tools
+    for src in sources:
+        if isinstance(src, dict) and src.get("tools_rev"):
+            cached = TOOLS_BY_ACCOUNT.get(account)
+            if cached and cached[0] == str(src["tools_rev"]):
+                return cached[1]
+            return None
+    cached = TOOLS_BY_ACCOUNT.get(account)
+    return cached[1] if cached else None
+
+
+def _tools_block(tools):
+    if not tools:
+        return ""
+    try:
+        import local_voice
+        return "\n\n" + local_voice.tools_context(tools)
+    except Exception as e:
+        print(f"[voice-agent] tools context skipped: {e}", file=sys.stderr)
+        return ""
+
+
+def _tool_result_turn(plaintext):
+    """The opened payload if this is a tool result (request 499), else None."""
+    t = (plaintext or "").lstrip()
+    if not t.startswith("{") or '"tool_result"' not in t[:400]:
+        return None
+    try:
+        p = json.loads(t)
+    except ValueError:
+        return None
+    return p if isinstance(p, dict) and isinstance(p.get("tool_result"), dict) else None
+
+
 def _voice_turn(plaintext):
     """The opened payload if this is an LQ turn, else None."""
     t = (plaintext or "").lstrip()
@@ -2670,10 +2720,10 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 self.log_message("stream transcript not archived: %.80s", e)
 
-        def answer_fn(text, turn_id=None):
+        def answer_fn(text, turn_id=None, tools=None):
             self.log_message("stream ask from %s: %.60s", name or account, text)
             res = ask(account, text, name, archive_question=False,
-                      context=time_context(tz) + VOICE_CONTEXT)
+                      context=time_context(tz) + VOICE_CONTEXT + _tools_block(tools))
             ans = str(res.get("answer") or "")
             archive_tag(ans, turn_id)          # request 497: ask() archived it without the id
             return ans
@@ -2831,6 +2881,9 @@ class Handler(BaseHTTPRequestHandler):
                     archive(text, "in", sender=person_name(name),
                             kind="voice_transcript", ts=ts, turn_id=turn_id)
 
+            tools = _tools_for(account, payload, d)
+            calls = []                   # request 499: a tool call parsed out of the answer
+
             def answer_fn(text):
                 self.log_message("voice ask from %s: %.60s",
                                  name or account, text)
@@ -2841,8 +2894,18 @@ class Handler(BaseHTTPRequestHandler):
                 # agent racing itself.
                 res = ask(account, text, name, archive_question=False,
                           archive_turn=keep,
-                          context=time_context(d.get("tz")) + VOICE_CONTEXT)
+                          context=time_context(d.get("tz")) + VOICE_CONTEXT + _tools_block(tools))
                 ans = str(res.get("answer") or "")
+                if tools and not res.get("agent_error"):
+                    import local_voice as _lvt
+                    clean, call = _lvt.split_tool_call(ans)
+                    if call:
+                        calls.append({"call_id": "c" + os.urandom(4).hex(), **call})
+                        if keep and clean != ans:
+                            archive_amend(ans, clean)     # the row never shows the marker
+                        ans = clean or ""
+                        self.log_message("voice turn: tool_call %s %.100s", call["name"],
+                                         json.dumps(call["arguments"], ensure_ascii=False))
                 if keep:
                     archive_tag(ans, turn_id)   # request 497
                 return ans
@@ -2919,6 +2982,7 @@ class Handler(BaseHTTPRequestHandler):
         LAST_APP_TURN[account] = time.time()
         body = json.dumps({"text": out["text"], "user_text": out["user_text"],
                            "turn_id": turn_id,              # request 497
+                           **({"tool_calls": calls} if calls else {}),   # request 499
                            # Present only when the answer's body belongs on the
                            # screen rather than in the ear; the app mutes the
                            # karaoke when it differs from `text`.
@@ -2936,6 +3000,65 @@ class Handler(BaseHTTPRequestHandler):
             "audio_seconds_in": out["audio_seconds_in"],
             "audio_seconds_out": out["audio_seconds_out"],
             "engine": "local",
+            "took_s": round(time.time() - t0, 2)})
+
+    def _tool_result_answer(self, spec, account, name, d, priv, mine, theirs):
+        """Request 499, clip path: the phone ran a tool and says so; the model
+        continues the SAME turn and the answer comes back as a fresh voice
+        reply keyed by the turn id (`continuation: true`) — an HTTP reply that
+        has ended cannot be reopened, so the continuation is its own exchange."""
+        t0 = time.time()
+        import local_voice
+        tr = spec.get("tool_result") if isinstance(spec, dict) else None
+        if not isinstance(tr, dict):
+            return self._send(400, {"error": "bad_tool_result"})
+        turn_id = str(tr.get("turn_id") or "")[:64]
+        call_id = str(tr.get("call_id") or "")[:32]
+        tname = str(tr.get("name") or "")[:80]
+        tools = _tools_for(account, spec, d)
+        keep = d.get("archive") is not False
+        lang = str(spec.get("lang") or "").strip().lower()[:5]
+        if not lang or lang == "auto":
+            lang = local_voice.recent_lang(account) or "en"
+        speaker = str(spec.get("speaker") or "").strip().lower()[:64]
+        prompt = local_voice.tool_result_prompt({"name": tname}, tr.get("output"))
+        self.log_message("voice turn: tool_result %s for %s -> continuing", tname, turn_id or "?")
+        res = ask(account, prompt, name, archive_question=False, archive_turn=keep,
+                  context=time_context(d.get("tz")) + VOICE_CONTEXT + _tools_block(tools))
+        ans = str(res.get("answer") or "")
+        calls = []
+        if tools and not res.get("agent_error"):
+            clean, call = local_voice.split_tool_call(ans)
+            if call:
+                calls.append({"call_id": "c" + os.urandom(4).hex(), **call})
+                if keep and clean != ans:
+                    archive_amend(ans, clean)
+                ans = clean or ""
+        if keep:
+            archive_tag(ans, turn_id)
+        to_say = local_voice._speakable(ans or "")
+        if to_say.strip():
+            audio, secs_out, fmt, rate, who = local_voice.speak(to_say, lang, speaker)
+            voice = {"format": fmt, "b64": base64.b64encode(audio).decode()}
+        else:
+            audio, secs_out, fmt, rate, who, voice = b"", 0.0, local_voice.REPLY_FORMAT, 0, "-", None
+        LAST_APP_TURN[account] = time.time()
+        body = json.dumps({"text": ans or "", "turn_id": turn_id, "continuation": True,
+                           "call_id": call_id, "lang": lang,
+                           **({"speaker": speaker} if speaker else {}),
+                           **({"tool_calls": calls} if calls else {}),
+                           "voice": voice,
+                           "reply_format": f"{fmt} {rate} Hz {local_voice.REPLY_BITRATE} {who}"},
+                          ensure_ascii=False)
+        sealed = seal_for_devices(body, account=account) or e2ee_seal(
+            body, priv, mine, theirs, direction=DIR_TO_PHONE)
+        self.log_message("voice turn: continuation after %s: %.1fs out, %d KB, %s%s",
+                         tname, secs_out, len(audio) // 1024, who,
+                         f", tool_call {calls[0]['name']}" if calls else "")
+        return self._send(200, {
+            "sealed": sealed, "audio_seconds_in": 0.0,
+            "audio_seconds_out": round(secs_out, 3),
+            "engine": "local", "continuation": True,
             "took_s": round(time.time() - t0, 2)})
 
     def do_POST(self):
@@ -3460,6 +3583,10 @@ class Handler(BaseHTTPRequestHandler):
                     if at is not None or str(d.get("kind") or "") == "attachments":
                         return self._attachments_answer(
                             at, account, name, d, priv, mine, theirs)
+                    tr = _tool_result_turn(q)
+                    if tr is not None or str(d.get("kind") or "") == "tool_result":
+                        return self._tool_result_answer(
+                            tr or {}, account, name, d, priv, mine, theirs)
                     vt = _voice_turn(q)
                     if vt is not None:
                         return self._voice_answer(

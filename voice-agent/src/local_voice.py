@@ -1519,6 +1519,85 @@ def _speakable(text):
     return say_text(text)
 
 
+# ---- phone tools on the local path (request 499, 2026-09-06) ---------------
+# The app declares its tools (the same JSON schema the cloud engines get); the
+# model here has no tool API of its own, so the declarations become a block in
+# the system context and a call is ONE marker line at the end of the answer:
+#     [tool_call] {"name": "set_appearance", "arguments": {"mode": "dark"}}
+# The agent strips the line, sends the call to the phone, and when the result
+# comes back asks the model to continue with a [tool_result] line. Nothing the
+# model invents can act: the phone refuses names it did not declare.
+TOOL_CALL_MARK = "[tool_call]"
+TOOL_RESULT_MARK = "[tool_result]"
+_TOOL_CALL_RE = re.compile(r"^[ \t]*\[tool_call\][ \t]*(\{.*\})[ \t]*$", re.M)
+MAX_TOOL_HOPS = 3
+
+
+def tools_context(tools, max_chars=16000):
+    """The system-context block for a declared tool list, or "" without one."""
+    if not isinstance(tools, list) or not tools:
+        return ""
+    lines = ["PHONE TOOLS. The person is talking to you through an app that can act on "
+             "these tools. To use one, answer normally (a short lead-in sentence is "
+             "good, e.g. \"Switching to dark mode.\") and END your answer with ONE line "
+             "exactly of the form:",
+             '[tool_call] {"name": "<tool name>", "arguments": {<arguments>}}',
+             "One call per answer. Never write that line unless you mean the app to act, "
+             "never invent a tool that is not listed, and never describe a call instead "
+             "of making it. After the app runs it you receive a line starting with "
+             "[tool_result] and continue the conversation from there.",
+             "", "Tools:"]
+    for t in tools:
+        if not isinstance(t, dict):
+            continue
+        name = str(t.get("name") or "").strip()
+        if not name:
+            continue
+        desc = " ".join(str(t.get("description") or "").split())
+        params = t.get("parameters") if isinstance(t.get("parameters"), dict) else {}
+        props = params.get("properties") if isinstance(params.get("properties"), dict) else {}
+        req = set(params.get("required") or [])
+        args = ", ".join(f"{k}{'' if k in req else '?'}: {(v or {}).get('type', 'any') if isinstance(v, dict) else 'any'}"
+                         + (f" {v.get('enum')}" if isinstance(v, dict) and v.get("enum") else "")
+                         for k, v in props.items())
+        lines.append(f"- {name}({args}) — {desc}")
+    out = "\n".join(lines)
+    return out[:max_chars]
+
+
+def split_tool_call(text):
+    """(text without the call line, {"name", "arguments"} or None). Only the
+    LAST marker line counts; anything after it is dropped from the text."""
+    t = str(text or "")
+    m = None
+    for m in _TOOL_CALL_RE.finditer(t):
+        pass
+    if not m:
+        return t, None
+    try:
+        call = json.loads(m.group(1))
+    except Exception:
+        return t, None
+    if not isinstance(call, dict) or not str(call.get("name") or "").strip():
+        return t, None
+    args = call.get("arguments")
+    clean = (t[:m.start()] + t[m.end():]).strip()
+    return clean, {"name": str(call["name"]).strip()[:80],
+                   "arguments": args if isinstance(args, dict) else {}}
+
+
+def tool_result_prompt(call, output):
+    """The continuation message after the phone ran a tool."""
+    try:
+        out = json.dumps(output, ensure_ascii=False)
+    except Exception:
+        out = str(output)
+    return (f"{TOOL_RESULT_MARK} {call.get('name')} -> {out[:4000]}\n"
+            "Continue the conversation for the person in one or two spoken sentences. "
+            "Do not repeat the lead-in you already said. Call another tool only if "
+            "the task still needs it.")
+
+
 # The model's own signal that this one is to be heard entire (#460).
 READ_IN_FULL = "[read-in-full]"
 

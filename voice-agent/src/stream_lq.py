@@ -406,8 +406,9 @@ def facts():
 # thread and a sequence number; the app plays in seq order and treats the
 # `final` chunk (or the `reply` frame that follows it) as the end of the turn.
 _SENT_END = re.compile(r'[.!?…。！？]+["”’)\]]*(?=\s)|\n')
-_TABLE_OR_FENCE = re.compile(r'(^|\n)\s*(\|.*\||```)', re.S)
+_TABLE_OR_FENCE = re.compile(r'(^|\n)\s*(\|.*\||```|\[tool_call\])', re.S)   # a tool-call line is never spoken
 MIN_SENT = int(os.environ.get("LQ_STREAM_MIN_SENT", "24"))
+TOOL_WAIT_S = float(os.environ.get("LQ_STREAM_TOOL_WAIT_S", "30"))   # request 499: how long a tool result may take
 
 
 def _strip_tables(text):
@@ -424,13 +425,13 @@ def _strip_tables(text):
 
 
 class _ChunkSpeaker:
-    def __init__(self, session, uid, lang, speaker, t0):
+    def __init__(self, session, uid, lang, speaker, t0, seq_start=0):
         self.s, self.uid, self.lang, self.speaker, self.t0 = session, uid, lang, speaker, t0
         self.seen = ""              # the model's text so far
         self.consumed = 0           # chars of `seen` already handed to the worker
         self.halted = False         # a table/fence appeared: stop cutting
         self.interrupted = False    # the phone stopped playing: send nothing more
-        self.seq = 0
+        self.seq = int(seq_start or 0)      # a continuation after a tool call carries on counting
         self.secs = 0.0
         self.bytes = 0
         self.first_audio = None     # seconds from t0 to the first chunk sent
@@ -492,7 +493,14 @@ class _ChunkSpeaker:
                 "spoke_by": self.spoke_by,
                 **({"interrupted": True} if self.interrupted else {})}
 
-    def finish(self, answer, spoken_line):
+    def close(self):
+        """Nothing more to say from this speaker (a tool call with no lead-in)."""
+        with self.lock:
+            self.q.put(None)
+        self.worker.join(timeout=30)
+        return self._stats()
+
+    def finish(self, answer, spoken_line, final=True):
         """The model is done. Speak whatever was not cut yet, flag it final.
         Returns None when the stream cannot be trusted (the final text does not
         start with what was already spoken) and NO chunk went out — the caller
@@ -517,7 +525,8 @@ class _ChunkSpeaker:
                            f"prefix ({self.consumed} chars) — remainder skipped")
                 rem = ""
             rem = _strip_tables(rem) if (self.halted or lv._TABLE_ROW.search(rem or "")) else rem
-            self.q.put((rem.strip(), True))
+            if rem.strip() or final:
+                self.q.put((rem.strip(), final))
             self.q.put(None)
         self.worker.join(timeout=120)
         return self._stats()
@@ -579,6 +588,10 @@ class StreamSession:
         # row by identity rather than by text (the texts differ: the archive
         # keeps paragraph breaks, the chunks are sentences).
         self.sid = uuid.uuid4().hex[:8]
+        # Request 499: the app's declared tools (from `start`), and the
+        # results it sends back, keyed by call id.
+        self.tools = None
+        self.tool_q = {}
         self.account = account
         self.on_transcript = on_transcript
         self.log = log or (lambda *a: print("[stream]", *a, file=sys.stderr))
@@ -654,6 +667,7 @@ class StreamSession:
         # frame with the text and no voice. An app that does not ask gets the
         # single-blob reply exactly as before; nothing changes under it.
         self.reply_stream = bool(start.get("reply_stream"))
+        self.tools = start.get("tools") if isinstance(start.get("tools"), list) and start.get("tools") else None
         # Request 495: partials need the resident GPU recogniser; the socket
         # itself needs only a decoder. A CPU install streams without partials.
         self.partials = bool(self.recog.ready())
@@ -669,9 +683,10 @@ class StreamSession:
                      "progress_every_s": PROGRESS_S,
                      "max_utterance_s": MAX_UTTERANCE_S,
                      "frame_ms": FRAME_MS,
-                     "reply_stream": self.reply_stream})
+                     "reply_stream": self.reply_stream,
+                     "tools": len(self.tools) if self.tools else 0})
         self.log(f"stream open: lang={self.lang or 'auto'} speaker={self.speaker or '-'} reply_stream={self.reply_stream} "
-                 f"backend={backend} partials={self.partials}")
+                 f"backend={backend} partials={self.partials} tools={len(self.tools) if self.tools else 0}")
         if start.get("greet"):
             # Request 489: the greeting is an id-0 reply right after the hello,
             # in the app's language, by first name, in the picked voice —
@@ -757,6 +772,13 @@ class StreamSession:
                 self.log(f"stream: interrupt for {c.get('id')!r} — nothing being spoken under that id")
         elif t == "heard_out":
             self.heard_out = c.get("seconds")
+        elif t == "tool_result":
+            # request 499: the phone ran the tool; the turn waiting on it continues
+            q = self.tool_q.get(str(c.get("call_id") or ""))
+            if q is not None:
+                q.put(c.get("output"))
+            else:
+                self.log(f"stream: tool_result for {c.get('call_id')!r} — no turn is waiting on it")
 
     def _partials(self):
         while not self.stop.is_set():
@@ -914,46 +936,130 @@ class StreamSession:
             # being made — on a CPU install that is the difference between the
             # first sound at 1.5 s and at 7 s (request 495, measured on the second install).
 
-        def _think():
-            try:
-                if speaker:
-                    box["answer"] = str(self.answer_fn(user_text, on_text=speaker.feed,
-                                                       **self._kw(self.answer_fn, turn_id=self.turn_id(uid))) or "")
-                else:
-                    box["answer"] = str(self.answer_fn(user_text, **self._kw(self.answer_fn, turn_id=self.turn_id(uid))) or "")
-            except Exception as e:                                 # noqa: BLE001
-                box["error"] = e
+        def _ask_model(prompt, spk):
+            """The model, with a progress frame every few seconds while it thinks."""
+            box = {}
 
-        th = threading.Thread(target=_think, daemon=True)
-        th.start()
-        t_think = time.time()
-        while th.is_alive():
-            th.join(PROGRESS_S)
-            if th.is_alive():
+            def _think():
                 try:
-                    self._agent({"type": "progress", "id": uid,
-                                 "elapsed_s": round(time.time() - t_think, 1)})
-                except Exception:
-                    break                       # the socket is gone; the turn ends below
-        if "error" in box:
-            raise box["error"]
-        answer = box.get("answer", "")
+                    kw = self._kw(self.answer_fn, turn_id=self.turn_id(uid), tools=self.tools)
+                    if spk:
+                        box["answer"] = str(self.answer_fn(prompt, on_text=spk.feed, **kw) or "")
+                    else:
+                        box["answer"] = str(self.answer_fn(prompt, **kw) or "")
+                except Exception as e:                                 # noqa: BLE001
+                    box["error"] = e
+
+            th = threading.Thread(target=_think, daemon=True)
+            th.start()
+            t_think = time.time()
+            while th.is_alive():
+                th.join(PROGRESS_S)
+                if th.is_alive():
+                    try:
+                        self._agent({"type": "progress", "id": uid,
+                                     "elapsed_s": round(time.time() - t_think, 1)})
+                    except Exception:
+                        break                       # the socket is gone; the turn ends below
+            if "error" in box:
+                raise box["error"]
+            return box.get("answer", "")
+
+        answer = _ask_model(user_text, speaker)
+        # REQUEST 499: THE MODEL MAY CALL ONE OF THE PHONE'S TOOLS. The call is
+        # the last line of its answer; the lead-in before it is spoken first,
+        # the call goes to the phone, the phone's result comes back as a
+        # control frame, and the model continues the SAME turn — more chunks
+        # under the same id, one closing reply at the end.
+        tool_calls, texts, parts = [], [], []
+        hops = 0
+        while True:
+            clean, call = lv.split_tool_call(answer)
+            if call is None:
+                break
+            if not (self.tools and self.reply_stream) or hops >= lv.MAX_TOOL_HOPS:
+                self.log(f"stream {uid}: tool call {call['name']} dropped "
+                         f"({'no tools declared' if not self.tools else 'no reply_stream' if not self.reply_stream else 'hop limit'})")
+                answer = clean
+                break
+            hops += 1
+            call_id = uuid.uuid4().hex[:8]
+            if speaker:
+                st = (speaker.finish(clean, "", final=False) if clean.strip() else speaker.close())
+                if st:
+                    parts.append(st)
+                self.speaking.pop(str(uid), None)
+            if clean.strip():
+                texts.append(clean)
+            q = queue.Queue()
+            self.tool_q[call_id] = q
+            self._agent({"type": "tool_call", "id": uid, "turn_id": self.turn_id(uid),
+                         "call_id": call_id, "name": call["name"], "arguments": call["arguments"]})
+            self.log(f"stream {uid}: tool_call {call['name']} {json.dumps(call['arguments'], ensure_ascii=False)[:120]} -> waiting for the phone")
+            output, waited, timed_out = None, 0.0, False
+            while True:
+                try:
+                    output = q.get(timeout=PROGRESS_S)
+                    break
+                except queue.Empty:
+                    waited += PROGRESS_S
+                    if waited >= TOOL_WAIT_S:
+                        timed_out = True
+                        break
+                    try:
+                        self._agent({"type": "progress", "id": uid, "elapsed_s": round(waited, 1), "waiting": "tool_result"})
+                    except Exception:
+                        timed_out = True
+                        break
+            self.tool_q.pop(call_id, None)
+            tool_calls.append({"call_id": call_id, "name": call["name"], "arguments": call["arguments"],
+                               **({"output": output} if not timed_out else {"timed_out": True})})
+            if timed_out:
+                self.log(f"stream {uid}: no tool_result for {call['name']} within {TOOL_WAIT_S:.0f}s — the turn ends")
+                answer = ""
+                speaker = None
+                break
+            self.log(f"stream {uid}: tool_result {call['name']} -> {json.dumps(output, ensure_ascii=False)[:120]}")
+            speaker = _ChunkSpeaker(self, uid, lang, self.speaker, t0,
+                                    seq_start=sum(p_["chunks"] for p_ in parts))
+            self.speaking[str(uid)] = speaker
+            answer = _ask_model(lv.tool_result_prompt(call, output), speaker)
         answer, speak_all = lv.read_in_full(answer)
         t1 = time.time()
         spoken_line = "" if speak_all else lv.speech_for(answer or "")
         if self.reply_stream and speaker is None and not spoken_line and (answer or "").strip():
-            speaker = _ChunkSpeaker(self, uid, lang, self.speaker, t0)
+            speaker = _ChunkSpeaker(self, uid, lang, self.speaker, t0,
+                                    seq_start=sum(p_["chunks"] for p_ in parts))
             self.speaking[str(uid)] = speaker
             speaker.feed(answer)               # every sentence at once; spoken one by one
         to_say = lv._speakable(spoken_line or answer or "")
         if not to_say.strip():
-            to_say = "I do not have an answer for that."
+            to_say = "I do not have an answer for that." if not tool_calls else ""
         streamed = speaker.finish(answer, spoken_line) if speaker else None
         self.speaking.pop(str(uid), None)
+        if parts:
+            # the lead-in chunks before a tool call count towards the turn
+            if not streamed:
+                streamed = {"chunks": 0, "audio_seconds_out": 0.0, "bytes": 0, "first_audio_s": None, "spoke_by": ""}
+            # a continuation speaker counts from where the lead-in stopped, so
+            # its `chunks` is already the turn's total; only a turn that ended
+            # without one (a timeout) has to add the lead-in's chunks itself
+            streamed = {**streamed,
+                        "chunks": streamed["chunks"] if streamed["chunks"] else sum(p_["chunks"] for p_ in parts),
+                        "audio_seconds_out": round(streamed["audio_seconds_out"] + sum(p_["audio_seconds_out"] for p_ in parts), 3),
+                        "bytes": streamed["bytes"] + sum(p_["bytes"] for p_ in parts),
+                        "first_audio_s": next((p_["first_audio_s"] for p_ in parts if p_.get("first_audio_s") is not None), streamed.get("first_audio_s")),
+                        "spoke_by": streamed.get("spoke_by") or parts[0].get("spoke_by") or ""}
+            if not streamed["chunks"]:
+                streamed = None
+        if texts:
+            answer = "\n\n".join(texts + ([answer] if (answer or "").strip() else []))
         if streamed:
             audio, secs_out, out_fmt, out_rate = b"", streamed["audio_seconds_out"], lv.REPLY_FORMAT, 0
             spoke_by = streamed["spoke_by"] or "-"
             voice = None                       # every byte of audio went as chunks
+        elif not to_say.strip():
+            audio, secs_out, out_fmt, out_rate, spoke_by, voice = b"", 0.0, lv.REPLY_FORMAT, 0, "-", None
         else:
             if speaker:
                 self.log(f"stream {uid}: chunking fell back to the single blob")
@@ -967,6 +1073,7 @@ class StreamSession:
                  **({"speaker": self.speaker} if self.speaker else {}),
                  "voice": voice,
                  **({"streamed": streamed} if streamed else {}),
+                 **({"tool_calls": tool_calls} if tool_calls else {}),
                  "audio_seconds": secs_in, "audio_seconds_out": round(secs_out, 3),
                  "peak_dbfs": None if peak == float("-inf") else round(peak, 1),
                  "reply_format": (f"{out_fmt} streamed {streamed['chunks']} chunks"
@@ -1009,7 +1116,12 @@ class _FakeWS:
             import ws_min
             raise ws_min.ConnectionClosed("done")
         if item == "WAIT":
-            time.sleep(16)                       # let both queued answers finish
+            for _ in range(32):                  # let both queued answers finish —
+                time.sleep(0.5)                  # and hand over anything injected meanwhile
+                inj = getattr(self, "injected", None)
+                if inj:
+                    self.inbox.insert(0, "WAIT")
+                    return inj.pop(0)
             return self.recv(timeout)
         if isinstance(item, tuple) and item[0] == 2 and item[1][0] == KIND_AUDIO:
             time.sleep(self.pace)
@@ -1020,6 +1132,15 @@ class _FakeWS:
 
     def send_binary(self, b):
         self.sent.append(("binary", b))
+        if getattr(self, "on_agent", None):
+            try:
+                self.on_agent(b)
+            except Exception as e:
+                print(f"[selftest] on_agent: {e}", file=sys.stderr)
+
+    def inject(self, item):
+        """A frame the phone sends in REACTION to the agent (a tool result)."""
+        self.injected = getattr(self, "injected", []) + [item]
 
 
 def _selftest():
@@ -1033,7 +1154,9 @@ def _selftest():
         counter[0] += 1
         return (2, seal_frame(kind, key, prefix, counter[0], payload))
 
-    text = "What time does the shipment leave the dock on Thursday?"
+    tools_mode = bool(os.environ.get("LQ_SELFTEST_TOOLS"))
+    text = ("Please switch the app to dark mode." if tools_mode
+            else "What time does the shipment leave the dock on Thursday?")
     a, secs, fmt, rate, who = lv.speak(text, "en", "af_heart")
     d = tempfile.mkdtemp()
     src = os.path.join(d, "u.m4a")
@@ -1068,15 +1191,36 @@ def _selftest():
     frames.append("WAIT")
     frames.append("END")
     ws = _FakeWS(frames)
+    calls_seen = []
+
+    def _on_agent(b):
+        try:
+            k, _n, payload = open_frame(key, b)
+            o = json.loads(payload)
+        except Exception:
+            return
+        if o.get("type") == "tool_call":
+            calls_seen.append(o)
+            ws.inject(phone(KIND_CTRL, json.dumps({"type": "tool_result", "turn_id": o.get("turn_id"),
+                                                   "call_id": o["call_id"], "output": {"ok": True, "mode": "dark"}}).encode()))
+    ws.on_agent = _on_agent
     start = {"type": "start", "lang": "auto", "speaker": "af_heart", "key_b64": base64.b64encode(key).decode(),
              "format": "pcm16", "rate": 16000, "frame_ms": 100, "tz": "America/Toronto",
-             "greet": True, "ui_lang": "en", "name": "Alex"}
+             "greet": True, "ui_lang": "en", "name": "Alex",
+             **({"tools": [{"type": "function", "name": "set_appearance",
+                            "description": "Switch the app between light and dark mode.",
+                            "parameters": {"type": "object", "properties": {"mode": {"type": "string", "enum": ["light", "dark"]}},
+                                           "required": ["mode"]}}]} if tools_mode else {})}
     def answer_fn(q, on_text=None):
         # The model, as the bridge delivers it: the full text so far on each
         # delta, a few words at a time, with a think before the first one.
         # LQ_SELFTEST_NO_ON_TEXT=1 makes it the skill agent's shape instead:
         # the whole answer at once, nothing in between.
-        if scripts_in(q).get("cyrl"):
+        if q.startswith(lv.TOOL_RESULT_MARK):
+            full = "Done. The app is in dark mode now."
+        elif tools_mode and "dark mode" in q.lower():
+            full = ('Switching to dark mode.\n[tool_call] {"name": "set_appearance", "arguments": {"mode": "dark"}}')
+        elif scripts_in(q).get("cyrl"):
             # The model answers in the language it was asked in; the voice follows the answer.
             full = (f"Вы спросили: {q} Док открывается в половине третьего. "
                     "Паллеты уходят дневным грузовиком, так что будьте там к двум. "
@@ -1170,7 +1314,21 @@ def _selftest():
     tids = [(o.get("id"), o.get("turn_id")) for k, _m, o in seen if k in ("final", "reply", "reply_chunk") and o.get("id") != 0]
     tid_ok = bool(tids) and all(t and str(t).endswith(f":{i}") for i, t in tids) and len({t.split(":")[0] for _i, t in tids}) == 1
     print(f"  turn ids on final/reply/reply_chunk: {tid_ok} -> {sorted({t for _i, t in tids})}")
-    ok = (greet_ok and stream_ok and in_order and lang_ok and tid_ok and kinds.count("reply") >= 3
+    tools_ok = True
+    if tools_mode:
+        r1 = [o for k, _m, o in seen if k == "reply" and o.get("id") == "utt-1"]
+        c1 = [o for k, _m, o in seen if k == "reply_chunk" and o.get("id") == "utt-1"]
+        tools_ok = (len(calls_seen) == 1 and calls_seen[0].get("name") == "set_appearance"
+                    and bool(r1) and (r1[-1].get("tool_calls") or [{}])[0].get("output") == {"ok": True, "mode": "dark"}
+                    and "dark mode now" in (r1[-1].get("text") or "")
+                    and "[tool_call]" not in (r1[-1].get("text") or "")
+                    and [c["seq"] for c in c1] == list(range(1, len(c1) + 1))
+                    and not any("[tool_call]" in (c.get("text") or "") for c in c1)
+                    and sum(1 for c in c1 if c.get("final")) == 1)
+        print(f"  phone tool: call seen {[(c.get('name'), c.get('arguments')) for c in calls_seen]}, "
+              f"chunks {[ (c['seq'], c.get('final'), (c.get('text') or '')[:30]) for c in c1]}, "
+              f"reply text {(r1[-1].get('text') if r1 else None)!r}, tool_calls {(r1[-1].get('tool_calls') if r1 else None)} -> {'ok' if tools_ok else 'FAIL'}")
+    ok = (greet_ok and stream_ok and in_order and lang_ok and tid_ok and tools_ok and kinds.count("reply") >= 3
           and (any(s[0] == "partial" for s in seen) or not sess.partials)
           and (not any(s[0] == "partial" for s in seen) or sess.partials))
     print("SELFTEST", "OK" if ok else "FAILED")
