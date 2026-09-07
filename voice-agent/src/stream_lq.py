@@ -1116,8 +1116,11 @@ class _FakeWS:
             import ws_min
             raise ws_min.ConnectionClosed("done")
         if item == "WAIT":
-            for _ in range(32):                  # let both queued answers finish —
-                time.sleep(0.5)                  # and hand over anything injected meanwhile
+            # let both queued answers finish — 16 s with a resident GPU
+            # recogniser, longer on a CPU install where each decode is a
+            # one-shot whisper-cli run — handing over anything injected meanwhile
+            for _ in range(int(getattr(self, "wait_s", 16) * 2)):
+                time.sleep(0.5)
                 inj = getattr(self, "injected", None)
                 if inj:
                     self.inbox.insert(0, "WAIT")
@@ -1191,6 +1194,7 @@ def _selftest():
     frames.append("WAIT")
     frames.append("END")
     ws = _FakeWS(frames)
+    ws.wait_s = float(os.environ.get("LQ_SELFTEST_WAIT_S") or (16 if ready() else 50))
     calls_seen = []
 
     def _on_agent(b):
