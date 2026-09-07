@@ -922,11 +922,11 @@ class StreamSession:
         # its way, and gives the app something to draw.
         box = {}
         speaker = None
+        try:
+            takes_on_text = "on_text" in inspect.signature(self.answer_fn).parameters
+        except (TypeError, ValueError):
+            takes_on_text = False
         if self.reply_stream:
-            try:
-                takes_on_text = "on_text" in inspect.signature(self.answer_fn).parameters
-            except (TypeError, ValueError):
-                takes_on_text = False
             if takes_on_text:
                 speaker = _ChunkSpeaker(self, uid, lang, self.speaker, t0)
                 self.speaking[str(uid)] = speaker
@@ -943,7 +943,7 @@ class StreamSession:
             def _think():
                 try:
                     kw = self._kw(self.answer_fn, turn_id=self.turn_id(uid), tools=self.tools)
-                    if spk:
+                    if spk and takes_on_text:
                         box["answer"] = str(self.answer_fn(prompt, on_text=spk.feed, **kw) or "")
                     else:
                         box["answer"] = str(self.answer_fn(prompt, **kw) or "")
@@ -984,6 +984,13 @@ class StreamSession:
                 break
             hops += 1
             call_id = uuid.uuid4().hex[:8]
+            if speaker is None and self.reply_stream and clean.strip():
+                # no streaming answer path: the lead-in is chunked now, before
+                # the call goes out, so it is heard before the app acts
+                speaker = _ChunkSpeaker(self, uid, lang, self.speaker, t0,
+                                        seq_start=sum(p_["chunks"] for p_ in parts))
+                self.speaking[str(uid)] = speaker
+                speaker.feed(clean)
             if speaker:
                 st = (speaker.finish(clean, "", final=False) if clean.strip() else speaker.close())
                 if st:
@@ -1020,9 +1027,16 @@ class StreamSession:
                 speaker = None
                 break
             self.log(f"stream {uid}: tool_result {call['name']} -> {json.dumps(output, ensure_ascii=False)[:120]}")
-            speaker = _ChunkSpeaker(self, uid, lang, self.speaker, t0,
-                                    seq_start=sum(p_["chunks"] for p_ in parts))
-            self.speaking[str(uid)] = speaker
+            # The continuation: a streaming answer path feeds a new speaker as
+            # it writes; one without on_text (the skill's ask()) gets its whole
+            # answer chunked afterwards, exactly like the first pass — passing
+            # on_text to a callback that has no such parameter closed the second install's
+            # socket on the first live tool call (2026-09-07 00:49 UTC).
+            speaker = None
+            if takes_on_text:
+                speaker = _ChunkSpeaker(self, uid, lang, self.speaker, t0,
+                                        seq_start=sum(p_["chunks"] for p_ in parts))
+                self.speaking[str(uid)] = speaker
             answer = _ask_model(lv.tool_result_prompt(call, output), speaker)
         answer, speak_all = lv.read_in_full(answer)
         t1 = time.time()
