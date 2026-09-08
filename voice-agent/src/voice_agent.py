@@ -3409,6 +3409,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(400, {"error": "sealed_open_failed",
                                             "detail": str(e)[:300]})
             elif (text and e2ee_locked(account) and not d.get("diagnostic")
+                  and who.strip().lower() not in ("app", "phone", "system")
                   and not _MARKER_ONLY.match(text)):
                 self.log_message("PLAINTEXT LOG REFUSED (e2ee declared)")
                 return self._send(400, {
@@ -3433,7 +3434,9 @@ class Handler(BaseHTTPRequestHandler):
             # be recalled: an explicit `diagnostic: true`, or a whole message
             # that is one bracketed marker. Anchored, so a sentence that merely
             # contains a bracket is still a sentence.
-            if d.get("diagnostic") or _MARKER_ONLY.match(text):
+            # 2026-09-08: the app's own diagnostics come as who: "app" (build
+            # 367's `[audio] cat= mode= out=` line) — logged, never a bubble.
+            if d.get("diagnostic") or who.strip().lower() in ("app", "phone", "system") or _MARKER_ONLY.match(text):
                 self.log_message("DIAGNOSTIC %s", text[:300])
                 _check_fabrication(self.log_message, text, account)
                 return self._send(200, {
