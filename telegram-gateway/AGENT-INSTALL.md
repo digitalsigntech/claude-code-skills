@@ -89,7 +89,9 @@ The pointer imports the workspace's memory index
 (`@~/.claude/projects/<path-slug>/memory/MEMORY.md`, created empty if missing) and
 tells the agent to save new memories into that directory — Claude Code keeps memory
 per working directory, and this is what gives a session started anywhere the same
-memory as the voice app and Telegram. The gateway repeats the render at every boot.
+memory as the voice app and Telegram. It also adds allow rules to
+`~/.claude/settings.json` so that session may read the workspace and read/write the
+memory directory — without them the index loads but every file it names is denied. The gateway repeats the render at every boot.
 Prove it before moving on, with a memory question and not only a name question:
 
 ```bash

@@ -91,7 +91,10 @@ is yours and survives. The pointer names the workspace's memory directory
 `@` line, so a session started in any other directory still has the whole memory
 index in front of it and is told to save new memories there — Claude Code keeps
 memory per working directory, and without the import a `claude` opened in `/tmp`
-knew its name but ran on an empty memory. Result: a `claude` opened in any shell,
+knew its name but ran on an empty memory. The same render adds four allow rules to
+`~/.claude/settings.json` (read the workspace; read, edit and write the memory
+directory), because a session outside the workspace is otherwise denied when it
+opens the very files the index names. Result: a `claude` opened in any shell,
 a voice-app turn and a Telegram turn are the same agent with the same name and
 the same memory. Before this (2026-09-08) the persona travelled only as the
 gateway's system prompt, and a terminal session on the same machine did not

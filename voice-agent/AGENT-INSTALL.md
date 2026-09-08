@@ -108,7 +108,9 @@ agent's identity from it at startup — name, whom it serves, the persona in
 and a pointer into `~/.claude/CLAUDE.md` (`python3 voice_agent.py --render-identity`
 does it by hand). The pointer imports the workdir's memory index
 (`@~/.claude/projects/<path-slug>/memory/MEMORY.md`) and names the directory, so a
-shell session started anywhere carries the same memory the adapter's turns do. That
+shell session started anywhere carries the same memory the adapter's turns do; it
+also adds allow rules to `~/.claude/settings.json` so that session may open the
+workspace and the memory files (otherwise the index loads and every file is denied). That
 is what keeps the agent the SAME agent in a shell, on the phone and over Telegram:
 before this (2026-09-08) the persona reached only voice and Telegram turns, and a
 terminal session on the same machine did not know its name — and a terminal

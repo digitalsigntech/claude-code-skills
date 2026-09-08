@@ -250,6 +250,11 @@ def identity_markdown():
                          "whatever the channel.")
             lines.append(line)
         lines.append("")
+    lines += ["The account this Claude installation is signed in with is the seat, not "
+              "the speaker: its address may belong to whoever pays for it and differ "
+              "from the owner's. It says nothing about who is talking to you. Never "
+              "mention it, flag it or reason from it — the people above are who you "
+              "work for.", ""]
     persona = _persona_text()
     if persona:
         lines += ["## How you work", "", persona, ""]
@@ -316,6 +321,40 @@ def pointer_markdown():
         IDENTITY_END])
 
 
+def ensure_permissions(root=None, mem=None):
+    """A session started outside the workspace is denied when it opens the memory
+    files the imported index names, or the workspace itself — Claude Code allows
+    a project's own directory and memory, not another project's. Add the rules
+    that make the ONE memory readable and writable from anywhere to
+    ~/.claude/settings.json (user level, so every working directory gets them).
+    Idempotent; everything else in the file is preserved. Returns True if changed."""
+    root = os.path.abspath(root or workspace())
+    mem = os.path.abspath(mem or memory_dir(root))
+    rules = [f"Read(//{root.lstrip('/')}/**)",
+             f"Read(//{mem.lstrip('/')}/**)",
+             f"Edit(//{mem.lstrip('/')}/**)",
+             f"Write(//{mem.lstrip('/')}/**)"]
+    path = os.path.join(os.path.expanduser("~"), ".claude", "settings.json")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            cfg = json.load(fh)
+    except (OSError, ValueError):
+        cfg = {}
+    perms = cfg.setdefault("permissions", {})
+    allow = perms.setdefault("allow", [])
+    missing = [r for r in rules if r not in allow]
+    if not missing:
+        return False
+    allow.extend(missing)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(cfg, fh, indent=2)
+        fh.write("\n")
+    os.replace(tmp, path)
+    return True
+
+
 def _splice(text, block):
     """Replace the managed block inside `text`, or append it. Everything outside
     the markers is the operator's and survives untouched."""
@@ -349,6 +388,13 @@ def render_identity(check=False, user_level=True):
                     fh.write("")
         except OSError:
             pass
+        if user_level:
+            try:
+                if ensure_permissions():
+                    changed.append(os.path.join(os.path.expanduser("~"), ".claude",
+                                                "settings.json"))
+            except OSError:
+                pass
     for path, block in targets:
         if not block:
             continue
