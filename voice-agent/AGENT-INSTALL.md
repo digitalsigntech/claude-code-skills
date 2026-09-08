@@ -474,6 +474,17 @@ true, lang, speaker, voice: {format, b64}, reply_format}` — with `audio_second
 account's last language, else English; the text is capped at 4000 characters. Nothing is
 archived: a script read aloud is not a line of the conversation.
 
+**A `say` over the socket, and a cache on the plane (request 503, 2026-09-08).** On a stream the
+phone can send control `{type: "say", id, text, lang?, speaker?}`: the session synthesises the
+text sentence by sentence — `reply_chunk` frames under that id, first sound ~1–1.5 s — then one
+metered `reply` with `say: true`, `audio_seconds: 0` and `audio_seconds_out`; it queues behind
+the answers in order, no model. On the clip path the plane's `POST /say` (clear JSON `{say, lang,
+speaker}`) caches the rendered audio by sha256(text | voice | language) and serves every later
+device from the cache without waking the agent and without a charge; a miss reaches the agent as
+`kind: say` with a CLEAR `question` (the app's own script, no user words) and the agent answers
+the voice reply in the clear. `lang: auto` never hits the shared cache (the agent resolves it per
+account) — send the script's language.
+
 **Phone tools on the local path (request 499, 2026-09-06).** The app declares its tools —
 the same JSON-schema list the cloud engines get — in the stream `start` (`tools: [...]`, once per
 stream) or in a clip ask (`tools` once, then `tools_rev` alone: the agent caches the list per

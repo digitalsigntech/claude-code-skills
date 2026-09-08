@@ -409,6 +409,7 @@ _SENT_END = re.compile(r'[.!?…。！？]+["”’)\]]*(?=\s)|\n')
 _TABLE_OR_FENCE = re.compile(r'(^|\n)\s*(\|.*\||```|\[tool_call\])', re.S)   # a tool-call line is never spoken
 MIN_SENT = int(os.environ.get("LQ_STREAM_MIN_SENT", "24"))
 TOOL_WAIT_S = float(os.environ.get("LQ_STREAM_TOOL_WAIT_S", "30"))   # request 499: how long a tool result may take
+_SAY = object()      # the answer queue's marker for a `say` (request 503)
 TAIL_WINDOW_S = float(os.environ.get("LQ_STREAM_TAIL_WINDOW_S", "4"))  # after an interrupt / the end of playback
 TAIL_MIN_WORDS = int(os.environ.get("LQ_STREAM_TAIL_MIN_WORDS", "8"))
 
@@ -805,6 +806,13 @@ class StreamSession:
         elif t == "heard_out":
             self.heard_out = c.get("seconds")
             self.last_heard_out = time.time()
+        elif t == "say":
+            # request 503: words the app wrote, spoken now, in order with the answers
+            text = str(c.get("text") or c.get("say") or "")[:4000].strip()
+            uid = c.get("id") if c.get("id") is not None else f"say{self.utt_seq + 1}"
+            if text:
+                self.answer_q.put((_SAY, uid, text, str(c.get("lang") or "").strip().lower()[:5] or None,
+                                   str(c.get("speaker") or "").strip().lower()[:64] or None))
         elif t == "tool_result":
             # request 499: the phone ran the tool; the turn waiting on it continues
             q = self.tool_q.get(str(c.get("call_id") or ""))
@@ -941,6 +949,38 @@ class StreamSession:
             self.log(f"utterance {uid}: heard {heard_code or '?'} (p={heard_p:.2f}) -> speaking {lang}")
         self.answer_q.put((uid, user_text, secs_in, peak, ctrl, t0, t_stt, ts, lang))
 
+    def _say(self, uid, text, lang, speaker):
+        """Request 503: the app's own words over the socket, sentence by
+        sentence — `reply_chunk` frames under the phone's id as they are
+        synthesised, then one metered `reply` with `say: true`. No model."""
+        t0 = time.time()
+        lang = lang or self.lang or lv.recent_lang(self.account) or "en"
+        lang = voice_lang_for(text, pinned=lang if lang != "auto" else None, last=lv.recent_lang(self.account))
+        speaker = speaker or self.speaker
+        streamed, voice, audio, secs_out, out_fmt, out_rate, spoke_by = None, None, b"", 0.0, lv.REPLY_FORMAT, 0, "-"
+        if self.reply_stream:
+            spk = _ChunkSpeaker(self, uid, lang, speaker, t0)
+            self.speaking[str(uid)] = spk
+            spk.feed(text)
+            streamed = spk.finish(text, "")
+            self.speaking.pop(str(uid), None)
+        if streamed:
+            secs_out, spoke_by = streamed["audio_seconds_out"], streamed["spoke_by"] or "-"
+        else:
+            audio, secs_out, out_fmt, out_rate, spoke_by = lv.speak(lv._speakable(text) or text, lang, speaker)
+            voice = {"format": out_fmt, "b64": base64.b64encode(audio).decode()}
+        reply = {"type": "reply", "id": uid, "turn_id": self.turn_id(uid), "text": text, "say": True,
+                 "lang": lang, **({"speaker": speaker} if speaker else {}),
+                 "voice": voice, **({"streamed": streamed} if streamed else {}),
+                 "audio_seconds": 0.0, "audio_seconds_out": round(secs_out, 3),
+                 "reply_format": (f"{out_fmt} streamed {streamed['chunks']} chunks {lv.REPLY_BITRATE} {spoke_by}"
+                                  if streamed else f"{out_fmt} {out_rate} Hz {lv.REPLY_BITRATE} {spoke_by}"),
+                 "timing": {"tts_s": round(time.time() - t0, 2)}, "ts": time.time()}
+        self._agent(reply, meter={"id": uid, "audio_seconds": 0.0, "audio_seconds_out": round(secs_out, 3)})
+        self.log(f"say {uid}: {len(text)} chars -> {secs_out:.1f}s"
+                 + (f" first_audio {streamed['first_audio_s']}s in {streamed['chunks']} chunks" if streamed else f" {len(audio) // 1024} KB blob")
+                 + f", {spoke_by}, lang={lang} speaker={speaker or '-'}, {time.time() - t0:.1f}s")
+
     def _answers(self):
         """One model turn at a time, in the order the sentences ended."""
         while not self.stop.is_set():
@@ -949,6 +989,9 @@ class StreamSession:
             except queue.Empty:
                 continue
             try:
+                if item and item[0] is _SAY:
+                    self._say(*item[1:])
+                    continue
                 self._answer(*item)
             except Exception as e:
                 self.log(f"answer failed for utterance {item[0]}: {str(e)[:120]}")
@@ -1236,6 +1279,10 @@ def _selftest():
         frames.append(phone(KIND_AUDIO, pcm[i:i + step].ljust(step, b"\0")))
         n += 1
     frames.append(phone(KIND_CTRL, json.dumps({"type": "utterance_end", "id": "utt-1", "seconds": round(n * 0.1, 1)}).encode()))
+    say_mode = bool(os.environ.get("LQ_SELFTEST_SAY"))
+    if say_mode:
+        frames.append(phone(KIND_CTRL, json.dumps({"type": "say", "id": "say-1", "lang": "en", "speaker": "af_heart",
+                                                    "text": "Everything you say is sealed on your phone before it leaves. Only your own agent can open it."}).encode()))
     # a second sentence straight after the first, while the first is being answered — in RUSSIAN,
     # so the language heard, not the language pinned, has to pick the voice
     # Long enough for the one-shot decoder to IDENTIFY it (SHORT_CLIP_S):
@@ -1378,6 +1425,16 @@ def _selftest():
     tids = [(o.get("id"), o.get("turn_id")) for k, _m, o in seen if k in ("final", "reply", "reply_chunk") and o.get("id") != 0]
     tid_ok = bool(tids) and all(t and str(t).endswith(f":{i}") for i, t in tids) and len({t.split(":")[0] for _i, t in tids}) == 1
     print(f"  turn ids on final/reply/reply_chunk: {tid_ok} -> {sorted({t for _i, t in tids})}")
+    say_ok = True
+    if say_mode:
+        sc = [o for k, _m, o in seen if k == "reply_chunk" and o.get("id") == "say-1"]
+        sr = [(m, o) for k, m, o in seen if k == "reply" and o.get("id") == "say-1"]
+        say_ok = (len(sc) >= 2 and sc[-1].get("final") is True and bool(sr) and sr[-1][1].get("say") is True
+                  and sr[-1][1].get("text", "").startswith("Everything you say") and sr[-1][1].get("voice") is None
+                  and sr[-1][0] is not None and float(sr[-1][0].get("audio_seconds_out") or 0) > 3
+                  and float(sr[-1][0].get("audio_seconds") or 0) == 0)
+        print(f"  say over the socket: {len(sc)} chunk(s), reply say={bool(sr) and sr[-1][1].get('say')}, metered "
+              f"{sr[-1][0] if sr else None} -> {'ok' if say_ok else 'FAIL'}")
     tools_ok = True
     if tools_mode:
         r1 = [o for k, _m, o in seen if k == "reply" and o.get("id") == "utt-1"]
@@ -1392,7 +1449,7 @@ def _selftest():
         print(f"  phone tool: call seen {[(c.get('name'), c.get('arguments')) for c in calls_seen]}, "
               f"chunks {[ (c['seq'], c.get('final'), (c.get('text') or '')[:30]) for c in c1]}, "
               f"reply text {(r1[-1].get('text') if r1 else None)!r}, tool_calls {(r1[-1].get('tool_calls') if r1 else None)} -> {'ok' if tools_ok else 'FAIL'}")
-    ok = (greet_ok and stream_ok and in_order and lang_ok and tid_ok and tools_ok and kinds.count("reply") >= 3
+    ok = (greet_ok and stream_ok and in_order and lang_ok and tid_ok and tools_ok and say_ok and kinds.count("reply") >= 3
           and (any(s[0] == "partial" for s in seen) or not sess.partials)
           and (not any(s[0] == "partial" for s in seen) or sess.partials))
     print("SELFTEST", "OK" if ok else "FAILED")

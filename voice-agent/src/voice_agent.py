@@ -3027,7 +3027,7 @@ class Handler(BaseHTTPRequestHandler):
             "engine": "local",
             "took_s": round(time.time() - t0, 2)})
 
-    def _say_answer(self, spec, account, priv, mine, theirs):
+    def _say_answer(self, spec, account, priv, mine, theirs, clear=False):
         """Request 501: the app's own words, spoken exactly — the security
         story's slides, fourteen languages, karaoke-highlighted on the phone.
         No model turn: the text is synthesised as given and comes back in the
@@ -3048,10 +3048,15 @@ class Handler(BaseHTTPRequestHandler):
                            "voice": {"format": fmt, "b64": base64.b64encode(audio).decode()},
                            "reply_format": f"{fmt} {rate} Hz {local_voice.REPLY_BITRATE} {who}"},
                           ensure_ascii=False)
+        self.log_message("say%s: %d chars -> %.1fs %s, %d KB, lang=%s speaker=%s",
+                         " (clear, for the plane's cache)" if clear else "",
+                         len(text), secs_out, who, len(audio) // 1024, lang, speaker or "-")
+        if clear:
+            return self._send(200, {**json.loads(body), "audio_seconds_in": 0.0,
+                                    "audio_seconds_out": round(secs_out, 3), "engine": "local",
+                                    "say": True, "took_s": round(time.time() - t0, 2)})
         sealed = seal_for_devices(body, account=account) or e2ee_seal(
             body, priv, mine, theirs, direction=DIR_TO_PHONE)
-        self.log_message("say: %d chars -> %.1fs %s, %d KB, lang=%s speaker=%s",
-                         len(text), secs_out, who, len(audio) // 1024, lang, speaker or "-")
         return self._send(200, {
             "sealed": sealed, "audio_seconds_in": 0.0,
             "audio_seconds_out": round(secs_out, 3),
@@ -3660,6 +3665,16 @@ class Handler(BaseHTTPRequestHandler):
                     self.log_message("SEALED ASK REFUSED: %s", e)
                     return self._send(400, {"error": "sealed_open_failed",
                                             "detail": str(e)[:300]})
+            elif str(d.get("kind") or "") == "say":
+                # Request 503: the plane asks for the app's own script in the
+                # CLEAR so it can cache the audio for every device — no user
+                # words in it, nothing to seal.
+                try:
+                    _spec = json.loads(q) if q.lstrip().startswith("{") else {"say": q}
+                except ValueError:
+                    _spec = {"say": q}
+                return self._say_answer(_spec if isinstance(_spec, dict) else {"say": q},
+                                        account, None, None, None, clear=True)
             elif e2ee_locked(account) and not d.get("diagnostic"):
                 # Downgrade rule: once declared, plaintext is refused rather
                 # than served. Accepting it "for compatibility" is exactly how
