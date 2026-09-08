@@ -1445,8 +1445,8 @@ def ask(account, question, account_name="", archive_question=True,
     cmd = [exe, "-p", prompt, "--dangerously-skip-permissions"]
     sysbits = []
     # THE INSTALL'S OWN PERSONA, ON THIS PATH TOO (2026-09-04). Asked "how are
-    # you, <name>" through a sealed ask, the agent answered "I am your the customer company
-    # Label assistant (not sure where that name came from)" — a correct and honest
+    # you, <name>" through a sealed ask, the agent answered "I am your <company>
+    # assistant (not sure where <name> came from)" — a correct and honest
     # answer from a model that had never been told the name. It reached the
     # VOICE model, which is minted with these instructions, and never the AGENT
     # model, which is the CLI and reads only CLAUDE.md.
@@ -3999,8 +3999,8 @@ def render_identity_files(check=False):
     """Identity on every road (2026-09-08). The persona this adapter appends to
     a voice turn (agent-system-prompt.md) reached only the turns that came
     through here or through the Telegram gateway. A `claude` opened in a shell
-    on the same machine read CLAUDE.md, which never named the agent — so Max
-    was Max on the phone and "your assistant (not sure where that name came from)"
+    on the same machine read CLAUDE.md, which never named the agent — so the agent
+    had its name on the phone and was "your assistant (not sure where that name came from)"
     in a terminal, with an empty memory if the shell was not in the workspace.
 
     The profile loader renders identity, persona, capabilities and the memory

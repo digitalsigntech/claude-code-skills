@@ -17,7 +17,7 @@ Resolution order, first hit wins:
 
 A missing profile is NOT an error. Every accessor takes a default, so a skill
 installed on a bare machine runs with generic values instead of dying — which is
-the failure mode that made the second install's install a day of hand-patching.
+the failure mode that made the second install's setup a day of hand-patching.
 
 Vendored, not imported across skills: each skill ships its own copy so it has no
 dependency on any other skill being present. sync_exports.py keeps them identical.
@@ -110,7 +110,7 @@ def roles():
 def has(capability):
     """True if this machine actually provides a capability.
 
-    the second install's install notes are a list of features that assumed our services existed:
+    the second install's notes are a list of features that assumed our services existed:
     a semantic answer cache that needs an embedding server, a photo reflex that
     needs a CLIP server, a privacy router that needs a local model and FAILS
     CLOSED. Each of those is now a question asked before the feature arms itself.
@@ -164,7 +164,7 @@ def describe():
 #
 # the owner, 2026-09-08: "His persona and other memory are part of the Telegram
 # gateway. So if there is no Telegram installed, it won't even know his name.
-# the second install must be able to work without Telegram. It must have full memory in a CLI
+# The agent must be able to work without Telegram. It must have full memory in a CLI
 # mode or when controlled by the voice app."
 #
 # The persona (agent-system-prompt.md) was handed to the model only as the

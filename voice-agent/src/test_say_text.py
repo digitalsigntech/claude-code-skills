@@ -53,8 +53,8 @@ CASES = [
     # table above covered the forms I imagined; these are the forms an actual
     # answer contains, and every one of them came out wrong an hour after the
     # rules went live.
-    ("see example.com/bavaria/ for details",
-     "see example.com/bavaria/ for details", "a URL is not two words with 'or'"),
+    ("see example.com/trip/ for details",
+     "see example.com/trip/ for details", "a URL is not two words with 'or'"),
     ("the file is at /opt/voice-agent/config.json",
      "the file is at /opt/voice-agent/config.json", "nor is a path"),
     ("https://example.com/a/b", "https://example.com/a/b", "nor a full URL"),

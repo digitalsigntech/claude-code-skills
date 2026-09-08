@@ -786,7 +786,7 @@ def interpret(text, now=None):
     if len(t) > 140:
         head, _, tail = _first_sentence_split(t)
         # THE FIRST SENTENCE IS ONLY THE QUESTION WHEN THE REST IS MACHINERY.
-        # the owner, 2026-08-14: "the second install should not react to the word 'reminders'
+        # the owner, 2026-08-14: "The agent should not react to the word 'reminders'
         # without reading the whole message. It's a wrong trigger." This rule
         # existed for the app's own scaffolding — a request followed by
         # instructions to the model — and it read the opening of ANY long

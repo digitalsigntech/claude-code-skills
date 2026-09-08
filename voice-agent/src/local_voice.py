@@ -1395,7 +1395,7 @@ _PER_UNITS = {"h", "hr", "hrs", "hour", "hours", "min", "mins", "minute",
 _CODE = re.compile(r"\b([A-Z]{2,3})-(\d[\d-]*)\b")
 # LEAVE THESE ALONE ENTIRELY. A URL, a path and an address are full of the
 # very characters every rule below claims, and none of them mean what the rule
-# thinks: "example.com/bavaria/" came out as "example.com or bavaria or".
+# thinks: "example.com/trip/" came out as "example.com or bavaria or".
 # Masked before the rules run and restored after, which is the only way a rule
 # cannot reach inside them by accident.
 _OPAQUE = re.compile(r"(?:https?://\S+|www\.\S+|\S+@\S+\.\S+"

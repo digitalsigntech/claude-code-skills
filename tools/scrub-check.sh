@@ -52,13 +52,29 @@ if [ -n "$ALLOW" ]; then
 else
   HITS=$(grep -rIn -E "$PATTERNS" --exclude-dir=.git .)
 fi
+# The tree is not the only thing a push publishes. Commit MESSAGES and the
+# author/committer identities travel with it, and 2026-09-08 the root commit's
+# subject and two author e-mails named the company while every file was clean.
+# pre-push hands us "<local ref> <local sha> <remote ref> <remote sha>" per line;
+# scan every commit that is about to leave.
+ZERO=0000000000000000000000000000000000000000
+while read -r _lref lsha _rref rsha; do
+  [ -z "$lsha" ] || [ "$lsha" = "$ZERO" ] && continue
+  if [ "$rsha" = "$ZERO" ]; then RANGE="$lsha"; else RANGE="$rsha..$lsha"; fi
+  META=$(git log --format='%h %an <%ae> %cn <%ce>%n%B' "$RANGE" 2>/dev/null          | { if [ -n "$ALLOW" ]; then sed -E "s#($ALLOW)##g"; else cat; fi; }          | grep -E "$PATTERNS")
+  [ -n "$META" ] && HITS="$HITS
+commit metadata: $META"
+done
+
 if [ -n "$HITS" ]; then
   echo "PUSH BLOCKED — this tree names something that must not be published:" >&2
   echo "$HITS" | head -20 >&2
   echo >&2
   echo "Every one of these is an identifier: a person, a company, a host, a chat," >&2
   echo "a mailbox. Replace it with a variable read from config at install time," >&2
-  echo "commit, and push again. Never --no-verify." >&2
+  echo "commit, and push again. Never --no-verify. A hit under 'commit metadata'" >&2
+  echo "is a message or an author identity: reword/amend (git commit --amend," >&2
+  echo "git rebase) before pushing." >&2
   exit 1
 fi
 exit 0

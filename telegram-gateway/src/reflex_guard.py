@@ -6,9 +6,9 @@ times about three different reflexes:
 
   2026-08-11, backups — "You said the backups are running well, but the last
   message here shows 2 failures" got the backup table again.
-  2026-08-14, reminders — twice. "I asked the agent to show me reminders. Here is what
+  2026-08-14, reminders — twice. "I asked the other agent to show me reminders. Here is what
   I got: …" and "I don't need to see reminders that I have with Claude. I am
-  reporting you that the second install has a problem" both got the reminders table, so a bug
+  reporting you that the other agent has a problem" both got the reminders table, so a bug
   report about another machine was answered with a list of his own rows. He had
   to censor the word — "why does the remind*** word trigger…" — to get a
   sentence through to the model at all.

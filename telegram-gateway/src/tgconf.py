@@ -205,7 +205,7 @@ MEDIA = os.path.join(WORKSPACE_ROOT, "local-ai", "media")
 # label-routed. "off" = no privacy gate.
 # A router that sends private questions to a local model FAILS CLOSED, so on a
 # machine without that model it breaks exactly the questions asked most often.
-# It cannot be on unless the capability is present. (the second install, 2026-08-13.)
+# It cannot be on unless the capability is present. (second install, 2026-08-13.)
 PRIVACY_MODE = (os.environ.get("TG_PRIVACY_MODE", "targeted")
                 if P.has("private_model") else "off")  # off | targeted | strict
 PRIVACY_ROUTER = PRIVACY_MODE != "off"
