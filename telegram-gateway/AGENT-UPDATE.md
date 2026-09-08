@@ -57,7 +57,9 @@ The pointer in `~/.claude/CLAUDE.md` also imports the workspace's memory index
 `cd /tmp && claude -p "What is your name, and what does your memory index list?"`
 — the answer must match one asked inside the workspace, including the detail
 from a memory file (the render also adds the allow rules that let a session outside
-the workspace read them; the log names `~/.claude/settings.json` once when it does). Before, a session started
+the workspace read them; the log names `~/.claude/settings.json` once when it does). Then
+`cd /tmp && claude -p "Remember: <fact>. Tell me the path you wrote."` — the file must
+appear in the workspace's memory directory, written via `agentprofile.py remember`. Before, a session started
 outside the workspace knew the name but had an empty memory.
 
 Then send the bot one message and confirm it answers. A gateway that starts cleanly

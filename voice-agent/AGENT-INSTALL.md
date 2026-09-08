@@ -110,7 +110,9 @@ does it by hand). The pointer imports the workdir's memory index
 (`@~/.claude/projects/<path-slug>/memory/MEMORY.md`) and names the directory, so a
 shell session started anywhere carries the same memory the adapter's turns do; it
 also adds allow rules to `~/.claude/settings.json` so that session may open the
-workspace and the memory files (otherwise the index loads and every file is denied). That
+workspace and the memory files (otherwise the index loads and every file is denied), and one Bash rule for
+`agentprofile.py remember`, the subcommand such a session saves memories with — the
+harness guards `~/.claude/` and refuses the file tools on another project's memory. That
 is what keeps the agent the SAME agent in a shell, on the phone and over Telegram:
 before this (2026-09-08) the persona reached only voice and Telegram turns, and a
 terminal session on the same machine did not know its name — and a terminal

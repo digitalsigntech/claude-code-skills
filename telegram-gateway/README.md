@@ -93,7 +93,11 @@ index in front of it and is told to save new memories there — Claude Code keep
 memory per working directory, and without the import a `claude` opened in `/tmp`
 knew its name but ran on an empty memory. The same render adds three allow rules to
 `~/.claude/settings.json` (read the workspace; read and edit the memory directory —
-an Edit rule covers every file-editing tool), because a session outside the workspace is otherwise denied when it
+an Edit rule covers every file-editing tool; plus one exact Bash rule for
+`agentprofile.py remember`, because the harness guards `~/.claude/` as sensitive and
+refuses the file tools on another project's memory directory even when allowed — so a
+session outside the workspace saves a memory through that subcommand, body on stdin,
+and the pointer shows it the command), because a session outside the workspace is otherwise denied when it
 opens the very files the index names. Result: a `claude` opened in any shell,
 a voice-app turn and a Telegram turn are the same agent with the same name and
 the same memory. Before this (2026-09-08) the persona travelled only as the

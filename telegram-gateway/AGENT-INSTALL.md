@@ -91,7 +91,16 @@ tells the agent to save new memories into that directory — Claude Code keeps m
 per working directory, and this is what gives a session started anywhere the same
 memory as the voice app and Telegram. It also adds allow rules to
 `~/.claude/settings.json` so that session may read the workspace and read/write the
-memory directory — without them the index loads but every file it names is denied. The gateway repeats the render at every boot.
+memory directory — without them the index loads but every file it names is denied. Saving a memory from
+such a session goes through `python3 telegram/agentprofile.py remember <name> --type
+<type> --description "…"` (body on stdin), which the pointer spells out and the
+rules allow — the harness guards `~/.claude/` and refuses the file tools there.
+Prove that too:
+
+```bash
+cd /tmp && claude -p "Remember for future sessions: <a fact>. Then tell me the path you wrote."
+ls ~/.claude/projects/<path-slug>/memory/     # the new file and its MEMORY.md line are here, not under -tmp
+``` The gateway repeats the render at every boot.
 Prove it before moving on, with a memory question and not only a name question:
 
 ```bash
