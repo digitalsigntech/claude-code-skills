@@ -84,15 +84,17 @@ python3 telegram/agentprofile.py render-identity --check   # "identity current"
 ```
 
 This writes a managed block into `<workspace>/CLAUDE.md` (name, people by role, the
-persona, capabilities, where memory lives) and a pointer into `~/.claude/CLAUDE.md`.
-The gateway repeats it at every boot. It is what makes the agent the same agent in a
-terminal, through the voice app and over Telegram — with the same project memory,
-which Claude Code keeps per working directory, so every road must run in
-`workspace.root`. Prove it before moving on:
+persona, capabilities, the memory directory) and a pointer into `~/.claude/CLAUDE.md`.
+The pointer imports the workspace's memory index
+(`@~/.claude/projects/<path-slug>/memory/MEMORY.md`, created empty if missing) and
+tells the agent to save new memories into that directory — Claude Code keeps memory
+per working directory, and this is what gives a session started anywhere the same
+memory as the voice app and Telegram. The gateway repeats the render at every boot.
+Prove it before moving on, with a memory question and not only a name question:
 
 ```bash
 cd <workspace> && claude -p "What is your name, who do you work for, and who am I?"
-cd /tmp && claude -p "What is your name?"      # the pointer must answer this too
+cd /tmp && claude -p "What is your name, and what does your memory index list?"   # must match the workspace answer
 ```
 
 ## 3. Optional integrations

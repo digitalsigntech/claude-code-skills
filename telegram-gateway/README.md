@@ -85,10 +85,15 @@ the same file is handed to the voice adapter and rendered for terminal sessions.
 boot (and on `python3 telegram/agentprofile.py render-identity`) the profile
 loader writes a managed block — who the agent is, whom it serves, the persona,
 what this machine provides, where its memory lives — into `<workspace>/CLAUDE.md`,
-and a short pointer into `~/.claude/CLAUDE.md`. Everything outside the block
-markers is yours and survives. Result: a `claude` opened in a shell, a voice-app
-turn and a Telegram turn are the same agent with the same name and the same
-project memory. Before this (2026-09-08) the persona travelled only as the
+and a pointer into `~/.claude/CLAUDE.md`. Everything outside the block markers
+is yours and survives. The pointer names the workspace's memory directory
+(`~/.claude/projects/<path-slug>/memory/`) and **imports its `MEMORY.md`** with an
+`@` line, so a session started in any other directory still has the whole memory
+index in front of it and is told to save new memories there — Claude Code keeps
+memory per working directory, and without the import a `claude` opened in `/tmp`
+knew its name but ran on an empty memory. Result: a `claude` opened in any shell,
+a voice-app turn and a Telegram turn are the same agent with the same name and
+the same memory. Before this (2026-09-08) the persona travelled only as the
 gateway's system prompt, and a terminal session on the same machine did not
 know its own name.
 

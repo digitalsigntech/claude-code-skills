@@ -22,7 +22,7 @@ the failure mode that made the second install's install a day of hand-patching.
 Vendored, not imported across skills: each skill ships its own copy so it has no
 dependency on any other skill being present. sync_exports.py keeps them identical.
 """
-import json, os
+import json, os, re
 
 SCHEMA_VERSION = 1
 
@@ -183,6 +183,17 @@ def describe():
 # workspace and memory are. Both services call this at boot; the CLI below does
 # it by hand. Idempotent: nothing is written when the block is already current.
 
+def memory_dir(root=None):
+    """Where the CLI keeps this workspace's durable memory: Claude Code stores a
+    project's memory under a path-derived directory in ~/.claude/projects/. Same
+    rule the harness uses (non-alphanumerics -> '-'), so the pointer rendered
+    into ~/.claude/CLAUDE.md can name the index a session started ELSEWHERE
+    would otherwise never load."""
+    root = os.path.abspath(root or workspace())
+    slug = "-" + re.sub(r"[^A-Za-z0-9]+", "-", root).strip("-")
+    return os.path.join(os.path.expanduser("~"), ".claude", "projects", slug, "memory")
+
+
 IDENTITY_BEGIN = "<!-- agent-identity:begin (rendered from agent-profile.json by agentprofile.py — edit the profile or the persona file, not this block) -->"
 IDENTITY_END = "<!-- agent-identity:end -->"
 
@@ -259,13 +270,17 @@ def identity_markdown():
             lines.append(f"- off here (do not assume them): {', '.join(sorted(off))}")
         lines.append("")
     dirs = (load().get("workspace") or {}).get("dirs") or {}
+    mem = memory_dir(root)
     lines += ["## Workspace and memory", "",
-              f"Your workspace is `{root}`. Work from that directory on every road: "
-              "your durable memory is this project's memory (loaded by the CLI for "
-              f"this directory), and a session started elsewhere must `cd {root}` "
-              "first or it runs with an empty one. What you learn about the people, "
-              "the company and the way they want things done belongs in that memory, "
-              "so the next session — on any road — already knows it.", ""]
+              f"Your workspace is `{root}`. Your durable memory is the directory "
+              f"`{mem}` — one file per fact, indexed by `MEMORY.md` there. The CLI "
+              f"loads it for sessions started in `{root}`; a session started anywhere "
+              "else has the index imported through `~/.claude/CLAUDE.md` and reads "
+              "the files it names from that same directory. Whatever the road — "
+              "terminal, voice app, Telegram, email — it is the ONE memory: save what "
+              "you learn about the people, the company and the way they want things "
+              f"done into `{mem}` (never into the memory directory of some other "
+              "working directory), so the next session on any road already knows it.", ""]
     if dirs:
         lines += ["| Role | Path |", "|---|---|"]
         for role, sub in dirs.items():
@@ -283,14 +298,21 @@ def pointer_markdown():
     name = get("agent.name", "the assistant")
     org = get("org.name") or get("org.short", "this company")
     root = workspace()
+    mem = memory_dir(root)
     return "\n".join([
         IDENTITY_BEGIN, "",
         f"You are {name}, the in-house assistant for {org}. Whatever directory this "
-        f"session was started in, your workspace, your instructions and your memory "
-        f"live in `{root}` — read `{os.path.join(root, 'CLAUDE.md')}` before doing "
-        f"anything, and work from that directory (`cd {root}`) so the project memory "
-        f"there loads. Your name is {name} on every road: terminal, voice app, "
-        "Telegram, email.", "",
+        f"session was started in, your workspace and your instructions live in "
+        f"`{root}` — read `{os.path.join(root, 'CLAUDE.md')}` before doing anything "
+        f"else. Your name is {name} on every road: terminal, voice app, Telegram, email.",
+        "",
+        f"Your memory is the directory `{mem}` — the index below is its `MEMORY.md`, "
+        "imported here so it is in front of you even when this session was not "
+        "started in the workspace. Each entry names a file in that directory; read "
+        "the file when the entry is relevant. Save new memories THERE, not into the "
+        "memory directory of the current working directory: there is one memory, "
+        "shared by every road.", "",
+        f"@{os.path.join(mem, 'MEMORY.md')}", "",
         IDENTITY_END])
 
 
@@ -315,6 +337,18 @@ def render_identity(check=False, user_level=True):
         targets.append((os.path.join(os.path.expanduser("~"), ".claude", "CLAUDE.md"),
                         pointer_markdown()))
     changed = []
+    if not check:
+        # The pointer imports <memory_dir>/MEMORY.md; create an empty index so
+        # the import resolves on a fresh install (the CLI fills it in later).
+        try:
+            mem = memory_dir()
+            os.makedirs(mem, exist_ok=True)
+            idx = os.path.join(mem, "MEMORY.md")
+            if not os.path.exists(idx):
+                with open(idx, "w", encoding="utf-8") as fh:
+                    fh.write("")
+        except OSError:
+            pass
     for path, block in targets:
         if not block:
             continue

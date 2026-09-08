@@ -52,6 +52,11 @@ On the first start after this version the log says `identity rendered into
 <workspace>/CLAUDE.md, ~/.claude/CLAUDE.md` — the profile's identity block, added to
 those files (2026-09-08). Nothing outside the block markers is touched. If the
 persona file says "over Telegram", take that phrase out: the gateway now adds it.
+The pointer in `~/.claude/CLAUDE.md` also imports the workspace's memory index
+(`@~/.claude/projects/<path-slug>/memory/MEMORY.md`), so after this update run
+`cd /tmp && claude -p "What is your name, and what does your memory index list?"`
+— the answer must match one asked inside the workspace. Before, a session started
+outside the workspace knew the name but had an empty memory.
 
 Then send the bot one message and confirm it answers. A gateway that starts cleanly
 but has stopped receiving is the failure mode worth catching immediately, and it does

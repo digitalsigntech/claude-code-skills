@@ -106,10 +106,14 @@ or one you wrote from its `agent-profile.example.json`), the adapter renders the
 agent's identity from it at startup — name, whom it serves, the persona in
 `agent-system-prompt.md`, capabilities, where memory lives — into `<workdir>/CLAUDE.md`
 and a pointer into `~/.claude/CLAUDE.md` (`python3 voice_agent.py --render-identity`
-does it by hand). That is what keeps the agent the SAME agent in a shell, on the
-phone and over Telegram: before this (2026-09-08) the persona reached only voice and
-Telegram turns, and a terminal session on the same machine did not know its name.
-Sessions must run in the workdir for the project memory to load — the adapter does.
+does it by hand). The pointer imports the workdir's memory index
+(`@~/.claude/projects/<path-slug>/memory/MEMORY.md`) and names the directory, so a
+shell session started anywhere carries the same memory the adapter's turns do. That
+is what keeps the agent the SAME agent in a shell, on the phone and over Telegram:
+before this (2026-09-08) the persona reached only voice and Telegram turns, and a
+terminal session on the same machine did not know its name — and a terminal
+started outside the workdir knew the name but ran on an empty memory.
+The adapter itself runs every turn in the workdir, so its memory is the project's.
 
 Override in `config.json` (`agent_name`, `company_name`, `user_name`, `user_email`,
 `logo`) only for something the files genuinely should not say.
