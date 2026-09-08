@@ -44,6 +44,15 @@ HERE = pathlib.Path(__file__).resolve().parent
 CONFIG = HERE / "config.json"
 STATE = HERE / "state.json"
 
+# The deployment's profile loader, vendored beside this file (sync_exports.py
+# keeps it identical to the gateway's copy). Optional: with no copy and no
+# profile the adapter runs exactly as before.
+try:
+    sys.path.insert(0, str(HERE))
+    import agentprofile as _profile
+except ImportError:
+    _profile = None
+
 DEFAULTS = {
     "workdir": str(pathlib.Path.home()),
     "port": 8787,
@@ -3986,11 +3995,41 @@ def _qr_sweeper():
         time.sleep(30)
 
 
+def render_identity_files(check=False):
+    """Identity on every road (2026-09-08). The persona this adapter appends to
+    a voice turn (agent-system-prompt.md) reached only the turns that came
+    through here or through the Telegram gateway. A `claude` opened in a shell
+    on the same machine read CLAUDE.md, which never named the agent — so Max
+    was Max on the phone and "your assistant (not sure where that name came from)"
+    in a terminal, with an empty memory if the shell was not in the workspace.
+
+    The profile loader renders identity, persona, capabilities and the memory
+    location into <workdir>/CLAUDE.md and a pointer into ~/.claude/CLAUDE.md,
+    which every road reads. Called at startup; idempotent. Returns the files
+    changed, or None when there is no loader or no profile to render from."""
+    if _profile is None:
+        return None
+    workdir = os.path.expanduser(config()["workdir"])
+    _profile.adopt(workdir)
+    if not _profile.load():
+        return None
+    return _profile.render_identity(check=check)
+
+
 def serve():
     cfg = config()
     srv = ThreadingHTTPServer((cfg["bind"], int(cfg["port"])), Handler)
     print(f"[voice-agent] listening on {cfg['bind']}:{cfg['port']}  "
           f"workdir={os.path.expanduser(cfg['workdir'])}", flush=True)
+    try:
+        ch = render_identity_files()
+        if ch is None:
+            print("[voice-agent] identity: no profile beside workdir — CLAUDE.md left as is", flush=True)
+        else:
+            print("[voice-agent] identity " + ("rendered into " + ", ".join(ch) if ch
+                  else f"current ({_profile.describe()})"), flush=True)
+    except Exception as e:
+        print(f"[voice-agent] identity render skipped: {e}", file=sys.stderr, flush=True)
     h = health()
     if not h["ok"]:
         print(f"[voice-agent] WARNING: {h.get('detail')}", flush=True)
@@ -4007,6 +4046,9 @@ if __name__ == "__main__":
     ap.add_argument("--check", action="store_true", help="print health and exit")
     ap.add_argument("--identity", action="store_true",
                     help="derive the identity panel now and print it")
+    ap.add_argument("--render-identity", action="store_true",
+                    help="write the profile's identity block into the workdir's "
+                         "CLAUDE.md and ~/.claude/CLAUDE.md now (also done at startup)")
     # The safety number, from the machine the agent actually runs on. The app
     # tells people this is the strongest check available to them, and a check
     # that requires decoding base64 and hashing it by hand is a check nobody
@@ -4055,5 +4097,10 @@ if __name__ == "__main__":
             print(f"{a.unpin} had no pinned device key")
     elif a.identity:
         print(json.dumps(ensure_identity(force=True), indent=2))
+    elif a.render_identity:
+        ch = render_identity_files()
+        if ch is None:
+            raise SystemExit("no profile loader or no agent-profile.json beside the workdir")
+        print("identity rendered into: " + (", ".join(ch) if ch else "(already current)"))
     else:
         serve()

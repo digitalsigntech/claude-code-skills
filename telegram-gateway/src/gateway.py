@@ -1511,6 +1511,16 @@ def main():
         {"command": "help", "description": "What I can do"},
     ])
     log(f"gateway up as @{who.get('username')} ({who.get('id')}); allowlist={sorted(C.allowlist())}")
+    # Identity on every road (2026-09-08): the persona this gateway appends to
+    # its turns is also rendered into the workspace CLAUDE.md and the user-level
+    # pointer, so a terminal session or a voice turn on this machine is the same
+    # agent with the same memory. Idempotent; the log says whether it moved.
+    try:
+        _ch = C.P.render_identity()
+        log("identity rendered into " + ", ".join(_ch) if _ch
+            else f"identity current ({C.P.describe()})")
+    except Exception as _e:
+        log(f"identity render skipped: {_e}")
     if not C.allowlist():
         log("WARNING: allowlist is EMPTY — every message will be denied until you add a user ID "
             "to telegram/allowlist.json")

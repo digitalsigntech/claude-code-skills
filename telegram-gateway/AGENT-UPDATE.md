@@ -48,6 +48,11 @@ cp claude-code-skills/telegram-gateway/src/*.py <PROJECT>/telegram/
 systemctl --user start telegram-gateway
 ```
 
+On the first start after this version the log says `identity rendered into
+<workspace>/CLAUDE.md, ~/.claude/CLAUDE.md` — the profile's identity block, added to
+those files (2026-09-08). Nothing outside the block markers is touched. If the
+persona file says "over Telegram", take that phrase out: the gateway now adds it.
+
 Then send the bot one message and confirm it answers. A gateway that starts cleanly
 but has stopped receiving is the failure mode worth catching immediately, and it does
 not show up in the logs as an error.

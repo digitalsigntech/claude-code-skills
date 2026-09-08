@@ -22,13 +22,13 @@ the owner, same day: "This message was addressed to a user, not to you."
 Owner-gated on purpose: this pushes text out to a paying customer's phone,
 which is not something a guest in the group gets to do.
 """
-import tgconf as C   # identity from config
 import json, os, re, time
 import urllib.error, urllib.request
 
 import tg_api as TG
+import tgconf as C
 
-FEEDBACK_CHAT = C.EXAMPLE_CHAT_ID
+FEEDBACK_CHAT = C.FEEDBACK_CHAT            # 0 = no feedback group on this install
 REALTIME_DIR = "<workspace>/voice/realtime"
 MAP_FILE = os.path.join(REALTIME_DIR, ".feedback_msgmap.json")
 SECRET_FILE = os.path.join(REALTIME_DIR, ".hook_secret")

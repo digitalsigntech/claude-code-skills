@@ -101,6 +101,16 @@ If something is missing and the operator wants it shown, the fix is usually to w
 where it belongs (`CLAUDE.md`, a company file) and re-derive — then the next agent to
 read this project knows it too.
 
+**If the workdir has an `agent-profile.json`** (the telegram-gateway skill's profile,
+or one you wrote from its `agent-profile.example.json`), the adapter renders the
+agent's identity from it at startup — name, whom it serves, the persona in
+`agent-system-prompt.md`, capabilities, where memory lives — into `<workdir>/CLAUDE.md`
+and a pointer into `~/.claude/CLAUDE.md` (`python3 voice_agent.py --render-identity`
+does it by hand). That is what keeps the agent the SAME agent in a shell, on the
+phone and over Telegram: before this (2026-09-08) the persona reached only voice and
+Telegram turns, and a terminal session on the same machine did not know its name.
+Sessions must run in the workdir for the project memory to load — the adapter does.
+
 Override in `config.json` (`agent_name`, `company_name`, `user_name`, `user_email`,
 `logo`) only for something the files genuinely should not say.
 

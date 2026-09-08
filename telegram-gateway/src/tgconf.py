@@ -5,7 +5,6 @@ committed/backed up. The allowlist (telegram/allowlist.json) is the set of Teleg
 user IDs permitted to talk to the bot; everyone else is ignored. This gateway can
 read email, query the KB and run commands on the box, so access MUST stay locked.
 """
-import tgconf as C   # identity from config
 import os, json
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -116,9 +115,16 @@ def _system_prompt():
     path = P.get("agent.system_prompt_file", "agent-system-prompt.md")
     for base in (WORKSPACE_ROOT, HERE):
         try:
-            return open(os.path.join(base, path)).read().strip()
+            text = open(os.path.join(base, path)).read().strip()
         except OSError:
             continue
+        # The persona file is channel-neutral by contract (2026-09-08): the same
+        # file is rendered into CLAUDE.md for terminal sessions and handed to the
+        # voice adapter, so "over Telegram" is added HERE, by the road that knows
+        # it, and never written into the persona itself.
+        return (text + "\n\nThis conversation is over Telegram. Telegram renders "
+                "only basic markdown (**bold**, `code`, lists); GFM tables render "
+                "natively through the gateway — write them bare, never fenced.")
     return (f"You are {BOT_NAME} replying to {OWNER_NAME} over Telegram. Keep "
             "answers concise and conversational — short paragraphs, minimal "
             "preamble, no status narration. Answer directly; use tools ONLY when "
@@ -135,7 +141,9 @@ def _system_prompt():
 #
 # Same name here as in the export, so the line is now identical in both and the
 # scrub has nothing left to rewrite.
-PRIMARY_OWNER_KEY = os.environ.get("TG_PRIMARY_OWNER_KEY", C.PRIMARY_OWNER_KEY)
+PRIMARY_OWNER_KEY = (os.environ.get("TG_PRIMARY_OWNER_KEY")
+                     or os.environ.get("TG_PRIMARY_OWNER_KEY")
+                     or P.person("owner", "reminders_key", "owner"))
 
 APPEND_SYSTEM = _system_prompt()
 # Photo reflex (2026-07-07): image requests answered deterministically from the warm
@@ -212,27 +220,65 @@ PRIVACY_ROUTER = PRIVACY_MODE != "off"
 # the owner 2026-08-05: "User Feedback" group — cloud LLM only, never Nemotron. It is
 # where users' reports land and where replies to them are typed; that traffic is
 # product work, and it must be handled by the model that can act on it.
-ALWAYS_CLAUDE_CHATS = {C.EXAMPLE_CHAT_ID, C.EXAMPLE_CHAT_ID, C.EXAMPLE_CHAT_ID, C.EXAMPLE_CHAT_ID,
-                       C.EXAMPLE_CHAT_ID, C.EXAMPLE_CHAT_ID, C.EXAMPLE_CHAT_ID}
+# The ids are deployment data and live in the profile (channels.telegram); the
+# literals that used to sit here scrubbed into self-references in the published
+# copy, which then could not be imported at all (found 2026-09-08, deploying to
+# a second install). No profile = no special chats, which is the right default.
+def _tg_channel(key, default=None):
+    tg = P.get("channels.telegram")
+    return (tg or {}).get(key, default) if isinstance(tg, dict) else default
+
+
+def _tg_chat_set(key):
+    try:
+        return {int(x) for x in (_tg_channel(key) or [])}
+    except (TypeError, ValueError):
+        return set()
+
+
+def _tg_env_chats(envname, key):
+    """TG_<X>=id,id wins; else the profile list; else nothing — a reflex gated
+    on an empty set never fires, which is the right default for a new install."""
+    raw = os.environ.get(envname, "")
+    if raw:
+        try:
+            return {int(x) for x in raw.replace(";", ",").split(",") if x.strip()}
+        except ValueError:
+            pass
+    return _tg_chat_set(key)
+
+
+ALWAYS_CLAUDE_CHATS = _tg_chat_set("always_cloud_chats")
+# Chats where the owner may ask for a login QR (qr_reflex) — the owner's DM and
+# any bot+owner-only group; a QR carries live credentials, so nowhere else.
+QR_CHATS = _tg_env_chats("TG_QR_CHATS", "qr_chats")
+# The app-feedback group (feedback_reply): 0 = no such group here.
+try:
+    FEEDBACK_CHAT = int(os.environ.get("TG_FEEDBACK_CHAT") or _tg_channel("feedback_chat") or 0)
+except (TypeError, ValueError):
+    FEEDBACK_CHAT = 0
 # Chats where EVERY message is answered on-box-path by Nemotron (private_turn: full
 # chat history + CRM/KB lookup tools + find_files/send_file so it can deliver private
 # documents into the chat, the owner 2026-07-08) — the cloud Claude turn is never used,
 # even for casual chat. Fails closed. Explicit /cloud is the only escape hatch.
 # the owner 2026-07-07: "Private" group. NOTE: until the DGX Spark lands,
 # Nemotron itself runs on OpenRouter (cloud inference) — the owner accepted this.
-ALWAYS_NEMOTRON_CHATS = {C.EXAMPLE_CHAT_ID}
+ALWAYS_NEMOTRON_CHATS = _tg_chat_set("always_local_chats")
 # Voice conversation mode (2026-07-13, the owner: "Voice Claude" group): a voice note in
 # one of these chats is transcribed on-box (whisper.cpp large-v3-turbo on the iGPU,
 # language autodetected), answered with a normal Claude turn, and the reply comes back
 # as a Piper-synthesized voice note plus the full text. Other chats keep the existing
 # file handling (e.g. a caption-less voice note in the owner's DM stays a personal note).
-VOICE_CHATS = {C.EXAMPLE_CHAT_ID}
+VOICE_CHATS = _tg_chat_set("voice_chats")
 # Project chats (the owner 2026-07-19, "PHD R&D with Claude" group): a group bound to a
 # project directory under workspace/projects/<slug>/ — every post (text/voice/photo/doc)
 # is auto-filed there; /wisdom (cloud Claude) vs /privacy (Nemotron) per chat, mode
 # shown on the group title. See projects_mode.py. Additional bindings can be added
 # at runtime via /project <slug> (persisted in state/projects.json).
-PROJECT_CHATS = {C.EXAMPLE_CHAT_ID: "phd-rd"}
+try:
+    PROJECT_CHATS = {int(k): v for k, v in (_tg_channel("project_chats") or {}).items()}
+except (TypeError, ValueError, AttributeError):
+    PROJECT_CHATS = {}
 WHISPER_BIN = os.path.expanduser("~/whisper.cpp/build-vulkan/bin/whisper-cli")
 WHISPER_MODEL = os.path.expanduser("~/whisper.cpp/models/ggml-large-v3-turbo-q5_0.bin")
 PIPER = os.path.join(WORKSPACE_ROOT, "voice", "venv", "bin", "piper")

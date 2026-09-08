@@ -68,6 +68,33 @@ strangers get a shell on this box through you.
 @BotFather → `/setprivacy` → pick the bot → **Disable**. Otherwise the bot only sees
 messages that @-mention it. Skip if they only want direct messages.
 
+## 2b. The profile, and the identity on every road
+
+Copy `agent-profile.example.json` to `<workspace>/agent-profile.json` and fill in
+`agent.name`, `org`, `host.label`, `workspace.root` and `people.owner` (name, title,
+email). Put the persona — how this agent works, what needs whose approval, what is
+private — in `<workspace>/agent-system-prompt.md`. Write it channel-neutral: never
+"over Telegram"; the gateway appends that itself.
+
+Then render the identity, and read what it wrote:
+
+```bash
+cd <workspace> && python3 telegram/agentprofile.py render-identity
+python3 telegram/agentprofile.py render-identity --check   # "identity current"
+```
+
+This writes a managed block into `<workspace>/CLAUDE.md` (name, people by role, the
+persona, capabilities, where memory lives) and a pointer into `~/.claude/CLAUDE.md`.
+The gateway repeats it at every boot. It is what makes the agent the same agent in a
+terminal, through the voice app and over Telegram — with the same project memory,
+which Claude Code keeps per working directory, so every road must run in
+`workspace.root`. Prove it before moving on:
+
+```bash
+cd <workspace> && claude -p "What is your name, who do you work for, and who am I?"
+cd /tmp && claude -p "What is your name?"      # the pointer must answer this too
+```
+
 ## 3. Optional integrations
 
 The README's *Optional integrations* section lists features built for the machine this

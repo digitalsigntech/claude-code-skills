@@ -37,7 +37,8 @@
       "mailbox": "jane@",
       "telegram_id": 0,
       "private_info": true,
-      "write_code": true
+      "write_code": true,
+      "reminders_key": "owner"
     },
     "second_owner": {
       "name": "Sam",
@@ -95,7 +96,9 @@
       "always_cloud_chats": [],
       "always_local_chats": [],
       "voice_chats": [],
-      "project_chats": {}
+      "project_chats": {},
+      "qr_chats": [],
+      "feedback_chat": 0
     }
   }
 }

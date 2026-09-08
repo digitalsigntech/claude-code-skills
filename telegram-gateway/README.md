@@ -77,7 +77,20 @@ only once the service behind it is really there.
 **Your system prompt is content, not code.** Put it in a markdown file at your
 workspace root (`agent-system-prompt.md` by default) — where your facts live,
 what needs whose approval, what is private. With no file you get a generic
-instruction that runs fine and says nothing about you.
+instruction that runs fine and says nothing about you. Keep it **channel-neutral**:
+do not write "over Telegram" into it — the gateway adds that sentence itself, and
+the same file is handed to the voice adapter and rendered for terminal sessions.
+
+**The identity is rendered into `CLAUDE.md`, so it holds without Telegram.** At
+boot (and on `python3 telegram/agentprofile.py render-identity`) the profile
+loader writes a managed block — who the agent is, whom it serves, the persona,
+what this machine provides, where its memory lives — into `<workspace>/CLAUDE.md`,
+and a short pointer into `~/.claude/CLAUDE.md`. Everything outside the block
+markers is yours and survives. Result: a `claude` opened in a shell, a voice-app
+turn and a Telegram turn are the same agent with the same name and the same
+project memory. Before this (2026-09-08) the persona travelled only as the
+gateway's system prompt, and a terminal session on the same machine did not
+know its own name.
 
 **One rule worth copying into yours if any turns arrive by voice.** Speech
 reaches the agent as transcription, and transcription sometimes produces

@@ -13,13 +13,18 @@ so the reflex is deliberately narrow:
 Anything else falls through to the normal Claude turn, which can still run the
 script by hand (e.g. for a different account or chat).
 """
-import tgconf as C   # identity from config
 import os, re, subprocess, sys, time
 
-SCRIPT = os.path.join(C.WORKSPACE_ROOT, "voice/hosted/make_account_qr.py")
-ACCOUNT, NAME = "acct-owner", "the owner"
-OWNER = C.OWNER_ID                          # the owner — it is HIS account credential
-ALLOWED_CHATS = {C.OWNER_ID, C.EXAMPLE_CHAT_ID}   # his DM + "Voice Claude" (bot+the owner only)
+import tgconf as C
+
+# Deployment data comes from the profile / TG_* env (2026-09-08): the literals
+# that used to sit here scrubbed into names the published copy never defined,
+# and the gateway would not import on a second install.
+SCRIPT = os.environ.get("TG_QR_SCRIPT") or os.path.join(C.WORKSPACE_ROOT, "voice/hosted/make_account_qr.py")
+ACCOUNT = os.environ.get("TG_QR_ACCOUNT", "acct-owner")
+NAME = C.OWNER_NAME
+OWNER = C.OWNER_ID                         # the owner — it is THEIR account credential
+ALLOWED_CHATS = set(C.QR_CHATS)            # their DM + bot+owner-only groups; empty = reflex never fires
 
 ACTION = re.compile(r"\b(create|make|generate|mint|send|give|get|need|want|"
                     r"show|display|see|another|fresh|new|resend|re-send)\b", re.I)
