@@ -464,6 +464,16 @@ the first sentence is synthesised and sent while the rest is still being made �
 install the first sound arrives ~1.5 s after the model instead of after the whole synthesis.
 `LQ_SELFTEST_NO_ON_TEXT=1 python3 src/stream_lq.py --selftest` proves that shape.
 
+**Words the app wrote, spoken exactly (`ask kind: say`, request 501, 2026-09-08).** The app owns
+scripts of its own — the security story's slides in fourteen languages, a chat line to read
+aloud — and a model retells a script in its own words. `POST ask` with `kind: "say"` and the
+sealed plaintext `{"say": "<text>", "lang": "auto"|<code>, "speaker": "<voice id>"}` synthesises
+EXACTLY that text, no model turn, and answers the usual sealed voice-reply shape — `{text, say:
+true, lang, speaker, voice: {format, b64}, reply_format}` — with `audio_seconds_in: 0` and
+`audio_seconds_out` as synthesised (billed like any spoken audio). `lang: auto` means the
+account's last language, else English; the text is capped at 4000 characters. Nothing is
+archived: a script read aloud is not a line of the conversation.
+
 **Phone tools on the local path (request 499, 2026-09-06).** The app declares its tools —
 the same JSON-schema list the cloud engines get — in the stream `start` (`tools: [...]`, once per
 stream) or in a clip ask (`tools` once, then `tools_rev` alone: the agent caches the list per

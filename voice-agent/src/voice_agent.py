@@ -2543,6 +2543,19 @@ def _tool_result_turn(plaintext):
     return p if isinstance(p, dict) and isinstance(p.get("tool_result"), dict) else None
 
 
+def _say_turn(plaintext):
+    """The opened payload if this is a `say` (request 501: speak EXACTLY this
+    text, no model), else None."""
+    t = (plaintext or "").lstrip()
+    if not t.startswith("{") or '"say"' not in t[:200]:
+        return None
+    try:
+        p = json.loads(t)
+    except ValueError:
+        return None
+    return p if isinstance(p, dict) and isinstance(p.get("say"), str) else None
+
+
 def _voice_turn(plaintext):
     """The opened payload if this is an LQ turn, else None."""
     t = (plaintext or "").lstrip()
@@ -3012,6 +3025,37 @@ class Handler(BaseHTTPRequestHandler):
             "audio_seconds_in": out["audio_seconds_in"],
             "audio_seconds_out": out["audio_seconds_out"],
             "engine": "local",
+            "took_s": round(time.time() - t0, 2)})
+
+    def _say_answer(self, spec, account, priv, mine, theirs):
+        """Request 501: the app's own words, spoken exactly — the security
+        story's slides, fourteen languages, karaoke-highlighted on the phone.
+        No model turn: the text is synthesised as given and comes back in the
+        usual sealed voice-reply shape with `audio_seconds_in: 0`."""
+        t0 = time.time()
+        import local_voice
+        text = str(spec.get("say") or "")[:4000].strip()
+        if not text:
+            return self._send(400, {"error": "bad_say", "detail": "say is empty"})
+        lang = str(spec.get("lang") or "").strip().lower()[:5]
+        if not lang or lang == "auto":
+            lang = local_voice.recent_lang(account) or "en"
+        speaker = str(spec.get("speaker") or "").strip().lower()[:64]
+        to_say = local_voice._speakable(text) or text
+        audio, secs_out, fmt, rate, who = local_voice.speak(to_say, lang, speaker)
+        body = json.dumps({"text": text, "say": True, "lang": lang,
+                           **({"speaker": speaker} if speaker else {}),
+                           "voice": {"format": fmt, "b64": base64.b64encode(audio).decode()},
+                           "reply_format": f"{fmt} {rate} Hz {local_voice.REPLY_BITRATE} {who}"},
+                          ensure_ascii=False)
+        sealed = seal_for_devices(body, account=account) or e2ee_seal(
+            body, priv, mine, theirs, direction=DIR_TO_PHONE)
+        self.log_message("say: %d chars -> %.1fs %s, %d KB, lang=%s speaker=%s",
+                         len(text), secs_out, who, len(audio) // 1024, lang, speaker or "-")
+        return self._send(200, {
+            "sealed": sealed, "audio_seconds_in": 0.0,
+            "audio_seconds_out": round(secs_out, 3),
+            "engine": "local", "say": True,
             "took_s": round(time.time() - t0, 2)})
 
     def _tool_result_answer(self, spec, account, name, d, priv, mine, theirs):
@@ -3599,6 +3643,9 @@ class Handler(BaseHTTPRequestHandler):
                     if tr is not None or str(d.get("kind") or "") == "tool_result":
                         return self._tool_result_answer(
                             tr or {}, account, name, d, priv, mine, theirs)
+                    sy = _say_turn(q)
+                    if sy is not None or str(d.get("kind") or "") == "say":
+                        return self._say_answer(sy or {}, account, priv, mine, theirs)
                     vt = _voice_turn(q)
                     if vt is not None:
                         return self._voice_answer(
