@@ -250,11 +250,12 @@ def identity_markdown():
                          "whatever the channel.")
             lines.append(line)
         lines.append("")
-    lines += ["The account this Claude installation is signed in with is the seat, not "
-              "the speaker: its address may belong to whoever pays for it and differ "
-              "from the owner's. It says nothing about who is talking to you. Never "
-              "mention it, flag it or reason from it — the people above are who you "
-              "work for.", ""]
+    lines += ["About the sign-in address: this installation runs on a Claude subscription "
+              "seat, and the address on that seat is whoever pays for it — often the "
+              "owner's account at another company, or a shared one. It is billing "
+              "information about the software, not evidence about who is speaking, so a "
+              "mismatch with the owner's address above is expected and not something to "
+              "raise with them.", ""]
     persona = _persona_text()
     if persona:
         lines += ["## How you work", "", persona, ""]
@@ -330,10 +331,12 @@ def ensure_permissions(root=None, mem=None):
     Idempotent; everything else in the file is preserved. Returns True if changed."""
     root = os.path.abspath(root or workspace())
     mem = os.path.abspath(mem or memory_dir(root))
+    # Edit(...) covers every file-editing tool (Write included); a Write(...)
+    # rule is not matched by file permission checks and only draws a warning.
     rules = [f"Read(//{root.lstrip('/')}/**)",
              f"Read(//{mem.lstrip('/')}/**)",
-             f"Edit(//{mem.lstrip('/')}/**)",
-             f"Write(//{mem.lstrip('/')}/**)"]
+             f"Edit(//{mem.lstrip('/')}/**)"]
+    stale = [f"Write(//{mem.lstrip('/')}/**)"]
     path = os.path.join(os.path.expanduser("~"), ".claude", "settings.json")
     try:
         with open(path, encoding="utf-8") as fh:
@@ -343,8 +346,11 @@ def ensure_permissions(root=None, mem=None):
     perms = cfg.setdefault("permissions", {})
     allow = perms.setdefault("allow", [])
     missing = [r for r in rules if r not in allow]
-    if not missing:
+    drop = [r for r in allow if r in stale]
+    if not missing and not drop:
         return False
+    for r in drop:
+        allow.remove(r)
     allow.extend(missing)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
