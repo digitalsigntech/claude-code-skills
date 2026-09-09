@@ -406,7 +406,7 @@ def facts():
 # thread and a sequence number; the app plays in seq order and treats the
 # `final` chunk (or the `reply` frame that follows it) as the end of the turn.
 _SENT_END = re.compile(r'[.!?…。！？]+["”’)\]]*(?=\s)|\n')
-_TABLE_OR_FENCE = re.compile(r'(^|\n)\s*(\|.*\||```|\[tool_call\])', re.S)   # a tool-call line is never spoken
+_TABLE_OR_FENCE = re.compile(r'(^|\n)\s*(\|.*\||```)|\[tool_call\]', re.S)   # a tool-call marker is never spoken, wherever it sits
 MIN_SENT = int(os.environ.get("LQ_STREAM_MIN_SENT", "24"))
 TOOL_WAIT_S = float(os.environ.get("LQ_STREAM_TOOL_WAIT_S", "30"))   # request 499: how long a tool result may take
 _SAY = object()      # the answer queue's marker for a `say` (request 503)
@@ -1350,7 +1350,7 @@ def _selftest():
         if q.startswith(lv.TOOL_RESULT_MARK):
             full = "Done. The app is in dark mode now."
         elif tools_mode and "dark mode" in q.lower():
-            full = ('Switching to dark mode.\n[tool_call] {"name": "set_appearance", "arguments": {"mode": "dark"}}')
+            full = ('Switching to dark mode. [tool_call] {"name": "set_appearance", "arguments": {"mode": "dark"}}')
         elif scripts_in(q).get("cyrl"):
             # The model answers in the language it was asked in; the voice follows the answer.
             full = (f"Вы спросили: {q} Док открывается в половине третьего. "

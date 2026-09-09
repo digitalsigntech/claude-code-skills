@@ -58,7 +58,7 @@ PIPER_VOICE = os.environ.get(
 # LANGUAGE ID IS NOT TRANSCRIPTION, and paying transcription prices for it is
 # what `-l auto` does: a second full encoder pass, 13.4s against 7.2s on a
 # two-core agent. A smaller model can say WHICH language without being able to
-# write down what was said — measured over ten languages on the second install:
+# write down what was said — measured over ten languages on a two-core CPU install:
 #
 #     tiny   9/10   0.84s      base  10/10  1.82s      small  10/10  6.59s
 #
@@ -943,7 +943,7 @@ def recent_lang(account):
 #
 # The app began overlapping turns (2026-09-04): it keeps listening while a turn
 # is out, and this server is a ThreadingHTTPServer, so two clips arrive and run
-# at once on two cores that ONE whisper pass already saturates. Measured on the second install:
+# at once on two cores that ONE whisper pass already saturates. Measured on a two-core CPU install:
 #
 #     1 at once   7.4s
 #     2 at once  18.9s each      (serial would be 7.4 and 14.8)
@@ -1034,7 +1034,7 @@ def transcribe(audio_bytes, suffix=".m4a", lang=None, hint=""):
             code = "auto"
         if code == "auto":
             # TOO SHORT TO IDENTIFY: inherit the session's language rather than
-            # ask a model a question it cannot answer. Measured on the second install — 1.8s of
+            # ask a model a question it cannot answer. Measured on a two-core CPU install — 1.8s of
             # Ukrainian reads as Russian at p=0.94, and 0.53s of Russian reads
             # as English at p=0.61 — so this is not a threshold that needs
             # tuning, it is audio that does not contain the answer.
@@ -1395,7 +1395,7 @@ _PER_UNITS = {"h", "hr", "hrs", "hour", "hours", "min", "mins", "minute",
 _CODE = re.compile(r"\b([A-Z]{2,3})-(\d[\d-]*)\b")
 # LEAVE THESE ALONE ENTIRELY. A URL, a path and an address are full of the
 # very characters every rule below claims, and none of them mean what the rule
-# thinks: "example.com/trip/" came out as "example.com or bavaria or".
+# thinks: "example.com/section/" came out as "example.com or section or".
 # Masked before the rules run and restored after, which is the only way a rule
 # cannot reach inside them by accident.
 _OPAQUE = re.compile(r"(?:https?://\S+|www\.\S+|\S+@\S+\.\S+"
@@ -1529,7 +1529,7 @@ def _speakable(text):
 # model invents can act: the phone refuses names it did not declare.
 TOOL_CALL_MARK = "[tool_call]"
 TOOL_RESULT_MARK = "[tool_result]"
-_TOOL_CALL_RE = re.compile(r"^[ \t]*\[tool_call\][ \t]*(\{.*\})[ \t]*$", re.M)
+_TOOL_CALL_RE = re.compile(r"\[tool_call\]")   # anywhere: the model puts it on the sentence's own line as often as on its own
 MAX_TOOL_HOPS = 3
 
 
@@ -1599,22 +1599,30 @@ def tools_context(tools, max_chars=TOOLS_CONTEXT_CHARS):
 
 
 def split_tool_call(text):
-    """(text without the call line, {"name", "arguments"} or None). Only the
-    LAST marker line counts; anything after it is dropped from the text."""
+    """(text without the call, {"name", "arguments"} or None).
+
+    The marker may sit on its own line or at the end of the sentence that
+    leads in ("Switching you to Adam. [tool_call] {...}" — 2026-09-09, both
+    replies of a session reached the phone with the marker in the text). The
+    LAST marker counts; its JSON object is read with a real decoder, so nested
+    braces in `arguments` do not cut it short; everything from the marker to
+    the end of that object is removed from the text."""
     t = str(text or "")
-    m = None
-    for m in _TOOL_CALL_RE.finditer(t):
-        pass
-    if not m:
+    marks = list(_TOOL_CALL_RE.finditer(t))
+    if not marks:
+        return t, None
+    m = marks[-1]
+    i = t.find("{", m.end())
+    if i < 0:
         return t, None
     try:
-        call = json.loads(m.group(1))
+        call, end = json.JSONDecoder().raw_decode(t[i:])
     except Exception:
         return t, None
     if not isinstance(call, dict) or not str(call.get("name") or "").strip():
         return t, None
     args = call.get("arguments")
-    clean = (t[:m.start()] + t[m.end():]).strip()
+    clean = (t[:m.start()].rstrip() + ("\n" if t[i + end:].strip() else "") + t[i + end:].strip()).strip()
     return clean, {"name": str(call["name"]).strip()[:80],
                    "arguments": args if isinstance(args, dict) else {}}
 

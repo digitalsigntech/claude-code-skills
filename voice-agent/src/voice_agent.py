@@ -2750,6 +2750,17 @@ class Handler(BaseHTTPRequestHandler):
             res = ask(account, text, name, archive_question=False,
                       context=time_context(tz) + VOICE_CONTEXT + _tools_block(tools))
             ans = str(res.get("answer") or "")
+            if tools and not res.get("agent_error") and ans:
+                # the archived row never shows a tool-call marker (2026-09-09)
+                try:
+                    import local_voice as _lvt
+                    _clean, _call = _lvt.split_tool_call(ans)
+                    if _call and _clean != ans:
+                        archive_amend(ans, _clean)
+                        archive_tag(_clean, turn_id)
+                        return ans
+                except Exception as e:
+                    self.log_message("marker amend skipped: %.80s", e)
             archive_tag(ans, turn_id)          # request 497: ask() archived it without the id
             return ans
 
