@@ -3082,6 +3082,17 @@ class Handler(BaseHTTPRequestHandler):
         if not lang or lang == "auto":
             lang = local_voice.recent_lang(account) or "en"
         speaker = str(spec.get("speaker") or "").strip().lower()[:64]
+        if tr.get("silent"):
+            # Request 505: nothing he needs told — no model, no audio, the
+            # turn ends on a reply that says so.
+            self.log_message("voice turn: tool_result %s for %s silent — no continuation", tname, turn_id or "?")
+            body = json.dumps({"text": "", "turn_id": turn_id, "continuation": True, "silent": True,
+                               "call_id": call_id, "lang": lang, "voice": None}, ensure_ascii=False)
+            sealed = seal_for_devices(body, account=account) or e2ee_seal(
+                body, priv, mine, theirs, direction=DIR_TO_PHONE)
+            return self._send(200, {"sealed": sealed, "audio_seconds_in": 0.0, "audio_seconds_out": 0.0,
+                                    "engine": "local", "continuation": True, "silent": True,
+                                    "took_s": round(time.time() - t0, 2)})
         prompt = local_voice.tool_result_prompt({"name": tname}, tr.get("output"))
         self.log_message("voice turn: tool_result %s for %s -> continuing", tname, turn_id or "?")
         res = ask(account, prompt, name, archive_question=False, archive_turn=keep,

@@ -817,7 +817,7 @@ class StreamSession:
             # request 499: the phone ran the tool; the turn waiting on it continues
             q = self.tool_q.get(str(c.get("call_id") or ""))
             if q is not None:
-                q.put(c.get("output"))
+                q.put({"output": c.get("output"), "silent": bool(c.get("silent"))})
             else:
                 self.log(f"stream: tool_result for {c.get('call_id')!r} — no turn is waiting on it")
 
@@ -1106,10 +1106,29 @@ class StreamSession:
                         timed_out = True
                         break
             self.tool_q.pop(call_id, None)
+            silent = bool(isinstance(output, dict) and output.get("silent")) if not timed_out else False
+            if isinstance(output, dict) and "output" in output and "silent" in output:
+                output = output["output"]
             tool_calls.append({"call_id": call_id, "name": call["name"], "arguments": call["arguments"],
-                               **({"output": output} if not timed_out else {"timed_out": True})})
+                               **({"output": output} if not timed_out else {"timed_out": True}),
+                               **({"silent": True} if silent else {})})
             if timed_out:
                 self.log(f"stream {uid}: no tool_result for {call['name']} within {TOOL_WAIT_S:.0f}s — the turn ends")
+                answer = ""
+                speaker = None
+                break
+            if silent:
+                # Request 505: the app says there is nothing he needs told
+                # (a bare success for something he can see). No continuation:
+                # the lead-in's chunks are closed with an empty final one and
+                # the turn ends on the metered reply.
+                self.log(f"stream {uid}: tool_result {call['name']} silent — no continuation, the turn ends")
+                if parts:
+                    self._agent({"type": "reply_chunk", "id": uid, "turn_id": self.turn_id(uid),
+                                 "seq": sum(p_["chunks"] for p_ in parts) + 1, "final": True, "text": "",
+                                 "voice": {"format": lv.REPLY_FORMAT, "b64": ""}, "audio_seconds_out": 0.0})
+                    parts.append({"chunks": 1, "audio_seconds_out": 0.0, "bytes": 0,
+                                  "first_audio_s": None, "spoke_by": ""})   # the closing chunk counts
                 answer = ""
                 speaker = None
                 break
@@ -1313,7 +1332,8 @@ def _selftest():
         if o.get("type") == "tool_call":
             calls_seen.append(o)
             ws.inject(phone(KIND_CTRL, json.dumps({"type": "tool_result", "turn_id": o.get("turn_id"),
-                                                   "call_id": o["call_id"], "output": {"ok": True, "mode": "dark"}}).encode()))
+                                                   "call_id": o["call_id"], "output": {"ok": True, "mode": "dark"},
+                                                   **({"silent": True} if os.environ.get("LQ_SELFTEST_SILENT") else {})}).encode()))
     ws.on_agent = _on_agent
     start = {"type": "start", "lang": "auto", "speaker": "af_heart", "key_b64": base64.b64encode(key).decode(),
              "format": "pcm16", "rate": 16000, "frame_ms": 100, "tz": "America/Toronto",
@@ -1439,9 +1459,12 @@ def _selftest():
     if tools_mode:
         r1 = [o for k, _m, o in seen if k == "reply" and o.get("id") == "utt-1"]
         c1 = [o for k, _m, o in seen if k == "reply_chunk" and o.get("id") == "utt-1"]
+        silent = bool(os.environ.get("LQ_SELFTEST_SILENT"))
         tools_ok = (len(calls_seen) == 1 and calls_seen[0].get("name") == "set_appearance"
                     and bool(r1) and (r1[-1].get("tool_calls") or [{}])[0].get("output") == {"ok": True, "mode": "dark"}
-                    and "dark mode now" in (r1[-1].get("text") or "")
+                    and (("dark mode now" not in (r1[-1].get("text") or "") and (r1[-1].get("tool_calls") or [{}])[0].get("silent") is True
+                          and r1[-1].get("text", "").strip() == "Switching to dark mode.") if silent
+                         else "dark mode now" in (r1[-1].get("text") or ""))
                     and "[tool_call]" not in (r1[-1].get("text") or "")
                     and [c["seq"] for c in c1] == list(range(1, len(c1) + 1))
                     and not any("[tool_call]" in (c.get("text") or "") for c in c1)

@@ -504,7 +504,11 @@ SAME session: on the stream the continuation comes as more `reply_chunk` frames 
 id and turn id with `seq` carrying on, then ONE closing `reply` whose `text` is the lead-in and
 the continuation, with `tool_calls: [{call_id, name, arguments, output | timed_out}]`; on the
 clip path the continuation is a FRESH voice reply keyed by the same `turn_id` with
-`continuation: true` and `call_id` — an HTTP reply that has ended cannot be reopened. Up to three
+`continuation: true` and `call_id` — an HTTP reply that has ended cannot be reopened. A `tool_result` carrying `silent: true` (a bare success for something the person can see —
+request 505) ends the turn without a continuation: no model call, on the stream an empty
+`final` chunk closes the lead-in and the metered `reply` follows with `tool_calls[…].silent`;
+on the clip path the continuation reply is `{text: "", continuation: true, silent: true,
+voice: null}` with `audio_seconds_out: 0`. Up to three
 calls per turn (`MAX_TOOL_HOPS`). Tools on the stream need `reply_stream: true` (the lead-in and
 the continuation are chunks); a call from a model on a stream without it, or without a
 declaration, is dropped from the text and logged. `LQ_SELFTEST_TOOLS=1 python3 src/stream_lq.py
