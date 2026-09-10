@@ -575,17 +575,36 @@ def archive(text, direction, sender, account_name="", mirror=True,
     # "queued" rather than a boolean pretending to know (2026-08-18).
     box = {}
 
+    _t0 = time.time()
+
     def _send():
-        box["ok"] = tg_text(text, who=(sender if direction == "in" else None))
+        try:
+            box["ok"] = tg_text(text, who=(sender if direction == "in" else None))
+        except Exception as e:                                  # noqa: BLE001
+            box["ok"] = False
+            print(f"[voice-agent] mirror {direction} ({kind}): send raised {str(e)[:120]}", file=sys.stderr)
+        if time.time() - _t0 > MIRROR_DEADLINE_S:
+            # the late verdict of a send that outlived the deadline (request 507)
+            print(f"[voice-agent] mirror {direction} ({kind}): {'delivered' if box.get('ok') else 'FAILED'} "
+                  f"late, after {time.time() - _t0:.1f}s — {str(text)[:40]!r}", file=sys.stderr)
+            if box.get("ok"):
+                _record_mirror(archive_chat_id(), True)
 
     t = threading.Thread(target=_send, daemon=True)
     t.start()
     t.join(MIRROR_DEADLINE_S)
     if "ok" not in box:
         # Still in flight: not yet a delivery, and the echo will settle it.
+        # Request 507 (2026-09-10): the person's spoken line never reached
+        # the chat while every answer did — the verdict is logged per line.
+        print(f"[voice-agent] mirror {direction} ({kind}): still sending after "
+              f"{MIRROR_DEADLINE_S:.1f}s — {str(text)[:40]!r}", file=sys.stderr)
         _record_mirror(archive_chat_id(), False)
         return "queued"
     _record_mirror(archive_chat_id(), bool(box["ok"]))
+    if not box["ok"]:
+        print(f"[voice-agent] mirror {direction} ({kind}): SEND FAILED — {str(text)[:40]!r}",
+              file=sys.stderr)
     return True if box["ok"] else "send_failed"
 
 
