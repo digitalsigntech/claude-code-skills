@@ -315,8 +315,10 @@ _TG_CACHE = {}
 
 def telegram():
     """The gateway's own send API, if this machine has one installed."""
-    if "mod" in _TG_CACHE:
+    if _TG_CACHE.get("mod") is not None:
         return _TG_CACHE["mod"]
+    # a failed import is retried on the next call, never remembered as "no
+    # gateway" for the life of the process (request 507)
     _TG_CACHE["mod"] = None
     d = os.path.join(os.path.expanduser(config()["workdir"]), "telegram")
     if os.path.isfile(os.path.join(d, "tg_api.py")):
@@ -580,6 +582,11 @@ def archive(text, direction, sender, account_name="", mirror=True,
     def _send():
         try:
             box["ok"] = tg_text(text, who=(sender if direction == "in" else None))
+            if not box["ok"]:
+                # one more try a moment later: the first post of a spoken line
+                # lands while the model is starting on the same cores (507)
+                time.sleep(2.0)
+                box["ok"] = tg_text(text, who=(sender if direction == "in" else None))
         except Exception as e:                                  # noqa: BLE001
             box["ok"] = False
             print(f"[voice-agent] mirror {direction} ({kind}): send raised {str(e)[:120]}", file=sys.stderr)
