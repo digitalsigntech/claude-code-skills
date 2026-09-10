@@ -602,7 +602,7 @@ def phantom_gate(text, seconds, prefiltered=None, peak=None):
 
 
 def hallucination_gate(text, seconds, prefiltered=None, peak=None, heard=None, phone_lang=None,
-                       quiet=False, known_langs=()):
+                       quiet=False, known_langs=(), heard_p=None):
     """Whisper's output on audio that held no words — the FULL rule (request
     from the app after the car-cabin session of 2026-09-05):
 
@@ -661,7 +661,12 @@ def hallucination_gate(text, seconds, prefiltered=None, peak=None, heard=None, p
         rate = words / secs if secs > 0 else 0
         phone = (phone_lang or "en").strip().lower()[:2] or "en"
         foreign = top_script(t) != "latn" or bool(heard and heard[:2] != phone)
-        need = 3 if foreign else 6
+        # 2026-09-10: the app's capture rework sends `prefiltered: false` on
+        # REAL sentences (its own recogniser heard nothing while ours heard
+        # "the capital of Finland, in one sentence" at p=1.00), so the phone's
+        # "no words" is weaker evidence than it was. A decode the recogniser
+        # is sure of (p >= 0.9) needs four words, not six.
+        need = 3 if foreign else (4 if (heard_p is not None and heard_p >= 0.9) else 6)
         plausible = (words >= need and 0.8 <= rate <= 4.0 and tl not in PHANTOMS
                      and (peak is None or peak == float("-inf") or peak >= -24.0))
         if not plausible:

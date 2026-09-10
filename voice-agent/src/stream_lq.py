@@ -429,6 +429,12 @@ def tail_verdict(since_s, words, heard_p, heard_text):
         return ""
     if words >= TAIL_MIN_WORDS:
         return ""
+    # 2026-09-10: a question asked the second a reply ends is the normal shape
+    # of a conversation, and the rule dropped "the capital of Finland, in one
+    # sentence" (7 words, p=1.00) 1.0 s after heard_out. A confident decode of
+    # four or more words is speech, whatever the phone heard.
+    if heard_p >= 0.9 and words >= 4:
+        return ""
     if not (heard_text or "").strip():
         return f"interrupt tail: {words} words, phone heard none, {since_s:.1f}s after"
     if heard_p < 0.7:
@@ -918,7 +924,8 @@ class StreamSession:
             heard=(heard_code if heard_p >= 0.6 else None),
             phone_lang=str(self.start.get("ui_lang") or "")[:2] or None,
             quiet=lv.quiet_for(peak, self.levels),
-            known_langs=(self.lang, lv.recent_lang(self.account)))
+            known_langs=(self.lang, lv.recent_lang(self.account)),
+            heard_p=heard_p)
         if _why:
             self.log(f"phantom dropped ({_why}): {user_text!r} ({secs_in}s, peak {peak:.1f} dBFS, "
                      f"prefiltered={ctrl.get('prefiltered')})")
