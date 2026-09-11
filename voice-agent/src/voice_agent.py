@@ -2834,7 +2834,7 @@ def _peers_path():
     return HERE / PEERS_FILE
 
 
-def push_preview_envelope(account, text):
+def push_preview_envelope(account, text, group=None):
     """The sealed banner preview: {"from": ..., "text": ...}, or None.
 
     A push carried a sealed preview only for the MESSAGE
@@ -2855,7 +2855,10 @@ def push_preview_envelope(account, text):
     if not body:
         return None
     payload = json.dumps(
-        {"from": branding().get("bot_name") or "agent", "text": body},
+        {"from": branding().get("bot_name") or "agent", "text": body,
+         # request 525: the chat's title rides inside the seal — a name is
+         # private in a way the chat's number is not
+         **({"group": str(group)[:120]} if group else {})},
         ensure_ascii=False, separators=(",", ":"))
     multi = seal_for_devices(payload, account=account)
     if multi:
@@ -4358,8 +4361,8 @@ def _message_watcher():
                 # `text` joined the projection for #270's sealed preview. It
                 # is read here and sealed to the phone's key before it goes
                 # anywhere — the plane still never sees a word of it.
-                "SELECT epoch, kind, direction, text FROM messages WHERE epoch > ? "
-                "ORDER BY epoch", (last,)).fetchall()
+                "SELECT epoch, kind, direction, text, chat_id, chat_title FROM messages "
+                "WHERE epoch > ? ORDER BY epoch", (last,)).fetchall()
             cx.close()
         except Exception:
             continue
@@ -4392,16 +4395,25 @@ def _message_watcher():
             # banner shows two lines and a whole answer in a push is a copy of
             # the conversation living in Apple's queue.
             env = None
+            # request 525: which chat the newest line is in, so a tap on the
+            # banner opens THAT chat. The id goes in the clear (it names
+            # nothing without the account); the title goes inside the seal
+            # when the account seals, in the clear otherwise.
+            newest_row = worth[-1]
+            chat_id = int(newest_row[4]) if len(newest_row) > 4 and newest_row[4] else 0
+            group = str(newest_row[5] or "")[:120] if len(newest_row) > 5 else ""
             try:
                 # The words without the attachment marker: a banner never
                 # reads "[camera photo: 20260816-095110.jpg]".
-                newest_text = _strip_marker(worth[-1][3] if len(worth[-1]) > 3 else "")
-                env = push_preview_envelope(acct, newest_text)
+                newest_text = _strip_marker(newest_row[3] if len(newest_row) > 3 else "")
+                env = push_preview_envelope(acct, newest_text, group=group or None)
             except Exception as e:
                 print(f"[voice-agent] preview seal failed for {acct}: {e}",
                       file=sys.stderr)
                 env = None
             res = _notify_plane(acct, count=len(worth),
+                                **({"chat_id": chat_id} if chat_id else {}),
+                                **({"group": group} if group and not env else {}),
                                 **({"sealed": env} if env else {}))
             print(f"[voice-agent] new-message push for {acct}: "
                   f"{len(worth)} line(s) -> {res}", file=sys.stderr)

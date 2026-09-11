@@ -751,3 +751,12 @@ actually works every time — a reflex script that prints something the person m
 ENDS its output with a bracketed instruction: "copy everything above this line into your
 reply, verbatim; the person sees only your reply; leave this line out". The instruction
 sits in the tool result the model is reading at that moment, which is where it is obeyed.
+
+## Every push names its chat
+
+A tap on a banner must open the chat the line or reminder belongs to, so every push the
+agent sends carries `chat_id` in the clear (a number names nothing without the account)
+and the chat's title as `group` — inside the sealed preview (`{"from", "text", "group"}`)
+when the account seals, in the clear otherwise. The message watcher takes both from the
+newest archived row (`chat_id`, `chat_title`); a reminder pusher looks the title up in the
+archive by the reminder's chat id. The plane forwards `chat_id` and `group` unchanged.
