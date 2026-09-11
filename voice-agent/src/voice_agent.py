@@ -963,7 +963,7 @@ def _archive_history(limit, since):
         cx = sqlite3.connect(f"file:{d / 'chat.db'}?mode=ro", uri=True, timeout=3)
         if is_guest():
             rows = cx.execute(
-                "SELECT epoch, sender, text, direction, session_id FROM messages "
+                "SELECT epoch, sender, text, direction, session_id, kind FROM messages "
                 "WHERE epoch > ? AND chat_id = ? ORDER BY epoch DESC LIMIT ?",
                 (since, guest_chat_id(), limit)).fetchall()
         else:
@@ -978,7 +978,7 @@ def _archive_history(limit, since):
             # Telegram chat id never reaches there. So the boundary is derived
             # from the code that mints them rather than from a list to maintain.
             rows = cx.execute(
-                "SELECT epoch, sender, text, direction, session_id FROM messages "
+                "SELECT epoch, sender, text, direction, session_id, kind FROM messages "
                 "WHERE epoch > ? AND chat_id > ? ORDER BY epoch DESC LIMIT ?",
                 (since, GUEST_CHAT_FLOOR, limit)).fetchall()
         cx.close()
@@ -999,7 +999,7 @@ def _archive_history(limit, since):
     except Exception:
         state = {}
     msgs = []
-    for ep, sender, text, direction, _sid in reversed(rows):
+    for ep, sender, text, direction, _sid, _kind in reversed(rows):
         if not isinstance(ep, (int, float)) or ep <= 0 or not text:
             continue
         # Direction is the authoritative field: keying on the sender's name puts
@@ -1016,8 +1016,20 @@ def _archive_history(limit, since):
              # content anywhere in the sealed path.
              "text": _strip_injected_prefix(str(text)),
              "ts": float(ep)}
+        # request 515: where the line CAME FROM. A row this agent archived
+        # from the app has a mirror-state entry (or a voice turn id / a
+        # transcript kind); every other row in the chat's log was written by
+        # the chat itself — the person typing in Telegram, the gateway
+        # answering there — and the chat has it by definition, so `mirrored`
+        # is true for those, never absent: an absent flag left the app to
+        # guess, and a remembered "no chat" turned the guess into no tick.
+        from_app = (float(ep) in state or str(_sid or "").startswith("turn:")
+                    or str(_kind or "") == "voice_transcript")
+        m["origin"] = "app" if from_app else "chat"
         if float(ep) in state:
             m["mirrored"] = state[float(ep)]
+        elif not from_app:
+            m["mirrored"] = True
         if str(_sid or "").startswith("turn:"):
             m["turn_id"] = str(_sid)[5:]          # request 497
         # A row that names files carries their tokens, so a restored chat shows

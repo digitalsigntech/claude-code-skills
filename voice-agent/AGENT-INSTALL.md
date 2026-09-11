@@ -688,3 +688,12 @@ agent sends none). A spoken line is stamped with the END OF THE UTTERANCE as
 it reached the agent (the phone's `utterance_end` frame), not the moment the
 recogniser finished a second or two later; a clip is stamped when it was
 transcribed, which is within a second of its arrival.
+
+## Ticks: `origin` and `mirrored` on history rows
+
+Every `history` row says where the line came from: `origin: "app"` for a row this agent
+archived from the voice app (it has a mirror-state entry, a voice turn id or a transcript
+kind), `origin: "chat"` for everything else in the chat's log — the person typing in the
+linked chat, the gateway answering there. `mirrored` answers "does the chat have this
+line?": for an app row it is the recorded outcome of the post (true/false); for a chat row
+it is always `true`, never absent — the chat wrote it. The app draws a tick from it.
