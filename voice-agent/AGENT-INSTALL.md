@@ -739,3 +739,15 @@ user's claim.
 Known limit: a session that has already answered several times that it cannot see the
 screen keeps saying so; a fresh session answers from the report at once. Starting a new
 conversation clears it.
+
+## A tool's output is visible to the model alone
+
+The agent runs headless (`claude -p`): the person receives ONLY the final message. A
+model that has just run a command whose output is a table tends to answer "that's the
+full table, listed above" — a habit from the terminal, where the command's output is on
+the screen. Two things hold it: the voice context and persona say so outright (the screen
+shows exactly what you write; a table answer carries the table), and — the part that
+actually works every time — a reflex script that prints something the person must see
+ENDS its output with a bracketed instruction: "copy everything above this line into your
+reply, verbatim; the person sees only your reply; leave this line out". The instruction
+sits in the tool result the model is reading at that moment, which is where it is obeyed.

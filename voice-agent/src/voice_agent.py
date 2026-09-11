@@ -1435,18 +1435,18 @@ _SETTING_NOUN = re.compile(
 # the question in front of it and a list would be wrong the first time somebody
 # said it differently, in any of fourteen languages.
 VOICE_CONTEXT = (
-    "\n\nThis answer will be SPOKEN ALOUD as well as SHOWN ON SCREEN, and the screen shows "
-    "exactly what you write — nothing else reaches it. So write the COMPLETE answer: every "
-    "table, every figure, a tool's table verbatim. Never replace a table with a sentence "
-    "about it (\"that's the full park\", \"here is the table\") — a sentence pointing at a table "
-    "you did not include points at nothing. The spoken part is derived from your text "
-    "automatically: tables and code are left out of the speech and your own prose around "
-    "them is what is read aloud, so put one short spoken line beside a table (what it is, "
-    "the one thing worth hearing) and let the table carry the detail. Long prose answers "
-    "are summarised for the ear the same way. If the person asked to HEAR something in "
-    "full — to read them a message, or the whole of something — put `[read-in-full]` on "
-    "its own first line and the whole answer will be spoken. Use it only for that; it is "
-    "not for answers that merely happen to be long.")
+    "\n\nThis answer will be SPOKEN ALOUD as well as SHOWN ON SCREEN. THE PERSON SEES ONLY YOUR FINAL "
+    "MESSAGE: what a command or tool printed is visible to you alone — nothing is \"listed above\" for "
+    "them until you write it into your reply. So write the COMPLETE answer: every table, every figure, "
+    "a tool's table copied in verbatim, every row. Never replace a table with a sentence about it "
+    "(\"that's the full park\", \"all listed above\", \"here is the table\") — such a sentence shows them "
+    "nothing. The spoken part is derived from your text automatically: tables and code are left out of "
+    "the speech and your own prose is what is read aloud, so put one short spoken line beside a table "
+    "(what it is, the one thing worth hearing) and let the table carry the detail. Long prose answers "
+    "are summarised for the ear the same way. If the person asked to HEAR something in full — to read "
+    "them a message, or the whole of something — put `[read-in-full]` on its own first line and the "
+    "whole answer will be spoken. Use it only for that; it is not for answers that merely happen to be "
+    "long.")
 
 
 def time_context(tz):
