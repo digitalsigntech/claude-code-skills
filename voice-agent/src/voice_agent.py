@@ -2817,6 +2817,7 @@ class Handler(BaseHTTPRequestHandler):
             return e2ee_open(env, priv, mine, theirs, direction=DIR_TO_AGENT)
 
         def on_transcript(text, ts, turn_id=None):
+            set_caller(account)                # the session's caller, whichever thread runs this
             try:
                 archive(text, "in", sender=person_name(name), kind="voice_transcript", ts=ts,
                         turn_id=turn_id)
@@ -2824,6 +2825,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.log_message("stream transcript not archived: %.80s", e)
 
         def answer_fn(text, turn_id=None, tools=None):
+            # THE CALLER IS THREAD-LOCAL AND THIS RUNS IN THE ANSWER WORKER
+            # (2026-09-11, request 507): with no caller set there, a guest's
+            # answer was filed under the OWNER's chat and posted to his
+            # Telegram while the guest's transcript (archived on the reading
+            # thread, caller set) went to the guest's private chat — the
+            # thread read as a bot talking to itself. Both halves of a turn
+            # now carry the session's caller.
+            set_caller(account)
             self.log_message("stream ask from %s: %.60s", name or account, text)
             res = ask(account, text, name, archive_question=False,
                       context=time_context(tz) + VOICE_CONTEXT + _tools_block(tools))
