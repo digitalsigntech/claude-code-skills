@@ -662,3 +662,17 @@ table row opening with the id, else a mention — is the caption. Whole-word
 matching with a small stop list ("show", "me", "the", "photo" …), best hits
 only (half the top score or better, at most 4). Tokens survive a restart: the
 file route re-mints them from the same walk. Health lists `media` in `caps`.
+
+## Message order: millisecond stamps and the agent's clock
+
+Every archived row carries `epoch` as a REAL with the full fraction (`time.time()` at
+the write), and `history` rows send it as `ts` unchanged — `1789096287.2786`, never a
+whole second. Each `history` reply also carries `server_now` (this agent's clock at the
+reply, three decimals) so the app can measure the offset between the phone's clock and
+the archive's and put live lines and archived rows on one clock; the plane passes it
+through and substitutes its own clock only for an older agent that sends none.
+
+A spoken line is stamped with the END OF THE UTTERANCE as it reached the agent (the
+phone's `utterance_end` frame), not the moment speech-to-text finished a second or two
+later — the app stamps its live copy at the same moment, so adopting the archived stamp
+does not move the line. A clip (non-stream) turn is stamped when its audio arrived.

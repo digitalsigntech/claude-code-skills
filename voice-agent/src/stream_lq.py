@@ -643,6 +643,7 @@ class StreamSession:
         self.last_interrupt = 0.0
         self.last_heard_out = 0.0
         self.utt_started = 0.0
+        self.utt_ended = 0.0        # request 513: the row's stamp is the end of the utterance, not the STT finish
         self.seen_nonces = set()
         self.dirty = threading.Event()
         self.stop = threading.Event()
@@ -775,6 +776,7 @@ class StreamSession:
             self.utt_id = c.get("id")            # the phone's id, its own type
             self.utt_started = time.time()
         elif t == "utterance_end":
+            self.utt_ended = time.time()
             self.ending.set()
             # THE ID IS ECHOED AS SENT — an int stays an int, a string a string
             # — because the app matches frames to sentences by it, and a
@@ -943,7 +945,12 @@ class StreamSession:
         lang = voice_lang_for(user_text, heard_code, heard_p, pinned=self.lang,
                               last=lv.recent_lang(self.account),
                               ui=str(self.start.get("ui_lang") or "")[:2] or None)
-        ts = time.time()
+        # request 513: a spoken line is stamped with the END OF THE UTTERANCE as it
+        # reached the agent (the utterance_end frame), not the STT finish a second or
+        # two later — the app stamps its live copy at the same moment, so adopting
+        # the archived stamp no longer moves the line.
+        ts = self.utt_ended if self.utt_ended and self.utt_ended >= started else time.time()
+        self.utt_ended = 0.0
         self._agent({"type": "final", "id": uid, "turn_id": self.turn_id(uid), "text": user_text})
         if self.on_transcript:
             try:
@@ -1381,7 +1388,7 @@ def _selftest():
         answer_fn = lambda q: _full_fn(q)      # noqa: E731 — the skill agent's shape: no on_text at all
 
     sess = StreamSession(ws, lambda env: json.dumps(start), answer_fn,
-                         account="selftest", on_transcript=lambda t, ts: print("  transcript:", t))
+                         account="selftest", on_transcript=lambda t, ts: print("  transcript:", t, "(stamp %.2fs before STT finish)" % (time.time() - ts)))
     t0 = time.time()
     try:
         sess.run()

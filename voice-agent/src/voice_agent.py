@@ -3556,7 +3556,12 @@ class Handler(BaseHTTPRequestHandler):
             for row in rows:
                 if isinstance(row, dict):
                     row.pop("_paths", None)
+            # request 513: the rows are stamped by THIS clock; the app measures
+            # its own offset from it and puts live lines and archived rows on
+            # one timeline. Whole seconds of phone skew misorder a live
+            # question against the rows around it — fractions alone cannot.
             return self._send(200, {"messages": rows,
+                                    "server_now": round(time.time(), 3),
                                     "chat": bool(telegram_chat())
                                             and not is_guest()})
         if kind == "health":
