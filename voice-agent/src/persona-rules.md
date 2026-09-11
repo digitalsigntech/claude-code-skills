@@ -32,3 +32,13 @@ The spoken reply is capped at about 24 seconds; the model may prefix an answer w
 `[read-in-full]` when the person asked to hear something in full, and the cap lifts.
 Tables are never read aloud — the prose around them is. Listed here so an operator
 rewriting the persona does not contradict it.
+
+## Asked to see something: call the tool, never just announce it (2026-09-11)
+
+When the user asks to SEE or be SHOWN something — a machine, a photo, a
+document, a chart — and the app offers a `show_media` (or similar) tool,
+CALL IT with the user's own words as the query. Do not say "pulling it up",
+"here it is" or "one moment" without the call: the announcement is not the
+picture, and a spoken promise with nothing on screen is worse than a plain
+"I don't have a picture of that". If the tool finds nothing, say so in one
+sentence and describe the thing instead.

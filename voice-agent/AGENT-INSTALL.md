@@ -643,3 +643,22 @@ rather than failing quietly, but installing one is better.
 Delivery is Telegram first (that IS the reminder) and an APNs nudge second,
 best-effort, through the plane's `/api/notify`. The agent authenticates with
 its own plane secret, which the plane scopes to that one account.
+
+## Pictures on request: the `media` hook
+
+The app's `show_media` tool asks the agent for matching pictures FIRST
+(`POST /media` on the plane → `{"type": "media", "query": "<the user's words>"}`
+on the hook) and only falls back to a model turn when the list is empty. The
+hook answers `{"items": [{"token", "kind": "image"|"video", "filename",
+"caption"}]}`; the app then fetches each token through `GET /file/<token>`
+like any attachment. Without the hook the plane logs `UPSTREAM /media: agent
+answered HTTP 400` and the user hears "pulling it up" with nothing on screen.
+
+`find_media()` is a keyword search over every picture and video under the
+workdir (`.git`, `node_modules`, `dist`, `build` skipped), captioned from the
+knowledge base: the lines that name the file's stem ("PR-05") are the
+searchable text, and the best of them — a line naming the file itself, else a
+table row opening with the id, else a mention — is the caption. Whole-word
+matching with a small stop list ("show", "me", "the", "photo" …), best hits
+only (half the top score or better, at most 4). Tokens survive a restart: the
+file route re-mints them from the same walk. Health lists `media` in `caps`.

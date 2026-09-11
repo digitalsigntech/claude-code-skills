@@ -1954,7 +1954,126 @@ def _remint(token):
     logo = os.path.expanduser(str(branding().get("logo") or ""))
     if logo and os.path.exists(logo) and media_token(logo) == token:
         return logo
+    # A picture the `media` hook found before a restart: same walk, same token.
+    for p in _media_index()[0]:
+        if media_token(p) == token:
+            return p
     return None
+
+
+# ---- request 511 (2026-09-11): "show me the Epson SurePress" ------------------
+# The app's show_media asks the agent for matching pictures FIRST (`media`
+# hook) and only falls back to a model turn when there are none. This install
+# answered the hook with 400 — it had no such hook — so the model was told to
+# "send the file" on a road that does not exist, and no photo appeared. A
+# keyword search over the install's own pictures, captioned from the knowledge
+# base (a photo named PR-05 is "PR-05 Epson SurePress L-6534VW" in the
+# equipment log), is what the box does with a neural index; here it is words.
+MEDIA_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".mp4", ".mov", ".m4v")
+_MEDIA_SKIP = {".git", "node_modules", "dist", "build", "venv", ".venv", "__pycache__", ".cache", "attcache"}
+_MEDIA_INDEX = {"ts": 0.0, "files": [], "kb": []}
+_MEDIA_STOP = {"the", "a", "an", "of", "our", "my", "your", "me", "us", "show", "see", "look", "at", "photo", "photos",
+               "picture", "pictures", "pic", "image", "images", "please", "can", "you", "want", "to", "on", "in", "it",
+               "is", "and", "or", "for", "with", "some", "any", "that", "this", "again"}
+
+
+def _media_index():
+    """(files, kb_lines): every picture/video under the workdir, and every
+    knowledge-base line — rebuilt at most every ten minutes."""
+    now = time.time()
+    if now - _MEDIA_INDEX["ts"] < 600 and _MEDIA_INDEX["files"]:
+        return _MEDIA_INDEX["files"], _MEDIA_INDEX["kb"]
+    root = os.path.expanduser(config()["workdir"])
+    files, kb = [], []
+    for dp, dns, fns in os.walk(root):
+        dns[:] = [d for d in dns if d not in _MEDIA_SKIP and not d.startswith(".")]
+        for fn in fns:
+            fp = os.path.join(dp, fn)
+            low = fn.lower()
+            if low.endswith(MEDIA_EXTS):
+                files.append(fp)
+            elif low.endswith((".md", ".txt")) and "knowledge-base" in dp and len(kb) < 20000:
+                try:
+                    with open(fp, errors="ignore") as f:
+                        for line in f:
+                            line = line.strip()
+                            if line:
+                                kb.append(line)
+                except OSError:
+                    pass
+        if len(files) > 3000:
+            break
+    _MEDIA_INDEX.update(ts=now, files=files, kb=kb)
+    return files, kb
+
+
+def _media_lines(path, kb):
+    """(caption, text) for a picture from the knowledge base: every line that
+    names its stem ("PR-05") joined as searchable text, and the best of them as
+    the caption — a line naming the file itself ("PR-05.jpg | Epson SurePress
+    L-6534VW | …") beats a table row that opens with the id, which beats a
+    passing mention. Without any, the folder and file name."""
+    base = os.path.basename(path)
+    stem = os.path.splitext(base)[0]
+    fallback = f"{os.path.basename(os.path.dirname(path))} {stem}".replace("_", " ").replace("-", " ").strip()
+    if len(stem) < 3:
+        return fallback, fallback
+    pat = re.compile(r"(?<![\w-])" + re.escape(stem) + r"(?![\w-])", re.I)
+    ranked = []
+    for line in kb:
+        m = pat.search(line)
+        if not m:
+            continue
+        clean = re.sub(r"[|*_`#>]+", " ", line)
+        clean = re.sub(r"\s{2,}", " ", clean).strip(" -:")
+        pos = clean.lower().find(stem.lower())
+        rank = (0 if base.lower() in line.lower() else 1, pos if pos >= 0 else 999, len(clean))
+        ranked.append((rank, clean))
+        if len(ranked) >= 12:
+            break
+    if not ranked:
+        return fallback, fallback
+    ranked.sort(key=lambda t: t[0])
+    caption = ranked[0][1][:160]
+    text = " ".join(c for _r, c in ranked[:6])
+    return caption, text
+
+
+def find_media(query, k=4):
+    """Pictures and videos of this install that match the words asked for.
+    Returns [{token, kind, filename, caption, path}], best first."""
+    q = str(query or "").lower()
+    words = [w for w in re.findall(r"[\w-]{2,}", q) if w not in _MEDIA_STOP]
+    if not words:
+        return []
+    files, kb = _media_index()
+    root = os.path.expanduser(config()["workdir"])
+    scored = []
+    for fp in files:
+        rel = os.path.relpath(fp, root).lower()
+        stem = os.path.splitext(os.path.basename(fp))[0].lower()
+        cap, text = _media_lines(fp, kb)
+        hay = rel + " " + text.lower()
+        toks = set(re.findall(r"[\w-]+", hay))
+        toks |= {t for tok in toks for t in tok.split("-") if t}
+        score = 0.0
+        for w in words:
+            if w == stem:
+                score += 3
+            elif w in toks:
+                score += 1
+            elif len(w) >= 4 and any(t.startswith(w) or (len(t) >= 4 and w.startswith(t)) for t in toks):
+                score += 0.5
+        if q and q in hay:
+            score += 3
+        if score > 0:
+            scored.append((score, fp, cap))
+    scored.sort(key=lambda t: -t[0])
+    top = scored[:k]
+    if top:
+        top = [t for t in top if t[0] >= top[0][0] * 0.5]
+    return [{"token": media_token(fp), "kind": "video" if fp.lower().endswith((".mp4", ".mov", ".m4v")) else "image",
+             "filename": os.path.basename(fp), "caption": cap, "path": fp} for _sc, fp, cap in top]
 
 
 def media_token(path):
@@ -2124,7 +2243,7 @@ def capabilities():
     derivation runs before pair.py registers rather than after."""
     # `progress` is unconditional: it costs nothing, and the app treats its absence
     # as an agent that is not there.
-    caps = ["ask", "health", "progress", "history"]
+    caps = ["ask", "health", "progress", "history", "media"]
     try:                       # only claimed when a key really exists
         agent_keys()
         caps.append("pubkey")
@@ -3192,7 +3311,8 @@ class Handler(BaseHTTPRequestHandler):
                                     "engine": "local", "continuation": True, "silent": True,
                                     "took_s": round(time.time() - t0, 2)})
         prompt = local_voice.tool_result_prompt({"name": tname}, tr.get("output"))
-        self.log_message("voice turn: tool_result %s for %s -> continuing", tname, turn_id or "?")
+        self.log_message("voice turn: tool_result %s for %s -> continuing; output %.200s", tname, turn_id or "?",
+                         json.dumps(tr.get("output"), ensure_ascii=False) if tr.get("output") is not None else "(none)")
         res = ask(account, prompt, name, archive_question=False, archive_turn=keep,
                   context=time_context(d.get("tz")) + VOICE_CONTEXT + _tools_block(tools))
         ans = str(res.get("answer") or "")
@@ -3447,6 +3567,12 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             return self._send(200, h)
+        if kind == "media":
+            q = str(d.get("query") or d.get("text") or "")[:200]
+            items = find_media(q)
+            self.log_message("hook media: %r -> %d hit(s): %s", q, len(items),
+                             ", ".join(it["filename"] for it in items) or "-")
+            return self._send(200, {"items": [{kk: vv for kk, vv in it.items() if kk != "path"} for it in items]})
         if kind == "branding":
             b = branding()
             if not b:
