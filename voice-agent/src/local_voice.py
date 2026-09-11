@@ -1584,6 +1584,11 @@ def tools_context(tools, max_chars=TOOLS_CONTEXT_CHARS):
              "never invent a tool that is not listed, and never describe a call instead "
              "of making it. After the app runs it you receive a line starting with "
              "[tool_result] and continue the conversation from there.",
+             "A picture of ONE specific thing goes to the show/media tool with the "
+             "person's own words; an OVERVIEW of several things (the equipment park, "
+             "the reminders, last month's sales) is a question for YOU — answer it with "
+             "the table, which carries the pictures. Captions name the thing itself, "
+             "never a file name, a web address or a listing.",
              "", "Tools:"]
     for t in tools:
         if not isinstance(t, dict):

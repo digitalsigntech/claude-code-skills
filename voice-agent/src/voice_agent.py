@@ -904,7 +904,7 @@ def list_attachments(since=0.0, limit=30):
             items.append({"token": media_token(path), "ts": float(ep),
                           "kind": _att_kind(path),
                           "filename": os.path.basename(path),
-                          "caption": caption})
+                          "caption": clean_caption(caption)})   # request 517
     return items
 
 
@@ -2040,15 +2040,48 @@ def _media_lines(path, kb):
         clean = re.sub(r"\s{2,}", " ", clean).strip(" -:")
         pos = clean.lower().find(stem.lower())
         rank = (0 if base.lower() in line.lower() else 1, pos if pos >= 0 else 999, len(clean))
-        ranked.append((rank, clean))
+        ranked.append((rank, clean, line))
         if len(ranked) >= 12:
             break
     if not ranked:
-        return fallback, fallback
+        return clean_caption(fallback), fallback
     ranked.sort(key=lambda t: t[0])
-    caption = ranked[0][1][:160]
-    text = " ".join(c for _r, c in ranked[:6])
-    return caption, text
+    caption = _product_name(ranked[0][2], base, stem) or clean_caption(ranked[0][1])
+    text = " ".join(c for _r, c, _l in ranked[:6])
+    return caption[:120], text
+
+
+_CAP_SOURCE = re.compile(r"(https?://\S+|\b[\w.-]+\.(?:com|net|org|io|ch|de|co|uk|ca|eu|us|info|biz)\b\S*"
+                         r"|\blisting\b.*|\bphoto \d+\b|\bimage \d+\b|\b[A-Z]{1,2}\d{6,}\b"
+                         r"|\b\w[\w-]*\.(?:jpe?g|png|webp|gif|heic|mp4|mov|m4v|pdf)\b)", re.I)
+
+
+def clean_caption(text):
+    """A caption a demo company can show (request 517): no file names, no web
+    addresses, no listing ids, no "photo 1" — the thing's own name, nothing
+    about where the picture came from."""
+    t = _CAP_SOURCE.sub(" ", str(text or ""))
+    t = re.sub(r"[()\[\]]\s*[()\[\]]", " ", t)
+    t = re.sub(r"\s{2,}", " ", t).strip(" -:,;|()")
+    return t
+
+
+def _product_name(line, base, stem):
+    """The product's own name out of a knowledge-base line: for a table row,
+    the first cell that is neither the file/id cell nor a source; for prose,
+    the cleaned line. "| PR-05.jpg | Epson SurePress L-6534VW | epson.com … |"
+    -> "Epson SurePress L-6534VW"; "| PR-05 Epson SurePress L-6534VW | 6 | …"
+    -> "Epson SurePress L-6534VW"."""
+    cells = [c.strip(" *_`") for c in line.strip().strip("|").split("|")] if "|" in line else [line]
+    ids = {base.lower(), stem.lower()}
+    for c in cells:
+        if not c or c.lower() in ids or re.fullmatch(r"[-:\s]+", c):
+            continue
+        c2 = re.sub(r"(?i)^" + re.escape(stem) + r"(\.\w+)?\s*[-—:]?\s*", "", c).strip()
+        c2 = clean_caption(c2)
+        if len(c2) >= 3 and not re.fullmatch(r"[\d.\s%-]+", c2):
+            return c2
+    return ""
 
 
 def find_media(query, k=4):
@@ -3589,7 +3622,8 @@ class Handler(BaseHTTPRequestHandler):
             items = find_media(q)
             self.log_message("hook media: %r -> %d hit(s): %s", q, len(items),
                              ", ".join(it["filename"] for it in items) or "-")
-            return self._send(200, {"items": [{kk: vv for kk, vv in it.items() if kk != "path"} for it in items]})
+            return self._send(200, {"items": [{kk: (clean_caption(vv) if kk == "caption" else vv)
+                                               for kk, vv in it.items() if kk != "path"} for it in items]})
         if kind == "branding":
             b = branding()
             if not b:

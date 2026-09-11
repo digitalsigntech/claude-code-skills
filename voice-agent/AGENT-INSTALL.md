@@ -660,7 +660,11 @@ knowledge base: the lines that name the file's stem ("PR-05") are the
 searchable text, and the best of them — a line naming the file itself, else a
 table row opening with the id, else a mention — is the caption. Whole-word
 matching with a small stop list ("show", "me", "the", "photo" …), best hits
-only (half the top score or better, at most 4). Tokens survive a restart: the
+only (half the top score or better, at most 4). The caption is the product's OWN NAME
+("HP Indigo 6900"): the first cell of the best line that is neither the file/id cell nor a
+source, scrubbed of file names, web addresses, listing ids and "photo N" by
+`clean_caption()` — which the attachments feed applies too. A demo company must look real,
+and a caption naming a marketplace listing says the photo is somebody else's. Tokens survive a restart: the
 file route re-mints them from the same walk. Health lists `media` in `caps`.
 
 ## Message order: millisecond stamps and the agent's clock
