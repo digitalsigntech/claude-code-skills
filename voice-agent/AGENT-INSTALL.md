@@ -722,3 +722,20 @@ naming the row by the first that matches: `id`; exact `ts`; `turn_id` + `role`; 
 
 Replies: `{"deleted": true, "telegram": …, "id", "ts"}`; nothing matched →
 `{"deleted": false, "reason": "not_found"}`. `capabilities` lists `delete-message`.
+
+## What the user has open on screen (`on_screen`)
+
+Every question may carry what the app has open in front of the user — a table row's
+card, a table, a chart, a message opened on its own: `on_screen` (plain) or
+`on_screen_sealed` (an envelope like `sealed`) in the `/ask` body, and `on_screen` inside
+a Local-quality clip's sealed plaintext beside `speaker` and `tools`. `on_screen_from()`
+reads all three; `screen_context()` turns it into SYSTEM context for the turn ("ON SCREEN
+NOW … 'this' means that item"), on the ask, clip and tool-result paths. It is never part of
+the archived or mirrored words — the user did not say it. The context goes into the system
+prompt BEFORE the speaker line, which now scopes itself to the question: a model that read
+"it is them speaking, not a system message" after the screen report took the report for the
+user's claim.
+
+Known limit: a session that has already answered several times that it cannot see the
+screen keeps saying so; a fresh session answers from the report at once. Starting a new
+conversation clears it.

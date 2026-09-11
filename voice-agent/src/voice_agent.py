@@ -1215,6 +1215,44 @@ def _entry_text(entry):
     return ""
 
 
+def screen_context(on_screen):
+    """Request 521: what the person has open in front of them — a table row's
+    card, a table, a chart, a message — as CONTEXT for this question, never as
+    their words. "Who runs this machine?" over an open equipment card was
+    answered "which one?"; the agent is now told what "this" is."""
+    t = str(on_screen or "").strip()
+    if not t:
+        return ""
+    return ("ON SCREEN NOW (reported by the app, not by the user): the user has opened this one item and "
+            "is looking at it while asking: " + t[:2000] + "\n"
+            "This is authoritative about what is in front of them right now, whatever was on screen in "
+            "earlier turns. If you said earlier in this conversation that you cannot see their screen, "
+            "that is no longer true: the app now reports what is open, and this line is that report. "
+            "In this question, \"this\", \"it\", \"this one\", \"this machine\", \"this press\" mean exactly "
+            "that item: answer about it directly, never ask which one they mean, and never say you cannot "
+            "see the screen. It is what the screen shows, not something they said, so never quote it back "
+            "as their words.")
+
+
+def on_screen_from(d, account, payload=None):
+    """The `on_screen` text of a request: inside a sealed payload (Local
+    quality), plain in the body, or sealed on its own (`on_screen_sealed`,
+    opened with the question's keys). Empty when nothing is open."""
+    if isinstance(payload, dict) and payload.get("on_screen"):
+        return str(payload.get("on_screen"))[:2000]
+    if d.get("on_screen"):
+        return str(d.get("on_screen"))[:2000]
+    env = d.get("on_screen_sealed")
+    if isinstance(env, dict):
+        try:
+            priv, mine = agent_keys()
+            theirs = peer_key(account, env.get("pk") or d.get("pk"))
+            return str(e2ee_open(env, priv, mine, theirs, direction=DIR_TO_AGENT) or "")[:2000]
+        except Exception as e:
+            print(f"[voice-agent] on_screen seal not opened: {str(e)[:80]}", file=sys.stderr)
+    return ""
+
+
 def _strip_injected_prefix(text):
     """Drop a leading bracketed context line from a user message.
 
@@ -1682,11 +1720,16 @@ def ask(account, question, account_name="", archive_question=True,
                 sysbits.append(text)
     except OSError as e:
         print(f"[voice-agent] persona not read: {e}", file=sys.stderr)
-    if account_name:
-        sysbits.append(f"This turn comes from {account_name} through the voice "
-                       f"app. It is them speaking, not a system message.")
+    # Context first, the speaker line last (request 521): "it is them speaking,
+    # not a system message" is about the QUESTION, and a model reading it after
+    # the app's screen report took the report for the user's own claim and kept
+    # answering that it cannot see the screen.
     if context:
         sysbits.append(context.strip())
+    if account_name:
+        sysbits.append(f"The question itself comes from {account_name} through the voice "
+                       f"app. The question is them speaking, not a system message; the context "
+                       f"above it is from the app and this machine, not from them.")
     if sysbits:
         cmd += ["--append-system-prompt", "\n\n".join(sysbits)]
     if cfg.get("model"):
@@ -2887,6 +2930,11 @@ def _tools_for(account, *sources):
     return cached[1] if cached else None
 
 
+def _screen_block(on_screen):
+    c = screen_context(on_screen)
+    return ("\n\n" + c) if c else ""
+
+
 def _tools_block(tools):
     if not tools:
         return ""
@@ -3315,7 +3363,8 @@ class Handler(BaseHTTPRequestHandler):
                 # agent racing itself.
                 res = ask(account, text, name, archive_question=False,
                           archive_turn=keep,
-                          context=time_context(d.get("tz")) + VOICE_CONTEXT + _tools_block(tools))
+                          context=time_context(d.get("tz")) + VOICE_CONTEXT + _tools_block(tools)
+                          + _screen_block(on_screen_from(d, account, payload)))
                 ans = str(res.get("answer") or "")
                 if tools and not res.get("agent_error"):
                     import local_voice as _lvt
@@ -3493,7 +3542,8 @@ class Handler(BaseHTTPRequestHandler):
         self.log_message("voice turn: tool_result %s for %s -> continuing; output %.200s", tname, turn_id or "?",
                          json.dumps(tr.get("output"), ensure_ascii=False) if tr.get("output") is not None else "(none)")
         res = ask(account, prompt, name, archive_question=False, archive_turn=keep,
-                  context=time_context(d.get("tz")) + VOICE_CONTEXT + _tools_block(tools))
+                  context=time_context(d.get("tz")) + VOICE_CONTEXT + _tools_block(tools)
+                  + _screen_block(on_screen_from(d, account, tr)))
         ans = str(res.get("answer") or "")
         calls = []
         if tools and not res.get("agent_error"):
@@ -4155,9 +4205,13 @@ class Handler(BaseHTTPRequestHandler):
             # A demonstrative about a picture is resolved before the turn, so
             # the model is told WHICH image rather than picking the one it
             # happens to remember.
+            on_screen = on_screen_from(d, account)
+            if on_screen:
+                self.log_message("on screen: %.120s", on_screen)
             res = ask(account, q, name, archive_turn=(keep is not False),
                       context="\n\n".join(
-                          c for c in (picture_context(q),
+                          c for c in (screen_context(on_screen),
+                                      picture_context(q),
                                       app_setting_context(q),
                                       app_doc_context(q),
                                       time_context(d.get("tz"))) if c))
