@@ -371,7 +371,12 @@ def telegram_chat():
                     chat = int(ids[0])
             except Exception:
                 chat = 0
-    _TG_CACHE["chat"] = chat
+    # Request 507 (2026-09-11): an EMPTY answer is not remembered — a lookup
+    # that fails once at boot (the gateway's tgconf not importable yet) would
+    # otherwise leave every mirror "no_chat" for the life of the process,
+    # answers and transcripts alike, and nothing said so.
+    if chat:
+        _TG_CACHE["chat"] = chat
     return chat
 
 
@@ -566,6 +571,8 @@ def archive(text, direction, sender, account_name="", mirror=True,
         _record_mirror(archive_chat_id(), False)
         return "guest_no_chat"
     if not telegram_chat():
+        print(f"[voice-agent] mirror {direction} ({kind}): NO CHAT — telegram_chat() is empty in this process; "
+              f"{str(text)[:40]!r} archived only", file=sys.stderr)
         _record_mirror(archive_chat_id(), False)
         return "no_chat"
     # A SLOW MIRROR SHOULD NOT BE A SLOW TICK. The app waits on this call to
@@ -3379,7 +3386,13 @@ class Handler(BaseHTTPRequestHandler):
                                     "chat": bool(telegram_chat())
                                             and not is_guest()})
         if kind == "health":
-            return self._send(200, health())
+            h = health()
+            try:
+                h["mirror_chat"] = telegram_chat() or 0        # request 507: the live value, not a guess
+                h["mirror_gateway"] = bool(telegram())
+            except Exception:
+                pass
+            return self._send(200, h)
         if kind == "branding":
             b = branding()
             if not b:
