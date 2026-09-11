@@ -401,7 +401,11 @@ def tg_text(text, who=None):
     body = f"🎙 {who}: {text}" if who else text
     try:
         res = api.send_message(chat, body[:3900])
-        return bool(res and res.get("ok"))
+        if not (res and res.get("ok")):
+            return False
+        # request 519: the message id, so the copy can be deleted later
+        mid = ((res.get("result") or {}).get("message_id")) if isinstance(res.get("result"), dict) else None
+        return int(mid) if isinstance(mid, int) and mid > 0 else True
     except Exception:
         return False
 
@@ -463,10 +467,19 @@ def _mirror_state_db():
     cx.execute("CREATE TABLE IF NOT EXISTS mirror_state("
                "epoch REAL, chat_id INTEGER, mirrored INTEGER, "
                "PRIMARY KEY(epoch, chat_id))")
+    # request 519: the Telegram message id of the mirror copy, so a delete can
+    # take it down too; and tombstones, so every device drops a deleted row.
+    try:
+        cx.execute("ALTER TABLE mirror_state ADD COLUMN tg_msg_id INTEGER")
+    except Exception:
+        pass
+    cx.execute("CREATE TABLE IF NOT EXISTS deleted_rows("
+               "id INTEGER, epoch REAL, chat_id INTEGER, deleted_at REAL, "
+               "PRIMARY KEY(id))")
     return cx
 
 
-def _record_mirror(chat_id, mirrored):
+def _record_mirror(chat_id, mirrored, msg_id=None):
     """Remember whether the line just archived actually reached the chat.
 
     2026-08-19: the app ticks whatever history hands back, and history could
@@ -482,8 +495,10 @@ def _record_mirror(chat_id, mirrored):
         row = cx.execute("SELECT epoch FROM messages WHERE chat_id=? "
                          "ORDER BY epoch DESC LIMIT 1", (chat_id,)).fetchone()
         if row:
-            cx.execute("INSERT OR REPLACE INTO mirror_state VALUES(?,?,?)",
-                       (row[0], chat_id, 1 if mirrored else 0))
+            cx.execute("INSERT OR REPLACE INTO mirror_state(epoch, chat_id, mirrored, tg_msg_id) "
+                       "VALUES(?,?,?,?)",
+                       (row[0], chat_id, 1 if mirrored else 0,
+                        int(msg_id) if isinstance(msg_id, int) and msg_id > 0 else None))
             cx.commit()
         cx.close()
     except Exception:
@@ -492,6 +507,124 @@ def _record_mirror(chat_id, mirrored):
 # No sentence anyone speaks or types is this long; anything bigger is a payload
 # that took a wrong turn.
 MAX_ARCHIVE_CHARS = 20000
+
+
+# ---- request 519 (2026-09-11): delete one message everywhere -----------------
+def _history_scope():
+    """(sql, params) naming the rows this caller may see — the same scope
+    history reads: a guest its own chat, an owner every non-guest chat."""
+    if is_guest():
+        return "chat_id = ?", (guest_chat_id(),)
+    return "chat_id > ?", (GUEST_CHAT_FLOOR,)
+
+
+def deleted_tombstones(days=30):
+    """[{id, ts}] of rows deleted in the last `days`, whatever `since` the
+    caller asked for — a deletion happens after the message it removes."""
+    d = archive_dir()
+    if not d:
+        return []
+    try:
+        import sqlite3
+        cx = sqlite3.connect(f"file:{d / 'chat.db'}?mode=ro", uri=True, timeout=3)
+        scope, params = _history_scope()
+        rows = cx.execute(f"SELECT id, epoch FROM deleted_rows WHERE deleted_at > ? AND {scope} "
+                          "ORDER BY deleted_at DESC LIMIT 500",
+                          (time.time() - days * 86400,) + tuple(params)).fetchall()
+        cx.close()
+        return [{"id": int(i), "ts": float(e)} for i, e in rows]
+    except Exception:
+        return []
+
+
+def history_delete(d):
+    """Delete one archived line everywhere this agent can reach: the archive
+    row (and its attachment files when nothing else names them), the mirror
+    copy in the chat (when its message id was recorded), and a tombstone so
+    every device drops the row. The row is named by the first that matches:
+    `id`; exact `ts`; `turn_id` + `role`; `role` + `text` + `at` (±60 s)."""
+    dd = archive_dir()
+    if not dd:
+        return {"deleted": False, "reason": "no_archive"}
+    import sqlite3
+    _mirror_state_db().close()                 # the sidecar tables exist
+    scope, params = _history_scope()
+    role = str(d.get("role") or "")
+    direction = "out" if role == "agent" else ("in" if role == "user" else None)
+    cx = sqlite3.connect(f"{dd / 'chat.db'}", timeout=5)
+    row = None
+    try:
+        if d.get("id") not in (None, ""):
+            row = cx.execute(f"SELECT id, epoch, chat_id, text FROM messages WHERE id = ? AND {scope}",
+                             (int(d["id"]),) + tuple(params)).fetchone()
+        if not row and d.get("ts") not in (None, ""):
+            ts = float(d["ts"])
+            row = cx.execute(f"SELECT id, epoch, chat_id, text FROM messages WHERE ABS(epoch - ?) < 0.0005 "
+                             f"AND {scope} ORDER BY ABS(epoch - ?) LIMIT 1",
+                             (ts,) + tuple(params) + (ts,)).fetchone()
+        if not row and d.get("turn_id") and direction:
+            row = cx.execute(f"SELECT id, epoch, chat_id, text FROM messages WHERE session_id = ? AND direction = ? "
+                             f"AND {scope} ORDER BY epoch DESC LIMIT 1",
+                             ("turn:" + str(d["turn_id"]), direction) + tuple(params)).fetchone()
+        if not row and direction and d.get("text") and d.get("at") not in (None, ""):
+            at = float(d["at"])
+            row = cx.execute(f"SELECT id, epoch, chat_id, text FROM messages WHERE direction = ? AND text = ? "
+                             f"AND ABS(epoch - ?) <= 60 AND {scope} ORDER BY ABS(epoch - ?) LIMIT 1",
+                             (direction, str(d["text"]), at) + tuple(params) + (at,)).fetchone()
+    except (ValueError, TypeError):
+        row = None
+    if not row:
+        cx.close()
+        return {"deleted": False, "reason": "not_found"}
+    rid, ep, chat_id, text = int(row[0]), float(row[1]), int(row[2] or 0), str(row[3] or "")
+    # the mirror copy first, while the sidecar row still exists
+    telegram_state = "not_mirrored"
+    try:
+        ms = cx.execute("SELECT mirrored, tg_msg_id FROM mirror_state WHERE epoch = ? AND chat_id = ?",
+                        (ep, chat_id)).fetchone()
+    except Exception:
+        ms = None
+    mirrored = bool(ms and ms[0])
+    origin_chat = ms is None and not str(text).startswith("[")     # a line the chat itself wrote
+    if mirrored or origin_chat:
+        api = telegram()
+        mid = ms[1] if ms else None
+        if api and mid:
+            try:
+                r = api.delete_message(chat_id, int(mid))
+                telegram_state = "deleted" if (r and r.get("ok")) else "failed"
+            except Exception:
+                telegram_state = "failed"
+        else:
+            telegram_state = "failed"          # the chat has it and its message id was never recorded
+    # attachment files, when no other row names them
+    mk = _MARKER.match(text.strip())
+    if mk:
+        for nm in mk.group(2).split(","):
+            nm = nm.strip()
+            path = _resolve_upload(nm)
+            if not path:
+                continue
+            others = cx.execute("SELECT count(*) FROM messages WHERE id != ? AND text LIKE ?",
+                                (rid, f"%{nm}%")).fetchone()[0]
+            if not others:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+    # The words go; the row's NUMBER stays. SQLite hands a deleted last id to
+    # the next insert, and a tombstone for that id would then take a live
+    # message down on every other device — so the row is blanked, not dropped:
+    # no text, kind "deleted", skipped by history and by every search.
+    cx.execute("UPDATE messages SET text = '', kind = 'deleted', session_id = NULL WHERE id = ?", (rid,))
+    cx.execute("DELETE FROM mirror_state WHERE epoch = ? AND chat_id = ?", (ep, chat_id))
+    cx.execute("INSERT OR REPLACE INTO deleted_rows(id, epoch, chat_id, deleted_at) VALUES(?,?,?,?)",
+               (rid, ep, chat_id, time.time()))
+    cx.commit()
+    cx.close()
+    print(f"[voice-agent] history delete: row {rid} ({ep:.3f}) removed; telegram {telegram_state}",
+          file=sys.stderr)
+    return {"deleted": True, "telegram": telegram_state, "id": rid, "ts": ep}
 
 
 def _looks_like_envelope(text):
@@ -603,7 +736,7 @@ def archive(text, direction, sender, account_name="", mirror=True,
             print(f"[voice-agent] mirror {direction} ({kind}): {'delivered' if box.get('ok') else 'FAILED'} "
                   f"late, after {time.time() - _t0:.1f}s — {str(text)[:40]!r}", file=sys.stderr)
             if box.get("ok"):
-                _record_mirror(archive_chat_id(), True)
+                _record_mirror(archive_chat_id(), True, box.get("ok"))
 
     t = threading.Thread(target=_send, daemon=True)
     t.start()
@@ -616,7 +749,7 @@ def archive(text, direction, sender, account_name="", mirror=True,
               f"{MIRROR_DEADLINE_S:.1f}s — {str(text)[:40]!r}", file=sys.stderr)
         _record_mirror(archive_chat_id(), False)
         return "queued"
-    _record_mirror(archive_chat_id(), bool(box["ok"]))
+    _record_mirror(archive_chat_id(), bool(box["ok"]), box["ok"])
     if not box["ok"]:
         print(f"[voice-agent] mirror {direction} ({kind}): SEND FAILED — {str(text)[:40]!r}",
               file=sys.stderr)
@@ -963,7 +1096,7 @@ def _archive_history(limit, since):
         cx = sqlite3.connect(f"file:{d / 'chat.db'}?mode=ro", uri=True, timeout=3)
         if is_guest():
             rows = cx.execute(
-                "SELECT epoch, sender, text, direction, session_id, kind FROM messages "
+                "SELECT epoch, sender, text, direction, session_id, kind, id FROM messages "
                 "WHERE epoch > ? AND chat_id = ? ORDER BY epoch DESC LIMIT ?",
                 (since, guest_chat_id(), limit)).fetchall()
         else:
@@ -978,7 +1111,7 @@ def _archive_history(limit, since):
             # Telegram chat id never reaches there. So the boundary is derived
             # from the code that mints them rather than from a list to maintain.
             rows = cx.execute(
-                "SELECT epoch, sender, text, direction, session_id, kind FROM messages "
+                "SELECT epoch, sender, text, direction, session_id, kind, id FROM messages "
                 "WHERE epoch > ? AND chat_id > ? ORDER BY epoch DESC LIMIT ?",
                 (since, GUEST_CHAT_FLOOR, limit)).fetchall()
         cx.close()
@@ -999,14 +1132,15 @@ def _archive_history(limit, since):
     except Exception:
         state = {}
     msgs = []
-    for ep, sender, text, direction, _sid, _kind in reversed(rows):
+    for ep, sender, text, direction, _sid, _kind, _rid in reversed(rows):
         if not isinstance(ep, (int, float)) or ep <= 0 or not text:
             continue
         # Direction is the authoritative field: keying on the sender's name puts
         # the agent's own words in the user's bubble the first time anything
         # else writes to the archive.
         role = "agent" if direction == "out" else "user"
-        m = {"role": role,
+        m = {"id": int(_rid),                    # request 519: stable, sent back on delete
+             "role": role,
              "sender": name if role == "agent" else (sender or "you"),
              # NO CAP (#275): this 2000 cut his answer mid-word at exactly
              # 2000 characters — "…over a channel the voi" — while the
@@ -2288,7 +2422,7 @@ def capabilities():
     derivation runs before pair.py registers rather than after."""
     # `progress` is unconditional: it costs nothing, and the app treats its absence
     # as an agent that is not there.
-    caps = ["ask", "health", "progress", "history", "media"]
+    caps = ["ask", "health", "progress", "history", "media", "delete-message"]
     try:                       # only claimed when a key really exists
         agent_keys()
         caps.append("pubkey")
@@ -3534,6 +3668,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": True, "deleted": False,
                                         "reason": str(e)[:120]})
             return self._send(200, {"ok": True, "deleted": bool(gone)})
+        if kind == "history_delete":
+            # request 519: one message, gone everywhere this agent can reach
+            try:
+                return self._send(200, history_delete(d))
+            except Exception as e:
+                self.log_message("history delete failed: %s", e)
+                return self._send(200, {"deleted": False, "reason": str(e)[:120]})
         if kind == "history":
             try:
                 limit = min(int(d.get("limit") or 50), 100)
@@ -3606,6 +3747,7 @@ class Handler(BaseHTTPRequestHandler):
             # one timeline. Whole seconds of phone skew misorder a live
             # question against the rows around it — fractions alone cannot.
             return self._send(200, {"messages": rows,
+                                    "deleted": deleted_tombstones(),      # request 519
                                     "server_now": round(time.time(), 3),
                                     "chat": bool(telegram_chat())
                                             and not is_guest()})

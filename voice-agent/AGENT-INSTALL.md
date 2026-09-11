@@ -701,3 +701,24 @@ kind), `origin: "chat"` for everything else in the chat's log — the person typ
 linked chat, the gateway answering there. `mirrored` answers "does the chat have this
 line?": for an app row it is the recorded outcome of the post (true/false); for a chat row
 it is always `true`, never absent — the chat wrote it. The app draws a tick from it.
+
+## Delete one message everywhere (`delete-message`)
+
+Every `history` row carries a stable `id` (the archive row number). The app's long-press
+Delete posts `/api/history/delete`, which the plane relays as `{"type": "history_delete", …}`
+naming the row by the first that matches: `id`; exact `ts`; `turn_id` + `role`; `role` +
+`text` + `at` (±60 s; text is never sent when the archive is sealed). The agent then:
+
+- blanks the archive row (no text, kind `deleted`) — the words are gone from every read and
+  search, but the row NUMBER stays, because SQLite hands a deleted last id to the next insert
+  and a tombstone for that id would take a live message down on every other device;
+- removes attachment files the row named when no other row names them;
+- deletes the mirror copy in the linked chat when its Telegram message id was recorded — the
+  mirror-state sidecar keeps `tg_msg_id` for every line mirrored from now on; a line the chat
+  itself wrote (typed in Telegram, answered by the gateway) has no recorded id, and the reply
+  says so — `"telegram": "deleted" | "not_mirrored" | "failed"`;
+- writes a tombstone. Every `history` reply carries `"deleted": [{"id", "ts"}]` for the last
+  30 days regardless of `since`, so a second device drops the row from its cache.
+
+Replies: `{"deleted": true, "telegram": …, "id", "ts"}`; nothing matched →
+`{"deleted": false, "reason": "not_found"}`. `capabilities` lists `delete-message`.
