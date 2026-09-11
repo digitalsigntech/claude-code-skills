@@ -727,7 +727,7 @@ def open_sealed_blob(ref, ct):
 def _greeting_turn(plaintext):
     """The opened greeting request if this is one ({"greeting": true, …})."""
     t = (plaintext or "").lstrip()
-    if not t.startswith("{") or '"greeting"' not in t[:120]:
+    if not t.startswith("{") or '"greeting"' not in t:
         return None
     try:
         p = json.loads(t)
@@ -740,7 +740,7 @@ def _attachments_turn(plaintext):
     """The opened attachments message if this is one, else None. Read from
     the PLAINTEXT like a voice turn: what is inside decides what this is."""
     t = (plaintext or "").lstrip()
-    if not t.startswith("{") or '"attachments"' not in t[:200]:
+    if not t.startswith("{") or '"attachments"' not in t:
         return None
     try:
         p = json.loads(t)
@@ -2567,20 +2567,26 @@ def _tools_block(tools):
 def _tool_result_turn(plaintext):
     """The opened payload if this is a tool result (request 499), else None."""
     t = (plaintext or "").lstrip()
-    if not t.startswith("{") or '"tool_result"' not in t[:400]:
+    if not t.startswith("{") or ('"tool_result"' not in t and '"call_id"' not in t):
         return None
     try:
         p = json.loads(t)
     except ValueError:
         return None
-    return p if isinstance(p, dict) and isinstance(p.get("tool_result"), dict) else None
+    if isinstance(p, dict) and isinstance(p.get("tool_result"), dict):
+        return p
+    if isinstance(p, dict) and p.get("call_id") and "output" in p and "voice" not in p:
+        # the flat shape: the result's fields at the top level beside lang/speaker/tools
+        return {**{k: v for k, v in p.items() if k not in ("turn_id", "call_id", "name", "output", "silent")},
+                "tool_result": {k: p.get(k) for k in ("turn_id", "call_id", "name", "output", "silent") if k in p}}
+    return None
 
 
 def _say_turn(plaintext):
     """The opened payload if this is a `say` (request 501: speak EXACTLY this
     text, no model), else None."""
     t = (plaintext or "").lstrip()
-    if not t.startswith("{") or '"say"' not in t[:200]:
+    if not t.startswith("{") or '"say"' not in t:
         return None
     try:
         p = json.loads(t)
@@ -2592,7 +2598,7 @@ def _say_turn(plaintext):
 def _voice_turn(plaintext):
     """The opened payload if this is an LQ turn, else None."""
     t = (plaintext or "").lstrip()
-    if not t.startswith("{") or '"voice"' not in t[:400]:
+    if not t.startswith("{") or '"voice"' not in t:
         return None
     try:
         p = json.loads(t)
