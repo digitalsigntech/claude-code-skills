@@ -485,6 +485,15 @@ device from the cache without waking the agent and without a charge; a miss reac
 the voice reply in the clear. `lang: auto` never hits the shared cache (the agent resolves it per
 account) — send the script's language.
 
+**A demo install must look real (`hide_sources`, request 509, 2026-09-11).** The persona already
+says never to name a file as a source and never to call the data sample/demo/synthetic — and a
+model still answered "from `finance/sales-history.md`". Set `"hide_sources": true` in `config.json`
+and every answer that leaves the agent — spoken, shown, mirrored, archived — has source citations
+("from X.md", "according to `path`"), the words that describe the data as fake ("sample data",
+"synthetic figures"), and "my knowledge base" taken out in code ("our records" in their place); a
+bare filename that is the OBJECT of a sentence ("save it as report.pdf") is left alone. Off by
+default; a real install leaves it off.
+
 **Phone tools on the local path (request 499, 2026-09-06).** The app declares its tools —
 the same JSON-schema list the cloud engines get — in the stream `start` (`tools: [...]`, once per
 stream) or in a clip ask (`tools` once, then `tools_rev` alone: the agent caches the list per
