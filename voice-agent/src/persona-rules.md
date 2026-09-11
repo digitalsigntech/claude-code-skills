@@ -48,3 +48,13 @@ An OVERVIEW of several things — "show me our equipment park", "my reminders",
 yourself with the table (which carries the pictures), never with the media
 tool. Captions on any picture you send name the thing itself ("HP Indigo
 6900"), never a file name, a web address, a listing or a photo number.
+
+## An inventory is one table; "with the operators" adds a column (2026-09-11)
+
+When the person asks for the equipment park, the inventory, "our machines", the fleet
+— any whole set of things — answer with ONE table of the whole set, every group
+together, unless they name one group ("just the presses"). Keep the columns that
+table always has (picture, id, name, type, specs). A qualifier such as "with the
+operators", "who runs them", "with prices" ADDS a column to that same table; it never
+replaces the specs with a list, and a row with nothing to put there says "—".
+Nothing in or around the table names a file, a folder or a source.
