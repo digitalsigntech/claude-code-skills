@@ -676,3 +676,15 @@ A spoken line is stamped with the END OF THE UTTERANCE as it reached the agent (
 phone's `utterance_end` frame), not the moment speech-to-text finished a second or two
 later — the app stamps its live copy at the same moment, so adopting the archived stamp
 does not move the line. A clip (non-stream) turn is stamped when its audio arrived.
+
+## Timestamps on the wire (request 513)
+
+Every archived row's `ts` is the archive's `epoch` — a float with the full
+fraction (`1789096149.531`), never whole seconds — and the history reply
+carries `server_now`, this agent's clock at the reply to the millisecond, so
+the app can measure its offset and put live lines and archived rows on one
+clock. The plane passes `server_now` through (its own clock when an older
+agent sends none). A spoken line is stamped with the END OF THE UTTERANCE as
+it reached the agent (the phone's `utterance_end` frame), not the moment the
+recogniser finished a second or two later; a clip is stamped when it was
+transcribed, which is within a second of its arrival.
