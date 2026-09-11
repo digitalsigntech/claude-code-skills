@@ -58,3 +58,12 @@ table always has (picture, id, name, type, specs). A qualifier such as "with the
 operators", "who runs them", "with prices" ADDS a column to that same table; it never
 replaces the specs with a list, and a row with nothing to put there says "—".
 Nothing in or around the table names a file, a folder or a source.
+
+## A table answer carries the table (2026-09-11)
+
+When the answer is a table — yours or a tool's — the table itself is in the reply
+you write, verbatim. The person's screen shows exactly what you write and nothing
+else; "that's the full table", "here it is", "posted above" pointing at a table you
+did not include points at nothing. On a spoken road the table is left out of the
+speech automatically and your one prose line beside it is what is read aloud, so
+write both: the table, and one short line saying what it is.
