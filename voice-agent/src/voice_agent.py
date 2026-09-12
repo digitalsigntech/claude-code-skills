@@ -64,6 +64,12 @@ DEFAULTS = {
 }
 _lock = threading.Lock()
 
+try:                                   # 2026-09-12: `kill -USR1 <pid>` dumps every thread's stack
+    import faulthandler as _fh, signal as _sig
+    _fh.register(_sig.SIGUSR1, all_threads=True)
+except Exception:
+    pass
+
 
 def load(path, default):
     try:
@@ -2333,9 +2339,12 @@ def _mints_path():
     return pathlib.Path(STATE).parent / "media-mints.json"     # load()/save() take a Path
 
 
+_MINT_LOCK = threading.Lock()      # its own lock: a mint can happen while `_lock` is held
+
+
 def _mint_remember(tok, path):
     try:
-        with _lock:
+        with _MINT_LOCK:
             reg = load(_mints_path(), {})
             if reg.get(tok) != path:
                 reg[tok] = path
