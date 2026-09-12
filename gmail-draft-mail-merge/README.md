@@ -29,6 +29,9 @@ MAIL_ACCOUNT=primary python3 src/draft_merge.py \
   --example you@example.com --dry-run
 ```
 
+Once the sample draft has been sent it is no longer in Drafts; pass `--sample-message-id <id>`
+to use the sent copy (or any message) as the master instead.
+
 Drop `--dry-run` to create the drafts. `--cc addr` copies an address on every draft
 (including the example). `--limit N` creates only the first N.
 Drive mode (`--doc "<Doc name>" --sheet "<Sheet name>"`) reads the two inputs from

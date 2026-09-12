@@ -10,6 +10,7 @@ Inputs
                     placeholder (gives the subject + the plain-text part)
   --leads FILE      CSV with columns: firstname, recipient
   --sample-subject  subject of the sample draft in Gmail Drafts (default: the template's)
+  --sample-message-id  use a specific Gmail message (e.g. the sent copy) as the master
   --example ADDR    also create one "[EXAMPLE]" draft to this address
   --cc ADDR         CC this address on every draft
   --limit N / --dry-run
@@ -84,6 +85,11 @@ def load_inputs(a):
     return open(a.template, encoding='utf-8-sig').read(), open(a.leads, encoding='utf-8-sig').read()
 
 
+def load_message(gm, mid):
+    raw = gm.users().messages().get(userId='me', id=mid, format='raw').execute()['raw']
+    return email.message_from_bytes(base64.urlsafe_b64decode(raw + '=='))
+
+
 def find_sample_draft(gm, subject):
     for d in gm.users().drafts().list(userId='me', maxResults=100).execute().get('drafts', []):
         m = gm.users().messages().get(userId='me', id=d['message']['id'], format='metadata',
@@ -140,7 +146,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--template'); ap.add_argument('--leads')
     ap.add_argument('--doc'); ap.add_argument('--sheet')
-    ap.add_argument('--sample-subject'); ap.add_argument('--example'); ap.add_argument('--example-name', default='there')
+    ap.add_argument('--sample-subject'); ap.add_argument('--sample-message-id', help='use this Gmail message (e.g. a sent copy) as the master'); ap.add_argument('--example'); ap.add_argument('--example-name', default='there')
     ap.add_argument('--cc', help='CC address(es) on every draft')
     ap.add_argument('--limit', type=int, default=0); ap.add_argument('--dry-run', action='store_true')
     a = ap.parse_args()
@@ -148,7 +154,7 @@ def main():
     tpl_txt, leads_csv = load_inputs(a)
     subject, body = read_template_text(tpl_txt)
     leads, bad = read_leads_csv(leads_csv)
-    html_src, text_src = parts(find_sample_draft(gm, a.sample_subject or subject))
+    html_src, text_src = parts(load_message(gm, a.sample_message_id) if a.sample_message_id else find_sample_draft(gm, a.sample_subject or subject))
     text_src = text_src or body
     d_words = ' '.join(norm_words(body.replace('[Name]', 'x'))).split('best regards')[0].split()
     s_words = re.sub(r'^hi \w+', 'hi x', ' '.join(norm_words(text_src)).split('best regards')[0]).split()
