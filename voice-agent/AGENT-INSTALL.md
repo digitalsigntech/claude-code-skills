@@ -769,3 +769,11 @@ the model from a subprocess (a chart drawn into `/tmp`, minted, put in the reply
 `![](vb-token:…)`) was unknown to the server process unless the file sat in a directory the
 re-mint walks, and every fetch of it 404'd — a picture in the reply the app could not get.
 Only paths that were explicitly minted are ever served; the registry keeps the last 5,000.
+
+## The answer push carries its own sealed preview
+
+Every reply path — the plain ask, the Local-quality clip, the tool-result continuation — now
+attaches `push_preview` (the sealed `{"from", "text", "group"}` banner preview) and `chat_id`
+to the reply, so the plane's `answer` push shows the real words once the phone is unlocked
+and a tap opens the right chat. Before this only the plain ask attached the preview, and the
+plane's reduced copy of the reply dropped it anyway: every answer banner read the generic line.

@@ -2885,6 +2885,26 @@ def _peers_path():
     return HERE / PEERS_FILE
 
 
+def _answer_push_fields(account, text):
+    """What an ANSWER push needs beside the reply (2026-09-12): the sealed
+    banner preview — built here for every reply path, not only the plain ask —
+    and the chat the line lives in (request 525), so a tap opens that chat."""
+    out = {}
+    try:
+        g = _chat_title() if not is_guest() else ""
+        c = archive_chat_id() if not is_guest() else 0
+        if c:
+            out["chat_id"] = int(c)
+        prev = push_preview_envelope(account, str(text or ""), group=g or None)
+        if prev:
+            out["push_preview"] = prev
+        elif g:
+            out["group"] = g
+    except Exception as e:
+        print(f"[voice-agent] answer push fields skipped: {str(e)[:80]}", file=sys.stderr)
+    return out
+
+
 def push_preview_envelope(account, text, group=None):
     """The sealed banner preview: {"from": ..., "text": ...}, or None.
 
@@ -3527,6 +3547,7 @@ class Handler(BaseHTTPRequestHandler):
         # cross-check rather than as the source.
         return self._send(200, {
             "sealed": sealed,
+            **_answer_push_fields(account, out["text"]),
             "audio_seconds_in": out["audio_seconds_in"],
             "audio_seconds_out": out["audio_seconds_out"],
             "engine": "local",
@@ -3635,7 +3656,8 @@ class Handler(BaseHTTPRequestHandler):
                          tname, secs_out, len(audio) // 1024, who,
                          f", tool_call {calls[0]['name']}" if calls else "")
         return self._send(200, {
-            "sealed": sealed, "audio_seconds_in": 0.0,
+            "sealed": sealed, **_answer_push_fields(account, ans),
+            "audio_seconds_in": 0.0,
             "audio_seconds_out": round(secs_out, 3),
             "engine": "local", "continuation": True,
             "took_s": round(time.time() - t0, 2)})
@@ -4307,13 +4329,7 @@ class Handler(BaseHTTPRequestHandler):
             # lines for a lock screen — and because the app is specified to
             # distrust readable text beside an envelope, so it may not ride
             # inside it.
-            try:
-                _prev = push_preview_envelope(account,
-                                              str(res.get("answer") or ""))
-                if _prev:
-                    res["push_preview"] = _prev
-            except Exception as e:
-                self.log_message("push preview skipped: %.80s", e)
+            res.update(_answer_push_fields(account, res.get("answer")))
             if seal_reply:
                 # Sealed in, sealed out — and the plaintext `answer` is
                 # REMOVED, not left beside it. The app is specified to ignore
