@@ -206,7 +206,10 @@ address, use a Cloudflare *named* tunnel and pass its hostname to `pair.py --url
 
 1. **Place the code**, e.g. `/opt/voice-agent/`.
 2. **Point it at your project** — copy `config.example.json` to `config.json` and set
-   `workdir` to the directory the agent should work in. This is the whole value of the
+   `workdir` to the directory the agent should work in. The model comes from that
+   workspace's `agent-profile.json` (`agent.model`) — the same field the chat gateway
+   reads, so a deployment runs one model on every road; `model` in `config.json` is
+   only the fallback for a workdir with no profile. This is the whole value of the
    thing: the agent answers out of *those* files.
 
    That is the only thing you have to decide. The identity panel works itself out

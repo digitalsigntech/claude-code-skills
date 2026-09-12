@@ -40,11 +40,6 @@ import shutil as _shutil
 CLAUDE_BIN = (os.environ.get("CLAUDE_BIN") or _shutil.which("claude")
               or os.path.expanduser("~/.local/bin/claude"))
 CLAUDE_WORKDIR = WORKSPACE_ROOT
-# Fable 5.1 since 2026-09-04 (the owner: "Switch to fable 5.1"). It needed the
-# Claude Code upgrade to 2.1.260 first — the model id did not resolve on
-# 2.1.226. Was Opus 5 from 2026-08-01, which itself replaced Fable 5 when
-# that hit its usage limit. Override per-run with TG_TG_MODEL.
-CLAUDE_MODEL = os.environ.get("TG_TG_MODEL", "claude-fable-5-1")
 CLAUDE_TIMEOUT = int(os.environ.get("TG_TG_TIMEOUT", "900"))
 
 # ---- Identity -------------------------------------------------------------
@@ -69,6 +64,16 @@ except ImportError:                     # profile lib absent = generic defaults
         capability = staticmethod(lambda n, f=None, d=None: d)
 
 BOT_NAME = os.environ.get("TG_BOT_NAME") or P.get("agent.name", "Claude")
+# Which Claude answers a chat turn. The profile (agent.model) is the one place a
+# deployment sets this — the same field the voice adapter reads, so both roads run
+# the same model and a change is made once. Found the hard way on 2026-09-12: the
+# second install had Fable in chat, Sonnet in the app, and Opus in a profile field
+# nobody consulted. TG_TG_MODEL still overrides for a single run.
+# History: Fable 5.1 since 2026-09-04 (needed Claude Code 2.1.260 — the id did not
+# resolve on 2.1.226); Opus 5 from 2026-08-01; Fable 5 before that (usage limit).
+CLAUDE_MODEL = (os.environ.get("TG_TG_MODEL")
+                or P.get("agent.model", "")
+                or "claude-fable-5-1")
 HOST_LABEL = os.environ.get("TG_HOST_LABEL") or P.get("host.label", "this machine")
 WORKSPACE_LABEL = os.environ.get("TG_WORKSPACE_LABEL") or P.get(
     "workspace.label", "workspace")

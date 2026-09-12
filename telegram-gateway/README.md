@@ -60,7 +60,7 @@ One file describes your deployment; the code reads roles, never names.
 
 | Section | What it sets |
 |---|---|
-| `agent` | bot name, its mailbox, model, and `system_prompt_file` |
+| `agent` | bot name, its mailbox, `model` (the Claude model every road runs — the gateway and the voice adapter both read it here, so it is changed once), and `system_prompt_file` |
 | `host` | how the bot refers to the machine (defaults to the hostname) |
 | `org` | company name, short name, domain |
 | `workspace` | `root`, display label, the `dirs` map, dirs to never index |
