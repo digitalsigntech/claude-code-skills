@@ -11,6 +11,7 @@ Inputs
   --leads FILE      CSV with columns: firstname, recipient
   --sample-subject  subject of the sample draft in Gmail Drafts (default: the template's)
   --example ADDR    also create one "[EXAMPLE]" draft to this address
+  --cc ADDR         CC this address on every draft
   --limit N / --dry-run
 
   Optional Drive mode (needs a Drive-scoped token and a `gdrive` module beside gmailer):
@@ -117,8 +118,10 @@ def personalise(html_src, text_src, first):
     return html_out, text_out.replace('[Name]', first)
 
 
-def make_draft(gm, to, subject, html_body, text_body, dry):
+def make_draft(gm, to, subject, html_body, text_body, dry, cc=None):
     msg = MIMEMultipart('alternative'); msg['To'] = to; msg['Subject'] = subject
+    if cc:
+        msg['Cc'] = cc
     if text_body:
         msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
     msg.attach(MIMEText(html_body, 'html', 'utf-8'))
@@ -138,6 +141,7 @@ def main():
     ap.add_argument('--template'); ap.add_argument('--leads')
     ap.add_argument('--doc'); ap.add_argument('--sheet')
     ap.add_argument('--sample-subject'); ap.add_argument('--example'); ap.add_argument('--example-name', default='there')
+    ap.add_argument('--cc', help='CC address(es) on every draft')
     ap.add_argument('--limit', type=int, default=0); ap.add_argument('--dry-run', action='store_true')
     a = ap.parse_args()
     gm = gmailer.svc()
@@ -155,11 +159,11 @@ def main():
     todo = leads[:a.limit] if a.limit else leads
     for first, addr in todo:
         h, t = personalise(html_src, text_src, first)
-        did = make_draft(gm, f"{first} <{addr}>" if first else addr, subject, h, t, a.dry_run)
+        did = make_draft(gm, f"{first} <{addr}>" if first else addr, subject, h, t, a.dry_run, a.cc)
         print(f"  draft -> {first} <{addr}>  [{did}]")
     if a.example:
         h, t = personalise(html_src, text_src, a.example_name)
-        print(f"  example -> {a.example_name} <{a.example}>  [{make_draft(gm, a.example, '[EXAMPLE] ' + subject, h, t, a.dry_run)}]")
+        print(f"  example -> {a.example_name} <{a.example}>  [{make_draft(gm, a.example, '[EXAMPLE] ' + subject, h, t, a.dry_run, a.cc)}]")
     print(f"{'would create' if a.dry_run else 'created'} {len(todo)} draft(s){' + 1 example' if a.example else ''} — nothing sent.")
 
 

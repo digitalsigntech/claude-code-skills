@@ -29,7 +29,8 @@ MAIL_ACCOUNT=primary python3 src/draft_merge.py \
   --example you@example.com --dry-run
 ```
 
-Drop `--dry-run` to create the drafts. `--limit N` creates only the first N.
+Drop `--dry-run` to create the drafts. `--cc addr` copies an address on every draft
+(including the example). `--limit N` creates only the first N.
 Drive mode (`--doc "<Doc name>" --sheet "<Sheet name>"`) reads the two inputs from
 Google Drive instead of local files; it needs a Drive-scoped token and a `gdrive`
 module next to `gmailer.py`.
