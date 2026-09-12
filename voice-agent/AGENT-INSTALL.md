@@ -760,3 +760,12 @@ and the chat's title as `group` — inside the sealed preview (`{"from", "text",
 when the account seals, in the clear otherwise. The message watcher takes both from the
 newest archived row (`chat_id`, `chat_title`); a reminder pusher looks the title up in the
 archive by the reminder's chat id. The plane forwards `chat_id` and `group` unchanged.
+
+## Tokens minted in another process
+
+`media_token()` now records every mint in `media-mints.json` beside the state file, and the
+file route's re-mint consults it first. Before this, a token minted by a reflex script or by
+the model from a subprocess (a chart drawn into `/tmp`, minted, put in the reply as
+`![](vb-token:…)`) was unknown to the server process unless the file sat in a directory the
+re-mint walks, and every fetch of it 404'd — a picture in the reply the app could not get.
+Only paths that were explicitly minted are ever served; the registry keeps the last 5,000.

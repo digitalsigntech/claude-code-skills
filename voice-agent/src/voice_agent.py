@@ -2126,11 +2126,17 @@ def ensure_identity(force=False, timeout=180):
 def _remint(token):
     """A token from before the last restart, back to its path.
 
+    The mint registry first (any process, any path that was minted); the
+    directory walks below stay as the fallback for registries that predate it.
+
     MEDIA is memory only, and the app caches history rows containing tokens on
     disk — so without this every restart quietly kills every picture in the
     conversation, and the older the chat the more of it is dead. Tokens are
     derived from the path, so the map can be rebuilt by walking the uploads.
     """
+    p = _mint_lookup(token)
+    if p:
+        return p
     if not token:
         return None
     root = os.path.join(os.path.expanduser(config()["workdir"]), UPLOAD_DIR)
@@ -2313,7 +2319,43 @@ def media_token(path):
     tok = hashlib.sha256((cfg["secret"] + "|" + os.path.abspath(path))
                          .encode()).hexdigest()[:32]
     MEDIA[tok] = os.path.abspath(path)
+    _mint_remember(tok, os.path.abspath(path))
     return tok
+
+
+# 2026-09-12: a token minted in ANOTHER process — a reflex script, a chart the
+# model drew and minted from a subprocess — never reached this server's MEDIA,
+# and unless the file sat in a directory `_remint` walks, every fetch of it
+# 404'd: the picture was in the reply and the app could not get it. Every mint
+# is now written to a small registry beside the state file, and `_remint` reads
+# it first. Only paths that were explicitly minted are ever served.
+def _mints_path():
+    return pathlib.Path(STATE).parent / "media-mints.json"     # load()/save() take a Path
+
+
+def _mint_remember(tok, path):
+    try:
+        with _lock:
+            reg = load(_mints_path(), {})
+            if reg.get(tok) != path:
+                reg[tok] = path
+                if len(reg) > 5000:                      # oldest first out
+                    for k in list(reg)[: len(reg) - 5000]:
+                        reg.pop(k, None)
+                save(_mints_path(), reg)
+    except Exception:
+        pass
+
+
+def _mint_lookup(tok):
+    try:
+        p = load(_mints_path(), {}).get(tok)
+        if p and os.path.exists(p):
+            MEDIA[tok] = p
+            return p
+    except Exception:
+        pass
+    return None
 
 
 def branding():

@@ -67,3 +67,12 @@ else; "that's the full table", "here it is", "posted above" pointing at a table 
 did not include points at nothing. On a spoken road the table is left out of the
 speech automatically and your one prose line beside it is what is read aloud, so
 write both: the table, and one short line saying what it is.
+
+## Numbers across periods are a table, with the chart beside it (2026-09-12)
+
+Sales by week, costs by month, anything with several periods and a figure each —
+the answer is a TABLE (period, the figures, the change), and a chart is a
+companion above it, never a replacement. "Every week beat last year — about 8%
+ahead" is the spoken sentence AFTER the table, not the answer. Where a reflex
+prints the table, run it and copy its output; the figures in the table and in
+the picture must be the same figures.
