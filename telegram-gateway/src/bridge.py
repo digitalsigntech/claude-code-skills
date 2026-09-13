@@ -202,7 +202,7 @@ def _base_cmd(prompt, extra_system=""):
     typing a sentence. It also lands in the archive as something they never
     said. The system channel is where facts we supply belong; the empty
     default keeps every existing caller byte-identical."""
-    cmd = [C.CLAUDE_BIN, "-p", prompt, "--model", C.CLAUDE_MODEL, "--dangerously-skip-permissions"]
+    cmd = [C.CLAUDE_BIN, "-p", prompt, "--model", C.current_model(), "--dangerously-skip-permissions"]
     sysmsg = "\n\n".join(x for x in (C.APPEND_SYSTEM, extra_system) if x)
     if sysmsg:
         cmd += ["--append-system-prompt", sysmsg]

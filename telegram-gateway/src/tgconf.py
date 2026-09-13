@@ -73,7 +73,44 @@ BOT_NAME = os.environ.get("TG_BOT_NAME") or P.get("agent.name", "Claude")
 # resolve on 2.1.226); Opus 5 from 2026-08-01; Fable 5 before that (usage limit).
 CLAUDE_MODEL = (os.environ.get("TG_TG_MODEL")
                 or P.get("agent.model", "")
-                or "claude-fable-5-1")
+                or "claude-opus-5")
+
+# ...and which Claude answers it RIGHT NOW. CLAUDE_MODEL is resolved once, at
+# import, but the daemons that spawn turns live for weeks: on 2026-09-13 the
+# voice adapter was still spawning the previous model many hours after the
+# profile had moved to Opus, and every turn it ran died on that model's usage
+# limit while the gateway — restarted, so re-imported — was fine. Which
+# processes need restarting is not something a model change should depend on
+# anyone remembering, so callers ask per turn and the file is re-read when its
+# mtime moves (one stat per turn, not one parse).
+_MODEL_CACHE = {"mtime": None, "value": CLAUDE_MODEL}
+
+
+def _profile_path():
+    prof = P.load() if hasattr(P, "load") else {}
+    return prof.get("_path") or os.path.join(WORKSPACE_ROOT, "agent-profile.json")
+
+
+def current_model():
+    """The model to spawn now: env override, else the profile, else the import-time value."""
+    env = os.environ.get("TG_TG_MODEL")
+    if env:
+        return env
+    path = _profile_path()
+    try:
+        mtime = os.stat(path).st_mtime
+    except OSError:
+        return _MODEL_CACHE["value"]
+    if mtime != _MODEL_CACHE["mtime"]:
+        _MODEL_CACHE["mtime"] = mtime
+        try:
+            with open(path) as fh:
+                val = ((json.load(fh).get("agent") or {}).get("model") or "").strip()
+            if val:
+                _MODEL_CACHE["value"] = val
+        except (OSError, ValueError):
+            pass                      # keep the last good value; a bad profile is not a dead bot
+    return _MODEL_CACHE["value"]
 HOST_LABEL = os.environ.get("TG_HOST_LABEL") or P.get("host.label", "this machine")
 WORKSPACE_LABEL = os.environ.get("TG_WORKSPACE_LABEL") or P.get(
     "workspace.label", "workspace")

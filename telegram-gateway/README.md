@@ -195,11 +195,21 @@ stderr and its whole result JSON on stdout, so the one sentence that explains it
 digs it out and shows it with the HTTP status. To confirm by hand, run the same
 call the gateway runs:
 
-    claude -p hi --model "$(python3 -c 'import tgconf; print(tgconf.CLAUDE_MODEL)')" \
+    claude -p hi --model "$(python3 -c 'import tgconf; print(tgconf.current_model())')" \
         --dangerously-skip-permissions --output-format json
 
-The fix is a different model in the profile's `agent.model` (one field — the voice
-adapter reads it too), then restart the gateway.
+The fix is a different model in the profile's `agent.model` — one field, and every
+road reads it. `current_model()` re-reads the profile whenever the file's mtime
+moves, so the change lands on the next turn and no daemon needs restarting; a
+module-level constant read at import is what let a long-running adapter keep
+spawning the previous model for hours after the profile had moved on. Anything
+that spawns a turn should call it rather than name a model of its own — the one
+place that did not (the photo-labelling reflex, which passed no `--model` at all)
+silently ran on whatever the CLI's saved default was.
+
+The full text of a failed run is appended to `logs/claude_errors.log`, and the
+session's own transcript under `~/.claude/projects/<workspace>/<session>.jsonl`
+records what the CLI said even when the chat got something truncated.
 
 
 ## What it does

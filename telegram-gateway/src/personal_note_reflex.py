@@ -54,8 +54,12 @@ def _label_later(note_id, path, chat_id=None):
     lost file — so this must never be able to turn a successful save into an
     error message."""
     try:
+        # Name the model. Left off, this ran on whatever the CLI's saved
+        # default happened to be — so the one turn on the box that ignored the
+        # profile was the one nobody looked at (2026-09-13 audit).
         out = subprocess.run(
             [CLAUDE, "-p", _PROMPT.format(path=path),
+             "--model", C.current_model(),
              "--dangerously-skip-permissions"],
             capture_output=True, text=True, timeout=300)
         txt = out.stdout or ""
