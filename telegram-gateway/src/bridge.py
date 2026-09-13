@@ -214,6 +214,19 @@ def _sess_args(sid, inited):
 
 
 # ---- non-streaming (used for file analysis) ---------------------------------
+def _err_text(stdout, stderr, rc):
+    """The human sentence behind a failed CLI run, not the JSON around it."""
+    try:
+        d = json.loads((stdout or "").strip())
+        msg = str(d.get("result") or d.get("error") or "").strip()
+        if msg:
+            status = d.get("api_error_status")
+            return f"{msg} (HTTP {status})" if status else msg
+    except Exception:
+        pass
+    return ((stderr or "").strip() or (stdout or "").strip())[:500] or f"exit {rc}"
+
+
 def _run(cmd):
     try:
         r = subprocess.run(cmd, cwd=C.CLAUDE_WORKDIR, capture_output=True,
@@ -221,7 +234,12 @@ def _run(cmd):
     except subprocess.TimeoutExpired:
         return None, "⏳ That took too long and timed out. Try again or narrow it down."
     if r.returncode != 0:
-        return None, (r.stderr or r.stdout or "").strip()[:500]
+        # A refusal from the API (usage limit, auth) exits non-zero with an EMPTY
+        # stderr and the whole result JSON on stdout — so the raw blob used to land
+        # in the chat, truncated mid-field, hiding the one sentence that says what
+        # happened ("You've reached your <model> limit"). 2026-09-12: read the
+        # message out of the JSON first, fall back to the raw text only if absent.
+        return None, _err_text(r.stdout, r.stderr, r.returncode)
     try:
         d = json.loads(r.stdout)
     except Exception:
@@ -331,7 +349,7 @@ def _stream_run(cmd, on_event):
     if flag["timeout"]:
         return None, "⏳ timed out"
     if final is None and err is None:
-        err = (proc.stderr.read() or "").strip()[:500] or f"exit {proc.returncode}"
+        err = _err_text("", proc.stderr.read(), proc.returncode)
     # Deliver the full streamed transcript (all text blocks), not just the result
     # field — which is only the LAST block, so earlier narration would vanish from
     # the bubble when it's replaced at the end.

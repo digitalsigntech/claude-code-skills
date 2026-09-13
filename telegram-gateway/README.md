@@ -188,6 +188,19 @@ gateway would be asking the broken component to report that it is broken.
 It alerts once per incident, not once per run, and its first run only sets a
 baseline: a watchdog that cries about last week's log is one that gets muted.
 
+**"⚠️ Claude error" on every message** is almost always the account's model limit,
+not the gateway. A per-model usage limit makes the CLI exit non-zero with an EMPTY
+stderr and its whole result JSON on stdout, so the one sentence that explains it
+(`result`: "You've reached your … limit") is buried in a blob; `bridge._err_text()`
+digs it out and shows it with the HTTP status. To confirm by hand, run the same
+call the gateway runs:
+
+    claude -p hi --model "$(python3 -c 'import tgconf; print(tgconf.CLAUDE_MODEL)')" \
+        --dangerously-skip-permissions --output-format json
+
+The fix is a different model in the profile's `agent.model` (one field — the voice
+adapter reads it too), then restart the gateway.
+
 
 ## What it does
 
