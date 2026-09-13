@@ -3,6 +3,14 @@
 cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" || exit 1
 mkdir -p logs
 export PYTHONWARNINGS="ignore"
+# Scrub the caller's Claude-session markers (2026-09-13). The gateway is often
+# restarted from INSIDE a gateway-spawned turn, and it then inherits that turn's
+# CLAUDE_CODE_* / CLAUDECODE / CLAUDE_PID — so every `claude` it later spawns
+# announces itself as a child of a session that died with the restart. Nothing
+# about this daemon should depend on who started it.
+for v in $(env | sed -n 's/^\(CLAUDECODE\|CLAUDE_CODE_[A-Z_]*\|CLAUDE_PID\|CLAUDE_EFFORT\|AI_AGENT\)=.*/\1/p'); do
+  unset "$v"
+done
 export PATH="$HOME/.local/bin:$PATH"   # ensure `claude` is found from cron
 # Single-instance lock: if another gateway holds it, exit quietly.
 exec 9>state/gateway.lock

@@ -9,7 +9,7 @@ ask_stream() runs Claude with --output-format stream-json and surfaces increment
 text + tool activity via a callback, so Telegram can show the reply building live
 instead of going silent for the whole (often 30-40s) agentic turn.
 """
-import os, json, uuid, subprocess, threading
+import os, json, time, uuid, subprocess, threading
 import tgconf as C
 
 _locks_guard = threading.Lock()
@@ -214,16 +214,53 @@ def _sess_args(sid, inited):
 
 
 # ---- non-streaming (used for file analysis) ---------------------------------
+CLAUDE_ERR_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "logs", "claude_errors.log")
+
+
+def _json_docs(text):
+    """Every top-level JSON object in `text`.
+
+    One CLI run can print MORE THAN ONE result object (a queued turn, a retry),
+    and then a plain json.loads of the whole stdout raises — which is how a real
+    failure came back to the chat as 500 characters of raw JSON with the reason
+    cut off. Decode them one at a time instead of trusting the buffer to hold
+    exactly one.
+    """
+    dec, docs, i, t = json.JSONDecoder(), [], 0, (text or "").strip()
+    while i < len(t):
+        try:
+            d, j = dec.raw_decode(t, i)
+        except ValueError:
+            break
+        docs.append(d)
+        i = j
+        while i < len(t) and t[i] in " \t\r\n":
+            i += 1
+    return docs
+
+
+def _log_raw(cmd, stdout, stderr, rc):
+    """Keep the whole failed run on disk. The chat gets one sentence; diagnosis
+    needs the JSON that sentence came out of, and it is gone otherwise."""
+    try:
+        os.makedirs(os.path.dirname(CLAUDE_ERR_LOG), exist_ok=True)
+        with open(CLAUDE_ERR_LOG, "a") as f:
+            f.write(f"\n=== {time.strftime('%F %T')} rc={rc} "
+                    f"flags={[a for a in (cmd or []) if a.startswith('--')]}\n")
+            f.write(f"--- stdout ({len(stdout or '')} bytes):\n{(stdout or '')[:8000]}\n")
+            f.write(f"--- stderr ({len(stderr or '')} bytes):\n{(stderr or '')[:4000]}\n")
+    except Exception:
+        pass
+
+
 def _err_text(stdout, stderr, rc):
     """The human sentence behind a failed CLI run, not the JSON around it."""
-    try:
-        d = json.loads((stdout or "").strip())
+    for d in reversed(_json_docs(stdout)):
         msg = str(d.get("result") or d.get("error") or "").strip()
         if msg:
             status = d.get("api_error_status")
             return f"{msg} (HTTP {status})" if status else msg
-    except Exception:
-        pass
     return ((stderr or "").strip() or (stdout or "").strip())[:500] or f"exit {rc}"
 
 
@@ -239,13 +276,22 @@ def _run(cmd):
         # in the chat, truncated mid-field, hiding the one sentence that says what
         # happened ("You've reached your <model> limit"). 2026-09-12: read the
         # message out of the JSON first, fall back to the raw text only if absent.
+        _log_raw(cmd, r.stdout, r.stderr, r.returncode)
         return None, _err_text(r.stdout, r.stderr, r.returncode)
-    try:
-        d = json.loads(r.stdout)
-    except Exception:
+    docs = _json_docs(r.stdout)
+    if not docs:
+        _log_raw(cmd, r.stdout, r.stderr, r.returncode)
         return None, (r.stdout or "").strip()[:500] or "Could not parse Claude output."
+    d = docs[-1]
+    if d.get("is_error") or not (d.get("result") or "").strip():
+        # Prefer a doc that actually carries text: with several results printed,
+        # the last one can be an empty tail while the answer sits in an earlier one.
+        for cand in reversed(docs):
+            if not cand.get("is_error") and (cand.get("result") or "").strip():
+                return cand["result"].strip(), None
     if d.get("is_error"):
-        return None, str(d.get("result") or d.get("error") or "Claude reported an error.")[:1000]
+        _log_raw(cmd, r.stdout, r.stderr, r.returncode)
+        return None, _err_text(r.stdout, r.stderr, r.returncode)
     return (d.get("result") or "").strip(), None
 
 
@@ -312,12 +358,14 @@ def _stream_run(cmd, on_event):
 
     killer = threading.Timer(C.CLAUDE_TIMEOUT, _kill)
     killer.start()
-    buf, final, err = [], None, None
+    buf, final, err, raw = [], None, None, []
     try:
         for line in proc.stdout:
             line = line.strip()
             if not line:
                 continue
+            raw.append(line[:2000])
+            del raw[:-60]                      # keep the tail, not the transcript
             try:
                 e = json.loads(line)
             except Exception:
@@ -348,8 +396,11 @@ def _stream_run(cmd, on_event):
         proc.wait()
     if flag["timeout"]:
         return None, "⏳ timed out"
+    stderr_txt = proc.stderr.read()
     if final is None and err is None:
-        err = _err_text("", proc.stderr.read(), proc.returncode)
+        err = _err_text("", stderr_txt, proc.returncode)
+    if err is not None:
+        _log_raw(cmd, "\n".join(raw), stderr_txt, proc.returncode)
     # Deliver the full streamed transcript (all text blocks), not just the result
     # field — which is only the LAST block, so earlier narration would vanish from
     # the bubble when it's replaced at the end.
