@@ -108,6 +108,7 @@ See each skill's own `README.md` for configuration.
 | **chat-archive** | Searchable SQLite/FTS5 log of chat messages with real-time multi-label project tagging and LLM query-expansion recall. | [`chat-archive/`](chat-archive/) |
 | **weekly-reports** | Scheduled research/report generator → HTML/PDF, distributed by email + chat + cloud drive. Bring-your-own prompt files. | [`weekly-reports/`](weekly-reports/) |
 | **drive-backup** | Daily project backup to Google Drive with retention (keep-N) and a documented exclusion list for secrets/state. | [`drive-backup/`](drive-backup/) |
+| **equipment-maintenance** | Maintenance records for every machine from its install date: work orders with full narrative, parts and labour, vendor invoices as PDFs, and one CLI that answers cost questions as tables — average per year per machine, quarterly breakdown of one machine, totals filtered by category and tag ("all digital presses"). SQLite + FTS5, stdlib only. | [`equipment-maintenance/`](equipment-maintenance/) |
 | **health-check** | Scheduled self-maintenance routines — weekly: grooms agent memory, audits crons/processes/log bloat, pings only on judgment calls; plus a 10-min auth watchdog that alerts when the Claude Code OAuth session dies (concurrent-process refresh race). Fully config-driven. | [`health-check/`](health-check/) |
 
 ### Infrastructure patterns / docs

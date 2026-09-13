@@ -1,0 +1,54 @@
+{
+  "schema": "equipment-maintenance/1",
+  "currency": "USD",
+  "bill_to_name": "Example Manufacturing Co.",
+  "bill_to_address": "100 Industrial Way\nSpringfield, ST 00000",
+  "assets": [
+    {"id": "P-01", "name": "Example Digital Press 1", "manufacturer": "ExampleOEM", "model": "DX-300",
+     "serial": "DX3-0001", "category": "press", "tags": ["digital", "inkjet", "printheads"],
+     "location": "Bay 1", "installed": "2023-02-15", "retired": null, "purchase_cost": 450000, "notes": ""},
+    {"id": "P-02", "name": "Example Flexo Press", "manufacturer": "ExampleOEM", "model": "FX-8",
+     "serial": "FX8-0042", "category": "press", "tags": ["flexo", "uv"],
+     "location": "Bay 2", "installed": "2021-06-01", "retired": null, "purchase_cost": 900000, "notes": ""},
+    {"id": "F-01", "name": "Example Die Cutter", "manufacturer": "ExampleOEM", "model": "DC-1",
+     "serial": "DC1-0007", "category": "finishing", "tags": ["die-cut"],
+     "location": "Finishing", "installed": "2022-09-10", "retired": null, "purchase_cost": 250000, "notes": ""}
+  ],
+  "vendors": [
+    {"name": "ExampleOEM Service", "address": "1 Vendor Road\nAnytown, ST 00000", "phone": "555-0100",
+     "email": "service@example.com", "remit_to": "PO Box 1, Anytown, ST 00000"}
+  ],
+  "technicians": [{"name": "Pat Tech", "role": "Maintenance Technician", "hourly_rate": 40.0}],
+  "invoices": [
+    {"number": "EX-1001", "vendor": "ExampleOEM Service", "date": "2024-03-04", "due": "2024-04-03",
+     "terms": "Net 30", "po": "PO-24-0012", "status": "paid", "paid_on": "2024-03-28", "field_tech": "Sam Field",
+     "lines": [{"part_no": "PH-300", "description": "Printhead, DX-300", "qty": 1, "unit_price": 5200.00},
+               {"part_no": null, "description": "Field service labour", "qty": 3, "unit_price": 185.00}],
+     "freight": 45.00, "tax": 0, "notes": "Replaced head 3 after nozzle loss."},
+    {"number": "EX-1107", "vendor": "ExampleOEM Service", "date": "2025-07-10", "due": "2025-08-09",
+     "terms": "Net 30", "po": null, "status": "paid", "paid_on": "2025-08-01", "field_tech": null,
+     "lines": [{"part_no": "BRG-6204", "description": "Anvil bearing", "qty": 2, "unit_price": 88.00}],
+     "freight": 12.00, "tax": 0, "notes": ""}
+  ],
+  "work_orders": [
+    {"id": "WO-2024-0003", "asset": "P-01", "opened": "2024-03-02", "closed": "2024-03-04", "type": "replacement",
+     "system": "printheads", "summary": "Head 3 replaced after cyan nozzle loss",
+     "description": "Nozzle check showed 22 nozzles out on head 3 after two purges. OEM replaced the head; alignment and nozzle check passed.",
+     "performed_by": "in-house + vendor", "technicians": ["Pat Tech"], "vendor": "ExampleOEM Service",
+     "labor_hours": 2, "labor_rate": 38.0, "downtime_hours": 9, "parts": [], "invoices": ["EX-1001"], "status": "closed"},
+    {"id": "WO-2024-0010", "asset": "P-01", "opened": "2024-08-20", "closed": "2024-08-20", "type": "preventive",
+     "system": "printheads", "summary": "Full flush and cap-station clean",
+     "description": "Scheduled flush. Nozzle-out 9 -> 1.", "performed_by": "in-house", "technicians": ["Pat Tech"],
+     "vendor": null, "labor_hours": 2.5, "labor_rate": 38.0, "downtime_hours": 3,
+     "parts": [{"part_no": "FL-1L", "description": "Flush fluid 1 L", "qty": 2, "unit_cost": 42.50}], "invoices": [], "status": "closed"},
+    {"id": "WO-2025-0021", "asset": "F-01", "opened": "2025-07-09", "closed": "2025-07-10", "type": "corrective",
+     "system": "die station", "summary": "Anvil bearings replaced",
+     "description": "Noise at the die station; both anvil bearings worn. Replaced.", "performed_by": "in-house",
+     "technicians": ["Pat Tech"], "vendor": "ExampleOEM Service", "labor_hours": 4, "labor_rate": 40.0,
+     "downtime_hours": 5, "parts": [], "invoices": ["EX-1107"], "status": "closed"},
+    {"id": "WO-2025-0030", "asset": "P-02", "opened": "2025-10-02", "closed": "2025-10-02", "type": "preventive",
+     "system": "UV curing", "summary": "UV lamp hours check", "description": "All lamps under 1,500 h.",
+     "performed_by": "in-house", "technicians": ["Pat Tech"], "vendor": null, "labor_hours": 0.5,
+     "labor_rate": 40.0, "downtime_hours": 0, "parts": [], "invoices": [], "status": "closed"}
+  ]
+}
