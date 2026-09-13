@@ -3382,8 +3382,11 @@ class Handler(BaseHTTPRequestHandler):
                              archive_question=False,
                              context=f"The user just sent {len(paths)} "
                                      f"file(s) with this message, saved "
-                                     f"at: {where}. Open them if the "
-                                     f"message refers to them.").get("answer")
+                                     f"at: {where}. They ARE what the "
+                                     f"message is about: open them before "
+                                     f"answering, even when the words are "
+                                     f"only \"here\" or \"this\", and never "
+                                     f"say nothing was attached.").get("answer")
             except Exception as e:
                 self.log_message("caption turn failed: %s", e)
         out = {"ok": True, "posted": posted,
@@ -4166,8 +4169,11 @@ class Handler(BaseHTTPRequestHandler):
                                  archive_question=False,
                                  context=f"The user just sent {len(paths)} "
                                          f"file(s) with this message, saved "
-                                         f"at: {where}. Open them if the "
-                                         f"message refers to them.").get("answer")
+                                         f"at: {where}. They ARE what the "
+                                         f"message is about: open them before "
+                                         f"answering, even when the words are "
+                                         f"only \"here\" or \"this\", and never "
+                                         f"say nothing was attached.").get("answer")
                 except Exception as e:
                     self.log_message("caption turn failed: %s", e)
             body = {"ok": True, "posted": posted,
