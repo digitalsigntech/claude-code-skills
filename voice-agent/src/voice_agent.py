@@ -4019,6 +4019,7 @@ class Handler(BaseHTTPRequestHandler):
                 # drawn with no tick. The duplicate is the strongest possible
                 # confirmation that the words are there: it is why we refused.
                 return self._send(200, {"ok": True, "mirrored": True,
+                                        "received": True,
                                         "suppressed": "already_archived",
                                         "reason": "these words are already in "
                                                   "the chat — not sent twice"})
@@ -4029,7 +4030,13 @@ class Handler(BaseHTTPRequestHandler):
             # `mirrored` means it reached the user's OTHER chat, and it is only
             # true when a send actually succeeded. A demo account has no chat
             # behind it by design, so it gets a reason rather than a tick.
-            body = {"ok": True, "mirrored": outcome is True}
+            # `received` is the agent's own word that it HOLDS the line —
+            # archived, whatever became of the chat copy — so an install with
+            # no chat at all can still tell the app its message arrived. The
+            # plane's own fallbacks never set it. None = the archive refused
+            # the line (an envelope or an oversized body).
+            body = {"ok": True, "mirrored": outcome is True,
+                    "received": outcome is not None and outcome != "empty"}
             if outcome == "queued":
                 # `mirrored` stays a BOOLEAN: a string there reads as nil on
                 # every build already in the field and degrades silently.
