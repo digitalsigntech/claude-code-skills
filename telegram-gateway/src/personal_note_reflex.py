@@ -30,6 +30,7 @@ import threading
 import time
 
 import note_body
+import tgconf
 
 HOME = os.path.expanduser("~")
 CAMERA = f"{C.WORKSPACE_ROOT}/voice/realtime/camera"
@@ -59,7 +60,7 @@ def _label_later(note_id, path, chat_id=None):
         # profile was the one nobody looked at (2026-09-13 audit).
         out = subprocess.run(
             [CLAUDE, "-p", _PROMPT.format(path=path),
-             "--model", C.current_model(),
+             "--model", tgconf.current_model(),
              "--dangerously-skip-permissions"],
             capture_output=True, text=True, timeout=300)
         txt = out.stdout or ""
