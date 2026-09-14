@@ -3395,6 +3395,9 @@ class Handler(BaseHTTPRequestHandler):
                "name": os.path.basename(paths[0]), "received": received,
                **({"missing": missing} if missing else {})}
         if answer:
+            # #770: a captioned upload's answer is pushed like any other, and
+            # without these the banner fell back to "Your agent has replied."
+            out.update(_answer_push_fields(account, answer))
             try:
                 out["sealed"] = (seal_for_devices(str(answer), account=account)
                                  or e2ee_seal(str(answer), priv, mine, theirs,
@@ -4186,7 +4189,8 @@ class Handler(BaseHTTPRequestHandler):
             body = {"ok": True, "posted": posted,
                     "posted_to": "Telegram" if telegram_chat() else "your chat",
                     "count": len(paths),
-                    **({"answer": answer} if answer else {})}
+                    **({"answer": answer} if answer else {}),
+                    **(_answer_push_fields(account, answer) if answer else {})}
             if kind == "photos":
                 body["tokens"] = toks
             else:
