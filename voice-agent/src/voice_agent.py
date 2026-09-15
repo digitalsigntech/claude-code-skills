@@ -1756,6 +1756,13 @@ def ask(account, question, account_name="", archive_question=True,
     env = dict(os.environ)
     if os.geteuid() == 0:
         env.setdefault("IS_SANDBOX", "1")
+    # THE ROAD, FOR THE TOOLS AND NOT ONLY THE MODEL (2026-09-15). The system
+    # prompt says a turn "comes through the voice app", and a workspace rule
+    # keys a table's pictures on that sentence — yet twice in one minute the
+    # model ran the table command without its app flag, even when asked "with
+    # pictures". A command the model runs inherits this environment, so a
+    # reflex can read the road itself instead of trusting a flag to be passed.
+    env["AGENT_ROAD"] = "app"
 
     turn_id = secrets.token_hex(8)
     with _inflight_lock:
