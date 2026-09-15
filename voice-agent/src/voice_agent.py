@@ -4290,7 +4290,8 @@ class Handler(BaseHTTPRequestHandler):
             if quick:
                 self.log_message("reflex answered: %.40s", q)
                 if d.get("archive") is not False:
-                    archive(q, "in", sender=person_name(name))
+                    if d.get("relayed") is not True:     # #788, as below
+                        archive(q, "in", sender=person_name(name))
                     archive(quick, "out",
                             sender=branding().get("bot_name") or "agent",
                             mirror=False)   # the table is for the app's grid
@@ -4307,7 +4308,13 @@ class Handler(BaseHTTPRequestHandler):
             on_screen = on_screen_from(d, account)
             if on_screen:
                 self.log_message("on screen: %.120s", on_screen)
+            # #788: `relayed` marks the voice model's paraphrase of a spoken
+            # turn. His own words are already in the archive through /log, so
+            # the paraphrase is asked but never filed as his line — it was being
+            # served back as a second user bubble in the model's wording.
+            relayed = d.get("relayed") is True
             res = ask(account, q, name, archive_turn=(keep is not False),
+                      archive_question=not relayed,
                       context="\n\n".join(
                           c for c in (screen_context(on_screen),
                                       picture_context(q),
