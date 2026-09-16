@@ -145,15 +145,25 @@ def norm_words(s):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--template'); ap.add_argument('--leads')
+    ap.add_argument('--to', action='append', default=[], help='one-off recipient "First <addr>" or addr, instead of a leads file')
     ap.add_argument('--doc'); ap.add_argument('--sheet')
     ap.add_argument('--sample-subject'); ap.add_argument('--sample-message-id', help='use this Gmail message (e.g. a sent copy) as the master'); ap.add_argument('--example'); ap.add_argument('--example-name', default='there')
     ap.add_argument('--cc', help='CC address(es) on every draft')
     ap.add_argument('--limit', type=int, default=0); ap.add_argument('--dry-run', action='store_true')
     a = ap.parse_args()
     gm = gmailer.svc()
-    tpl_txt, leads_csv = load_inputs(a)
-    subject, body = read_template_text(tpl_txt)
-    leads, bad = read_leads_csv(leads_csv)
+    if a.to:
+        if not a.template:
+            sys.exit('--to still needs --template for the subject and text')
+        subject, body = read_template_text(open(a.template, encoding='utf-8-sig').read())
+        leads, bad = [], []
+        for spec in a.to:
+            m = re.match(r'\s*(.*?)\s*<([^>]+)>\s*$', spec)
+            leads.append((m.group(1), m.group(2)) if m else ('', spec.strip()))
+    else:
+        tpl_txt, leads_csv = load_inputs(a)
+        subject, body = read_template_text(tpl_txt)
+        leads, bad = read_leads_csv(leads_csv)
     html_src, text_src = parts(load_message(gm, a.sample_message_id) if a.sample_message_id else find_sample_draft(gm, a.sample_subject or subject))
     text_src = text_src or body
     d_words = ' '.join(norm_words(body.replace('[Name]', 'x'))).split('best regards')[0].split()
