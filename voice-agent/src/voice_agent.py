@@ -199,12 +199,42 @@ def progress(account=None):
             "tasks": tasks}
 
 
+# ONE MODEL TURN PER ACCOUNT AT A TIME (2026-09-16).
+#
+# Two spoken questions four seconds apart started two `claude --resume` runs on
+# the SAME session. The CLI queued the second into the first, which turned a
+# real user sentence into an interrupted, re-delivered one — arriving beside a
+# re-read of the instruction files, with "Continue from where you left off" and
+# "No response requested" between them. The model read its own user's words as
+# injected file content and refused them, then warned him about the injection.
+# It was right about what it saw; what it saw was our delivery.
+#
+# A session is a single conversation: only one process may hold it. The second
+# question waits, then resumes a session that is whole.
+_TURN_LOCKS = {}
+_TURN_LOCKS_GUARD = threading.Lock()
+
+
+def _account_turn_lock(account):
+    with _TURN_LOCKS_GUARD:
+        lk = _TURN_LOCKS.get(account or "")
+        if lk is None:
+            lk = _TURN_LOCKS[account or ""] = threading.RLock()
+    return lk
+
+
 def _finish_turn(turn_id):
     """Drop a turn from the in-flight list. Every exit from ask() goes through
     here: a turn that fails and stays listed makes the app narrate work that
     stopped minutes ago, and `busy` never falls back to false."""
     with _inflight_lock:
-        INFLIGHT.pop(turn_id, None)
+        rec = INFLIGHT.pop(turn_id, None)
+    lk = (rec or {}).get("lock")
+    if lk is not None:
+        try:
+            lk.release()
+        except RuntimeError:
+            pass
 
 
 # ---------------------------------------------------------------- history
@@ -1833,6 +1863,20 @@ def ask(account, question, account_name="", archive_question=True,
             # never typed — the mistake the caption path already made once.
             archive(question.split("\n\n[", 1)[0], "in",
                     sender=person_name(account_name))
+
+    # Wait for any turn already running on this account's session, and hold it
+    # for this one. Read the session id only once it is ours: the turn ahead of
+    # us may be the one that creates it.
+    _lk = _account_turn_lock(account)
+    if not _lk.acquire(timeout=max(30, int(cfg["turn_timeout"]))):
+        _finish_turn(turn_id)
+        return {"answer": "", "agent_error": "busy",
+                "detail": "another question on this account is still running"}
+    with _inflight_lock:
+        if turn_id in INFLIGHT:
+            INFLIGHT[turn_id]["lock"] = _lk
+        else:                      # finished already: do not strand the lock
+            _lk.release()
 
     sid = session_id(account)
     if sid:
