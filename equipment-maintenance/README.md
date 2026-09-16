@@ -16,6 +16,28 @@ hand back a table.
 Stdlib Python 3.9+. One file, `src/maintenance.py`. PDFs need `wkhtmltopdf`; without it
 invoices are written as HTML.
 
+## The equipment park table
+
+`src/park.py` renders the whole park as ONE markdown table for an agent to hand
+back — presses and finishing lines together, with the specs columns.
+
+| Ask | Command |
+|---|---|
+| Show me the equipment park | `park.py` |
+| … with pictures (a phone app can draw them in a cell) | `park.py --photos` |
+| … who runs them | `park.py --operators` |
+| Just the presses / just finishing | `park.py --presses` / `park.py --finishing` |
+| A chat client that cannot put a picture in a table | `park.py --album <chat_id>` |
+
+**Pictures are automatic on the app road.** An agent that runs its model turns
+with `AGENT_ROAD=app` in the environment gets the photo column without the model
+having to remember a flag — which it demonstrably does not. `--plain` opts out.
+
+It reads `knowledge-base/equipment/equipment-park.md`, the photos beside it and
+`knowledge-base/company/team.md` from the workspace (`--root`, else
+`AGENT_WORKSPACE`, else two levels above the script). No path or file name ever
+appears in the output.
+
 ## The questions it is built for
 
 | Question | Command |
