@@ -29,7 +29,8 @@ MAIL_ACCOUNT=primary python3 src/draft_merge.py \
   --example you@example.com --dry-run
 ```
 
-Once the sample draft has been sent it is no longer in Drafts; pass `--sample-message-id <id>`
+The master is the **oldest** draft with that subject, so a second batch is never cloned from
+the first batch's output. Once the sample draft has been sent it is no longer in Drafts; pass `--sample-message-id <id>`
 to use the sent copy (or any message) as the master instead.
 
 `--to "First <addr>"` (repeatable) drafts for one or two named people without a leads file.

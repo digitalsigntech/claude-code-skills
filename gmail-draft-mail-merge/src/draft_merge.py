@@ -91,14 +91,26 @@ def load_message(gm, mid):
 
 
 def find_sample_draft(gm, subject):
-    for d in gm.users().drafts().list(userId='me', maxResults=100).execute().get('drafts', []):
+    """The master is the OLDEST draft with this subject.
+
+    After a batch runs, the drafts this tool created share the subject too. Taking the
+    oldest keeps the human-written draft as the master, so a later batch is never cloned
+    from a clone. If several match, say so — --sample-message-id settles it.
+    """
+    hits = []
+    for d in gm.users().drafts().list(userId='me', maxResults=200).execute().get('drafts', []):
         m = gm.users().messages().get(userId='me', id=d['message']['id'], format='metadata',
                                       metadataHeaders=['Subject']).execute()
         s = next((h['value'] for h in m['payload']['headers'] if h['name'] == 'Subject'), '')
         if s.strip() == subject.strip():
-            raw = gm.users().messages().get(userId='me', id=d['message']['id'], format='raw').execute()['raw']
-            return email.message_from_bytes(base64.urlsafe_b64decode(raw + '=='))
-    sys.exit(f"no draft with subject {subject!r} in this mailbox's Drafts")
+            hits.append((int(m.get('internalDate', 0)), d['message']['id']))
+    if not hits:
+        sys.exit(f"no draft with subject {subject!r} in this mailbox's Drafts")
+    hits.sort()
+    if len(hits) > 1:
+        print(f"  note: {len(hits)} drafts share this subject — using the oldest ({hits[0][1]}); "
+              f"pass --sample-message-id to override")
+    return load_message(gm, hits[0][1])
 
 
 def parts(msg):
