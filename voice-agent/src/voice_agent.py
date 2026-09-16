@@ -1663,6 +1663,65 @@ def hide_sources(text):
     return out
 
 
+_URL_IN_TEXT = re.compile(r"https?://", re.I)
+_SITE_WORDS = re.compile(
+    r"\b(web ?site|web ?sites|home ?page|landing page|site'?s? (?:copy|banner|"
+    r"hero|page|pages|header|footer))\b", re.I)
+_PAGE_FILE = re.compile(r"\b([A-Za-z0-9._-]+\.html?)\b")
+
+
+def site_url():
+    """The company's own site: config first, then the deployment profile.
+
+    The profile is read from the WORKSPACE, not from beside this file: this
+    adapter usually lives in /opt while the workspace (and its
+    agent-profile.json) is elsewhere, so `agentprofile`'s own search finds
+    nothing here.
+    """
+    cfg = config()
+    url = str(cfg.get("site_url") or "").strip()
+    if not url and _profile:
+        prof = os.path.join(os.path.expanduser(cfg["workdir"]),
+                            "agent-profile.json")
+        try:
+            dom = str((_profile.load(prof).get("org") or {}).get("domain")
+                      or "").strip()
+        except Exception:
+            dom = ""
+        url = f"https://{dom}" if dom else ""
+    if url and not _URL_IN_TEXT.match(url):
+        url = "https://" + url.lstrip("/")
+    return url.rstrip("/")
+
+
+def with_site_url(question, answer):
+    """A turn ABOUT the site carries the site's address, because this puts it
+    there (2026-09-16).
+
+    The owner's rule: when he asks to work on the company's website, its URL
+    must appear in the chat, so the app can open the page. The app opens
+    a page only when an http(s) address is in the message text, and the agent
+    had just written a long, correct answer about three pages of his site with
+    no address anywhere — so the panel had nothing to open. A prompt rule is
+    what the equipment photos taught us not to rely on: the flag was in the
+    rule, in the road and in the help text, and the model still left it off.
+
+    The page beats the root when the answer names one, because the panel then
+    shows the page he is being told about.
+    """
+    url = site_url()
+    a = str(answer or "")
+    if not url or _URL_IN_TEXT.search(a):
+        return a
+    host = url.split("//", 1)[-1]
+    blob = f"{question or ''}\n{a}"
+    if not (_SITE_WORDS.search(blob) or host.lower() in blob.lower()
+            or _PAGE_FILE.search(a)):
+        return a
+    page = _PAGE_FILE.search(a)
+    return a.rstrip() + "\n\n" + (f"{url}/{page.group(1)}" if page else url)
+
+
 def ask(account, question, account_name="", archive_question=True,
         archive_turn=True, context=""):
     """`archive_turn=False` for a LOOKUP: answer and drop.
@@ -1822,6 +1881,7 @@ def ask(account, question, account_name="", archive_question=True,
 
     remember_session(account, sid)
     _finish_turn(turn_id)
+    out = with_site_url(question, out)                # 2026-09-16
     if archive_turn:
         out = hide_sources(out)                       # request 509
         archive(out, "out", sender=branding().get("bot_name") or "agent")
