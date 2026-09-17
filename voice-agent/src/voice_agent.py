@@ -3706,6 +3706,58 @@ class Handler(BaseHTTPRequestHandler):
             "engine": "local", "say": True,
             "took_s": round(time.time() - t0, 2)})
 
+    def _tool_result_text(self, tr, spec, account, name, d, priv, mine,
+                          theirs, t0):
+        """A typed turn's tool result: the model continues the same turn and
+        the answer comes back as text, sealed like any typed answer. No audio,
+        no voice fields — the phone asked in writing and is answered in
+        writing."""
+        tools = _tools_for(account, spec, d)
+        keep = d.get("archive") is not False
+        tname = str(tr.get("name") or "")[:80]
+        if tr.get("silent"):
+            self.log_message("typed turn: tool_result %s silent — no continuation", tname)
+            return self._send(200, {"ok": True, "continuation": True,
+                                    "silent": True, "answer": ""})
+        prompt = local_voice.tool_result_prompt({"name": tname}, tr.get("output"))
+        self.log_message("typed turn: tool_result %s -> continuing; output %.200s",
+                         tname,
+                         json.dumps(tr.get("output"), ensure_ascii=False)
+                         if tr.get("output") is not None else "(none)")
+        res = ask(account, prompt, name, archive_question=False,
+                  archive_turn=keep,
+                  context="\n\n".join(c for c in (
+                      time_context(d.get("tz")), _tools_block(tools),
+                      _screen_block(on_screen_from(d, account, tr))) if c))
+        ans = str(res.get("answer") or "")
+        calls = []
+        if tools and not res.get("agent_error"):
+            clean, call = local_voice.split_tool_call(ans)
+            if call:
+                calls.append({"call_id": "c" + os.urandom(4).hex(), **call})
+                if keep and clean != ans:
+                    archive_amend(ans, clean)
+                ans = clean or ""
+        out = {"answer": ans, "continuation": True,
+               "took_s": round(time.time() - t0, 2)}
+        out.update(_answer_push_fields(account, ans))
+        try:
+            blob = json.dumps({"tool_calls": calls}, ensure_ascii=False)
+            out["sealed"] = (seal_for_devices(ans, account=account)
+                             or e2ee_seal(ans, priv, mine, theirs,
+                                          direction=DIR_TO_PHONE))
+            out.pop("answer", None)
+            if calls:
+                out["tool_calls_sealed"] = (
+                    seal_for_devices(blob, account=account)
+                    or e2ee_seal(blob, priv, mine, theirs,
+                                 direction=DIR_TO_PHONE))
+        except Exception as e:
+            self.log_message("SEALING THE TOOL RESULT FAILED: %s", e)
+            return self._send(500, {"error": "seal_failed",
+                                    "detail": str(e)[:300]})
+        return self._send(200, out)
+
     def _tool_result_answer(self, spec, account, name, d, priv, mine, theirs):
         """Request 499, clip path: the phone ran a tool and says so; the model
         continues the SAME turn and the answer comes back as a fresh voice
@@ -3716,6 +3768,11 @@ class Handler(BaseHTTPRequestHandler):
         tr = spec.get("tool_result") if isinstance(spec, dict) else None
         if not isinstance(tr, dict):
             return self._send(400, {"error": "bad_tool_result"})
+        if str(spec.get("mode") or tr.get("mode") or "") == "text":
+            # The typed turn's continuation: same model call, no synthesis,
+            # answered in the shape a typed ask expects (2026-09-17).
+            return self._tool_result_text(tr, spec, account, name, d,
+                                          priv, mine, theirs, t0)
         turn_id = str(tr.get("turn_id") or "")[:64]
         call_id = str(tr.get("call_id") or "")[:32]
         tname = str(tr.get("name") or "")[:80]
@@ -4424,6 +4481,14 @@ class Handler(BaseHTTPRequestHandler):
             # the paraphrase is asked but never filed as his line — it was being
             # served back as a second user bubble in the model's wording.
             relayed = d.get("relayed") is True
+            # TOOLS ON A TYPED TURN (2026-09-17). The clip path has offered
+            # the app's tools since request 499; the typed path never did, so
+            # an agent could dim the screen, show a picture or reload a page
+            # when spoken to and not when typed to — an asymmetry invisible
+            # until somebody types, and he types a lot. Declarations ride
+            # OUTSIDE the seal (they are the app's own published list, not the
+            # user's words); what comes back is sealed with the answer.
+            _tools = _tools_for(account, d)
             res = ask(account, q, name, archive_turn=(keep is not False),
                       archive_question=not relayed,
                       context="\n\n".join(
@@ -4431,9 +4496,23 @@ class Handler(BaseHTTPRequestHandler):
                                       picture_context(q),
                                       app_setting_context(q),
                                       app_doc_context(q),
+                                      _tools_block(_tools),
                                       time_context(d.get("tz"))) if c))
             self.log_message("answered in %.1fs (%s)", time.time() - t0,
                              res.get("agent_error") or "ok")
+            _calls = []
+            if _tools and not res.get("agent_error"):
+                import local_voice as _lvt
+                _clean, _call = _lvt.split_tool_call(str(res.get("answer") or ""))
+                if _call:
+                    _calls.append({"call_id": "c" + os.urandom(4).hex(), **_call})
+                    if keep is not False and _clean != str(res.get("answer") or ""):
+                        archive_amend(str(res["answer"]), _clean)
+                    res["answer"] = _clean or ""
+                    self.log_message("typed turn: tool_call %s %.100s",
+                                     _call["name"],
+                                     json.dumps(_call["arguments"],
+                                                ensure_ascii=False))
             # GROUND TRUTH FOR THE FABRICATION INVARIANT. The figures in what
             # this agent actually said are kept so a later turn that speaks
             # different ones can be told apart from a later turn that rounds
@@ -4465,6 +4544,24 @@ class Handler(BaseHTTPRequestHandler):
             # distrust readable text beside an envelope, so it may not ride
             # inside it.
             res.update(_answer_push_fields(account, res.get("answer")))
+            if _calls:
+                # A call's arguments quote the user ("show me the Nilpeter"),
+                # so they are as private as the answer: in the clear only for
+                # an account that does not seal.
+                if seal_reply:
+                    try:
+                        _p, _m = agent_keys()
+                        _t = peer_key(account)
+                        _blob = json.dumps({"tool_calls": _calls},
+                                           ensure_ascii=False)
+                        res["tool_calls_sealed"] = (
+                            seal_for_devices(_blob, account=account)
+                            or e2ee_seal(_blob, _p, _m, _t,
+                                         direction=DIR_TO_PHONE))
+                    except Exception as e:
+                        self.log_message("TOOL CALL SEAL FAILED: %s", e)
+                else:
+                    res["tool_calls"] = _calls
             if seal_reply:
                 # Sealed in, sealed out — and the plaintext `answer` is
                 # REMOVED, not left beside it. The app is specified to ignore
