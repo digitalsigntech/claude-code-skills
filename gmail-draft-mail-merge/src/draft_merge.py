@@ -28,7 +28,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 import gmailer  # noqa: E402
 
 EMAIL_RE = re.compile(r"^[\w.+\-']+@[\w\-]+(\.[\w\-]+)+$")
-GREET = re.compile(r'(Hi|Hello|Dear)(\s*(?:<[^>]+>\s*)*)([^<,]{1,60}?)(\s*(?:</[^>]+>\s*)*,)', re.I)
+# The greeting must start a line or follow a '>' — otherwise the "hi" inside a style
+# attribute ("white-space:pre-wrap") matches, and the swap eats the attribute. That is
+# exactly what happened on 2026-09-16 when a master put the greeting text in the same
+# span as the style. The name itself cannot contain : ; " either, for the same reason.
+GREET = re.compile(r'(?:(?<=>)|^)[ \t]*(Hi|Hello|Dear)(\s*(?:<[^>]+>\s*)*)([^<,;:"]{1,60}?)(\s*(?:</[^>]+>\s*)*,)',
+                   re.I | re.M)
+NAME_OK = re.compile(r"^[\w '’\-\.]{1,40}$", re.U)
 
 
 def read_template_text(txt):
@@ -131,6 +137,9 @@ def personalise(html_src, text_src, first):
     m = GREET.search(head)
     if not m:
         sys.exit("no 'Hi <name>,' greeting near the top of the sample draft")
+    if not NAME_OK.match(m.group(3).strip()):
+        sys.exit(f"the greeting match does not look like a name ({m.group(3)!r}) — "
+                 f"refusing to edit the sample draft's HTML")
     html_out = head[:m.start(3)] + H.escape(first) + head[m.end(3):] + tail
     text_out = GREET.sub(lambda mm: mm.group(1) + mm.group(2) + first + mm.group(4), text_src, count=1) if text_src else ''
     return html_out, text_out.replace('[Name]', first)
