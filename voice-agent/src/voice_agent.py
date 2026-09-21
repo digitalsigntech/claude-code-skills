@@ -4690,8 +4690,12 @@ def _message_watcher():
                 _mcx.close()
         except Exception as e:
             print(f"[voice-agent] mirror state unreadable: {e}", file=sys.stderr)
+        # EVERY MESSAGE PUSH NAMES ITS CHAT. A row with no chat id cannot be
+        # opened by a tap, and a banner the phone cannot place is one it cannot
+        # suppress while he is reading that very chat (2026-09-21).
         worth = [r for r in rows if (r[1] or "") != "voice"
                  and not _strip_marker(r[3]).startswith("⏰")
+                 and int(r[4] or 0)
                  and (round(float(r[0]), 3), int(r[4] or 0)) not in _own]
         last = newest
         st = load(STATE, {})
