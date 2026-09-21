@@ -4673,33 +4673,53 @@ def _message_watcher():
         # Never a voice turn (the app's own bubbles) and never a fired reminder
         # or scheduled-task result: fire_reminders pushes those itself, with the
         # picture (request 493, 2026-09-06 — one firing, two pushes).
+        # A LINE THIS APP WROTE IS NEVER NEWS TO IT (2026-09-21). The old
+        # guard was a 120-second silence after any app turn, which suppressed
+        # by TIME: a message landing in another group while he worked was lost,
+        # and his own line pushed back at him if he backgrounded the app after
+        # the window. Provenance instead — every row the agent or the app
+        # wrote has a mirror_state entry keyed by (epoch, chat_id); a line
+        # typed into the chat itself has none.
+        _own = set()
+        try:
+            _mcx = _mirror_state_db()
+            if _mcx is not None:
+                _own = {(round(float(e), 3), int(c or 0)) for e, c in
+                        _mcx.execute("SELECT epoch, chat_id FROM mirror_state "
+                                     "WHERE epoch > ?", (last,))}
+                _mcx.close()
+        except Exception as e:
+            print(f"[voice-agent] mirror state unreadable: {e}", file=sys.stderr)
         worth = [r for r in rows if (r[1] or "") != "voice"
-                 and not _strip_marker(r[3]).startswith("⏰")]
+                 and not _strip_marker(r[3]).startswith("⏰")
+                 and (round(float(r[0]), 3), int(r[4] or 0)) not in _own]
         last = newest
         st = load(STATE, {})
         st["notify_seen_epoch"] = newest
         save(STATE, st)
         if not worth:
             continue
+        # ONE PUSH PER GROUP (2026-09-21, his rule: "we must receive push
+        # notifications for any notification sent to any Telegram group").
+        # A batch that spans two chats used to become a single banner naming
+        # the newest one, so the other group's message arrived as a count and
+        # a tap opened the wrong place.
+        by_chat = {}
+        for r in worth:
+            by_chat.setdefault(int(r[4] or 0), []).append(r)
         for acct in accounts:
-            quiet = time.time() - LAST_APP_TURN.get(acct, 0)
-            if quiet < APP_TURN_QUIET_S:
-                print(f"[voice-agent] new-message push skipped for {acct}: "
-                      f"an app turn finished {quiet:.0f}s ago — the phone "
-                      f"already has these words", file=sys.stderr)
-                continue
+          for chat_id, chat_rows in by_chat.items():
             # #270 stage 4: the preview travels SEALED. The plane cannot read
             # it, the notification extension on the phone can, and a phone that
             # fails to decrypt keeps the generic wording. Capped, because a
             # banner shows two lines and a whole answer in a push is a copy of
             # the conversation living in Apple's queue.
             env = None
-            # request 525: which chat the newest line is in, so a tap on the
+            # request 525: which chat these lines are in, so a tap on the
             # banner opens THAT chat. The id goes in the clear (it names
             # nothing without the account); the title goes inside the seal
             # when the account seals, in the clear otherwise.
-            newest_row = worth[-1]
-            chat_id = int(newest_row[4]) if len(newest_row) > 4 and newest_row[4] else 0
+            newest_row = chat_rows[-1]
             group = str(newest_row[5] or "")[:120] if len(newest_row) > 5 else ""
             try:
                 # The words without the attachment marker: a banner never
@@ -4710,12 +4730,13 @@ def _message_watcher():
                 print(f"[voice-agent] preview seal failed for {acct}: {e}",
                       file=sys.stderr)
                 env = None
-            res = _notify_plane(acct, count=len(worth),
+            res = _notify_plane(acct, count=len(chat_rows),
                                 **({"chat_id": chat_id} if chat_id else {}),
                                 **({"group": group} if group and not env else {}),
                                 **({"sealed": env} if env else {}))
-            print(f"[voice-agent] new-message push for {acct}: "
-                  f"{len(worth)} line(s) -> {res}", file=sys.stderr)
+            print(f"[voice-agent] new-message push for {acct} "
+                  f"({group or chat_id or 'no chat'}): "
+                  f"{len(chat_rows)} line(s) -> {res}", file=sys.stderr)
 
 
 # ------------------------------------------------------ the app's own docs
