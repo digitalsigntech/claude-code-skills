@@ -4622,6 +4622,48 @@ def _strip_marker(text):
     return _ATT_MARKER.sub("", str(text or "")).strip()
 
 
+_OWNER_SENDERS = set()
+
+
+def _owner_senders():
+    """Every name this archive might file the OWNER'S own lines under.
+
+    His words must never push him back, wherever he typed them: the app, the
+    chat on this phone, the chat on another (2026-09-21). A chat archive
+    records whatever each channel calls him — a display name from one gateway,
+    a username from another — so one name is not enough. The deployment
+    profile's identities are taken together, plus the name branding shows.
+    """
+    global _OWNER_SENDERS
+    if _OWNER_SENDERS:
+        return _OWNER_SENDERS
+    names = set()
+    try:
+        b = str(branding().get("user_name") or "").strip().lower()
+        if b:
+            names.add(b)
+            names.add(b.split()[0])
+    except Exception:
+        pass
+    try:
+        if _profile:
+            prof = os.path.join(os.path.expanduser(config()["workdir"]),
+                                "agent-profile.json")
+            who = ((_profile.load(prof).get("people") or {}).get("owner")
+                   or {})
+            for k in ("name", "full_name", "reminders_key",
+                      "telegram_username", "username"):
+                v = str(who.get(k) or "").strip().lower()
+                if v:
+                    names.add(v)
+                    names.add(v.split()[0])
+    except Exception as e:
+        print(f"[voice-agent] owner identities unreadable: {e}",
+              file=sys.stderr)
+    _OWNER_SENDERS = names
+    return names
+
+
 def _notify_plane(account, kind=NOTIFY_KIND, **extra):
     """Ask the plane to nudge this account's phones. Authenticated with this
     agent's own secret, which the plane scopes to this account alone."""
@@ -4659,9 +4701,11 @@ def _message_watcher():
             rows = cx.execute(
                 # `text` joined the projection for #270's sealed preview. It
                 # is read here and sealed to the phone's key before it goes
-                # anywhere — the plane still never sees a word of it.
-                "SELECT epoch, kind, direction, text, chat_id, chat_title FROM messages "
-                "WHERE epoch > ? ORDER BY epoch", (last,)).fetchall()
+                # anywhere — the plane still never sees a word of it. `sender`
+                # joined it so his own lines can be told from anyone else's.
+                "SELECT epoch, kind, direction, text, chat_id, chat_title, "
+                "sender FROM messages WHERE epoch > ? ORDER BY epoch",
+                (last,)).fetchall()
             cx.close()
         except Exception:
             continue
@@ -4693,9 +4737,13 @@ def _message_watcher():
         # EVERY MESSAGE PUSH NAMES ITS CHAT. A row with no chat id cannot be
         # opened by a tap, and a banner the phone cannot place is one it cannot
         # suppress while he is reading that very chat (2026-09-21).
+        _mine = _owner_senders()
         worth = [r for r in rows if (r[1] or "") != "voice"
                  and not _strip_marker(r[3]).startswith("⏰")
                  and int(r[4] or 0)
+                 and ((r[2] or "") == "out"
+                      or str(r[6] if len(r) > 6 else "").strip().lower()
+                      not in _mine)
                  and (round(float(r[0]), 3), int(r[4] or 0)) not in _own]
         last = newest
         st = load(STATE, {})
