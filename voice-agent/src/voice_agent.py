@@ -2467,6 +2467,42 @@ def _mint_remember(tok, path):
         pass
 
 
+# #853: a sealed upload whose reply never reached the app (the agent restarted
+# mid-send, the plane timed out) comes back as a retry of the SAME upload ids.
+# Every delivered upload id is remembered with the reply it produced, so the
+# retry gets that reply back and nothing is posted twice.
+def _delivered_path():
+    return pathlib.Path(STATE).parent / "sealed-delivered.json"
+
+
+_DELIVERED_LOCK = threading.Lock()
+
+
+def _delivered_get(blob_ids):
+    """The earlier reply when EVERY id was already delivered, else None."""
+    ids = [b for b in blob_ids if b]
+    if not ids:
+        return None
+    try:
+        reg = load(_delivered_path(), {})
+    except Exception:
+        return None
+    rows = [reg.get(b) for b in ids]
+    return rows if all(rows) else None
+
+
+def _delivered_put(pairs):
+    try:
+        with _DELIVERED_LOCK:
+            reg = load(_delivered_path(), {})
+            reg.update(pairs)
+            for k in list(reg)[: max(0, len(reg) - 2000)]:
+                reg.pop(k, None)
+            save(_delivered_path(), reg)
+    except Exception:
+        pass
+
+
 def _mint_lookup(tok):
     try:
         p = load(_mints_path(), {}).get(tok)
@@ -3451,6 +3487,23 @@ class Handler(BaseHTTPRequestHandler):
         caption = str(spec.get("caption") or "").strip() or None
         blobs = {str(b.get("token") or ""): str(b.get("b64") or "")
                  for b in (d.get("blobs") or []) if isinstance(b, dict)}
+        # #853: a retry of uploads already delivered answers from the ledger
+        # and posts nothing.
+        _again = _delivered_get([str((r or {}).get("token") or "")
+                                 for r in refs[:10] if isinstance(r, dict)])
+        if _again:
+            self.log_message("sealed attachments: retry of %d delivered "
+                             "upload(s), not posted again", len(_again))
+            ids = [str(r.get("token") or "") for r in refs[:10]
+                   if isinstance(r, dict) and r.get("token")]
+            return self._send(200, {
+                "ok": True, "duplicate": True, "posted": True,
+                "posted_to": _again[0].get("posted_to"),
+                "count": len(_again),
+                "tokens": [x["token"] for x in _again],
+                "token": _again[0]["token"], "name": _again[0]["name"],
+                "tokens_by_blob": {b: x["token"] for b, x in zip(ids, _again)},
+                "received": [b for b in ids if blobs.get(b)]})
         saved, received, missing = [], [], []
         saved_blobs = []
         for ref in refs[:10]:
@@ -3486,6 +3539,11 @@ class Handler(BaseHTTPRequestHandler):
         # The upload id of each saved file, in the same order (#851).
         _blob_of = saved_blobs
         posted = archive_file(paths, caption, person_name(name))
+        _where = "Telegram" if telegram_chat() else "your chat"
+        if posted:
+            _delivered_put({b: {"token": t, "name": os.path.basename(p),
+                                "posted_to": _where}
+                            for b, t, p in zip(_blob_of, toks, paths)})
         self.log_message("sealed attachments: %d file(s) opened, %d missing,"
                          " %s", len(paths), len(missing),
                          "archived" if posted else "STORED BUT NOT ARCHIVED")
