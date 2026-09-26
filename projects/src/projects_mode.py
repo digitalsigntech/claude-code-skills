@@ -319,10 +319,15 @@ def ingest_file(chat_id, path, caption, sender):
     ext = os.path.splitext(path)[1].lower()
     caption = (caption or "").strip()
     auto = False
+    # An always-cloud chat is one the owner has closed to the background model:
+    # its files are filed with the caption only, and the Claude turn reads them.
+    cloud_only = int(chat_id) in C.ALWAYS_CLAUDE_CHATS
     if ext in C.IMG_EXTS:
         kind = "photo"
         annotation = caption
-        if not annotation:
+        if not annotation and cloud_only:
+            annotation = "(not auto-annotated — cloud-only chat)"
+        elif not annotation:
             annotation = annotate_image(path) or "(unannotated — auto-annotation unavailable)"
             auto = True
     elif ext in (".ogg", ".oga", ".mp3", ".m4a", ".wav"):
@@ -333,7 +338,7 @@ def ingest_file(chat_id, path, caption, sender):
         annotation = caption or "(video — no auto-annotation yet)"
     else:
         kind = "document"
-        summary = summarize_doc(path)
+        summary = None if cloud_only else summarize_doc(path)
         auto = bool(summary) and not caption
         annotation = " — ".join(x for x in (caption, summary) if x) or "(no extractable text)"
     dest = file_file(slug, path, sender, annotation, kind)
