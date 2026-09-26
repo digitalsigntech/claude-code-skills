@@ -3452,6 +3452,7 @@ class Handler(BaseHTTPRequestHandler):
         blobs = {str(b.get("token") or ""): str(b.get("b64") or "")
                  for b in (d.get("blobs") or []) if isinstance(b, dict)}
         saved, received, missing = [], [], []
+        saved_blobs = []
         for ref in refs[:10]:
             if not isinstance(ref, dict):
                 continue
@@ -3475,12 +3476,15 @@ class Handler(BaseHTTPRequestHandler):
             saved.append(save_upload(
                 plain, str(ref.get("mime") or "application/octet-stream"),
                 stem=re.sub(r"[^A-Za-z0-9._-]+", "-", stem) or "file"))
+            saved_blobs.append(tok)
         if not saved:
             return self._send(400, {"error": "no attachments opened",
                                     "received": received,
                                     "missing": missing})
         paths = [p for p, _ in saved]
         toks = [t for _, t in saved]
+        # The upload id of each saved file, in the same order (#851).
+        _blob_of = saved_blobs
         posted = archive_file(paths, caption, person_name(name))
         self.log_message("sealed attachments: %d file(s) opened, %d missing,"
                          " %s", len(paths), len(missing),
@@ -3503,6 +3507,9 @@ class Handler(BaseHTTPRequestHandler):
         out = {"ok": True, "posted": posted,
                "posted_to": "Telegram" if telegram_chat() else "your chat",
                "count": len(paths), "tokens": toks, "token": toks[0],
+               # #851: upload id -> agent media token; `tokens` follows the
+               # order of the files that opened, and a failed one shifts it.
+               "tokens_by_blob": dict(zip(_blob_of, toks)),
                "name": os.path.basename(paths[0]), "received": received,
                **({"missing": missing} if missing else {})}
         if answer:
