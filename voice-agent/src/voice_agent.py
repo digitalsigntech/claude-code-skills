@@ -1132,7 +1132,7 @@ def _archive_history(limit, since):
         cx = sqlite3.connect(f"file:{d / 'chat.db'}?mode=ro", uri=True, timeout=3)
         if is_guest():
             rows = cx.execute(
-                "SELECT epoch, sender, text, direction, session_id, kind, id FROM messages "
+                "SELECT epoch, sender, text, direction, session_id, kind, id, chat_id FROM messages "
                 "WHERE epoch > ? AND chat_id = ? ORDER BY epoch DESC LIMIT ?",
                 (since, guest_chat_id(), limit)).fetchall()
         else:
@@ -1147,7 +1147,7 @@ def _archive_history(limit, since):
             # Telegram chat id never reaches there. So the boundary is derived
             # from the code that mints them rather than from a list to maintain.
             rows = cx.execute(
-                "SELECT epoch, sender, text, direction, session_id, kind, id FROM messages "
+                "SELECT epoch, sender, text, direction, session_id, kind, id, chat_id FROM messages "
                 "WHERE epoch > ? AND chat_id > ? ORDER BY epoch DESC LIMIT ?",
                 (since, GUEST_CHAT_FLOOR, limit)).fetchall()
         cx.close()
@@ -1168,7 +1168,7 @@ def _archive_history(limit, since):
     except Exception:
         state = {}
     msgs = []
-    for ep, sender, text, direction, _sid, _kind, _rid in reversed(rows):
+    for ep, sender, text, direction, _sid, _kind, _rid, _cid in reversed(rows):
         if not isinstance(ep, (int, float)) or ep <= 0 or not text:
             continue
         # Direction is the authoritative field: keying on the sender's name puts
@@ -1176,6 +1176,8 @@ def _archive_history(limit, since):
         # else writes to the archive.
         role = "agent" if direction == "out" else "user"
         m = {"id": int(_rid),                    # request 519: stable, sent back on delete
+             # #857: the chat the row belongs to, so a client can check it.
+             "chat_id": int(_cid) if _cid is not None else None,
              "role": role,
              "sender": name if role == "agent" else (sender or "you"),
              # NO CAP (#275): this 2000 cut his answer mid-word at exactly
