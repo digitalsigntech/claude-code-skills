@@ -958,6 +958,9 @@ def handle_project_file(msg, chat_id, path, caption):
         handle_project_text(msg, chat_id, text, kind="voice",
                             already_filed=f" (Voice note: audio filed at {dest}; transcript auto-filed to notes/.)")
         return
+    if pm.get("privacy") != "privacy":
+        handle_project_media(msg, chat_id, [path], caption)
+        return
     with Typing(chat_id):
         dest, kind, annotation, auto = projects_mode.ingest_file(chat_id, path, caption, sender)
     rel = os.path.relpath(dest, projects_mode.PROJECTS_DIR)
@@ -981,8 +984,37 @@ def handle_project_file(msg, chat_id, path, caption):
                             already_filed=" (File + caption already filed — do not re-file.)")
 
 
+def handle_project_media(msg, chat_id, paths, caption):
+    """Photos/documents in a (non-privacy) project chat go to the main model UNFILED:
+    it looks at them with the project in mind and decides what to do — process them
+    (e.g. receipts into a sheet), file them into the project, or leave them
+    (the owner, 2026-09-27: "decide with the main LLM, don't file them without any
+    thought"). Nothing is posted before the turn's own answer."""
+    slug = projects_mode.get(chat_id)["project"]
+    listing = "\n".join(paths)
+    cap = f'Caption: "{caption.strip()}".' if caption.strip() else "No caption."
+    prompt = (f"The user sent {len(paths)} file(s) into this project chat. They are NOT "
+              f"filed yet — they sit in the gateway inbox:\n{listing}\n{cap}\n"
+              f"Look at them and decide, using the project's context, what to do: act on "
+              f"them (e.g. process receipts the way this project does), file them into the "
+              f"project if they are worth keeping there — `python3 "
+              f"{os.path.join(os.path.dirname(os.path.abspath(__file__)), 'projects_mode.py')} "
+              f"file {slug} <path> \"<one-line note>\"` moves it to files/<date>/ with a "
+              f"registry line — or leave them if they are not. Then answer the caption if "
+              f"it asks something; with no caption, say in one or two lines what you did.")
+    ctx = projects_mode.turn_context(chat_id, " (Media message — nothing filed yet.)")
+    with Typing(chat_id):
+        reply = bridge.ask(chat_id, ctx + "\n\n" + prompt, sender=_sender_full(msg))
+    TG.send_message(chat_id, reply, reply_to=msg["message_id"])
+    _arc_out(chat_id, reply)
+    log(f"project media turn chat={chat_id} files={len(paths)}")
+
+
 def handle_project_album(msgs, chat_id, paths, caption):
     sender = _sender_first(msgs[0])
+    if projects_mode.get(chat_id).get("privacy") != "privacy":
+        handle_project_media(msgs[0], chat_id, paths, caption)
+        return
     lines, dests = [], []
     with Typing(chat_id):
         for p in paths:

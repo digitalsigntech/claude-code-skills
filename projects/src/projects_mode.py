@@ -349,6 +349,21 @@ def ingest_file(chat_id, path, caption, sender):
     return dest, kind, annotation, auto
 
 
+def file_decided(slug, path, note, sender="the owner"):
+    """File one inbox download because the conversational turn decided it belongs in
+    the project (no background-model annotation — the turn's own note is the
+    annotation). Returns the filed path."""
+    ext = os.path.splitext(path)[1].lower()
+    kind = ("photo" if ext in C.IMG_EXTS else "video" if ext in C.VID_EXTS else
+            "audio" if ext in (".ogg", ".oga", ".mp3", ".m4a", ".wav") else "document")
+    dest = file_file(slug, path, sender, note, kind)
+    write_sidecar(dest, note, sender, "")
+    if kind == "photo":
+        clip_index(dest, note)
+    index_refresh(slug)
+    return dest
+
+
 # ---- prompt context for the conversational turn -----------------------------
 def turn_context(chat_id, filed_note=""):
     st = get(chat_id)
@@ -356,9 +371,11 @@ def turn_context(chat_id, filed_note=""):
     r = root(slug)
     return (
         f"[PROJECT CHAT — project '{slug}'. This group is a lab notebook for this "
-        f"project; everything the user posts is auto-filed under {r}/ "
+        f"project, kept under {r}/ "
         f"(PROJECT.md = overview, REGISTRY.md = index of all filed items, notes/ = "
-        f"chronological text/voice notes, files/ = raw files by date).{filed_note} "
+        f"chronological text/voice notes, files/ = raw files by date). Text and voice "
+        f"messages are auto-filed to notes/; photos and documents are NOT — the turn "
+        f"that receives them decides what to do with them.{filed_note} "
         f"FIRST SOURCE of truth for any question here is the project directory. "
         f"RETRIEVAL: run `{PK} {slug} search \"<question>\" -k 6` FIRST — ~0.15s "
         f"semantic search over PROJECT.md, REGISTRY.md, notes/ and file sidecars "
@@ -369,3 +386,13 @@ def turn_context(chat_id, filed_note=""):
         f"results/decisions/facts worth keeping, also update PROJECT.md (Goals/"
         f"Current state/Decisions/Key files) so the overview stays current. If it "
         f"is just a note with nothing to answer, confirm filing in ONE short line.]")
+
+
+if __name__ == "__main__":
+    # python3 projects_mode.py file <slug> <inbox path> "<one-line note>"
+    import sys as _sys
+    if len(_sys.argv) == 5 and _sys.argv[1] == "file":
+        print(file_decided(_sys.argv[2], _sys.argv[3], _sys.argv[4]))
+    else:
+        print('usage: projects_mode.py file <slug> <path> "<note>"', file=_sys.stderr)
+        _sys.exit(2)

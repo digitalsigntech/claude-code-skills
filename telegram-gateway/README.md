@@ -341,8 +341,10 @@ records what the CLI said even when the chat got something truncated.
   that falls through to `bridge.ask` from a private group is a privacy leak (bit
   us for single files 2026-07-20, for albums 2026-07-28).
 - **Project chats (optional).** Groups listed in `PROJECT_CHATS` (or bound at
-  runtime via `/project <slug>`) become self-filing R&D lab notebooks: every post
-  is auto-filed into a per-project directory before the conversational turn, with
+  runtime via `/project <slug>`) become self-filing R&D lab notebooks: text and
+  voice posts are auto-filed into a per-project directory before the conversational
+  turn; photos/documents go to the main model unfiled and it decides whether to
+  process, file (`projects_mode.py file <slug> <path> "<note>"`) or leave them, with
   a `/privacy`·`/wisdom` per-chat model switch shown on the group title. See the
   [projects](../projects/) skill for the module (`projects_mode.py`) and details.
 - **Resilience.** `start_telegram.sh` is single-instance (flock) and waits for
