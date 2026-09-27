@@ -559,6 +559,20 @@ spoken one is kept (Kokoro's Japanese ran ten seconds on one short line). Japane
 greet without a Latin name — the synthesiser spells it letter by letter. Measured on the owner's
 agent, one greeting per language: 1.1–3.4 s spoken, under a second to make.
 
+## Accounts that never seal (`e2ee_exempt_accounts`)
+
+An account whose password is shared (a public demo handed to every prospect)
+cannot anchor end-to-end encryption: the first device that seals pins the
+account, and every other person's phone is then refused (`e2ee_required`) and
+reads encrypted rows. List such accounts in `config.json`:
+
+    "e2ee_exempt_accounts": ["demo-…"]
+
+A listed account is never offered `e2ee-v1`, so its devices never seal, never
+pin, and read history in plaintext. After adding an account that already
+sealed, remove its entries from `peer-keys.json` and `e2ee_devices.json` and
+restart the agent.
+
 ## Sealed attachments (2026-09-04) — stage 3 of end-to-end encryption
 
 Once an account is sealed (`e2ee` on, a device key on disk) and `e2ee_attachments`

@@ -3271,6 +3271,12 @@ def peer_key(account, offered_b64=None):
     return None
 
 
+def e2ee_exempt_accounts():
+    """Accounts that never seal: `e2ee_exempt_accounts` in config (#863)."""
+    v = config().get("e2ee_exempt_accounts")
+    return {str(a) for a in v if a} if isinstance(v, list) else set()
+
+
 def e2ee_ready(account=None):
     """True when this agent can seal AT ALL — the capability declaration.
 
@@ -3280,6 +3286,12 @@ def e2ee_ready(account=None):
     Requiring the key here meant the switch could never be thrown.
     """
     if not config().get("e2ee", False):
+        return False
+    # #863: an account whose password is SHARED (the demo, handed to every
+    # prospect) cannot anchor encryption: the first device to seal pinned it,
+    # and every other person's phone was refused and read ciphertext rows.
+    # Listed accounts are never offered e2ee, so they never pin or refuse.
+    if account and str(account) in e2ee_exempt_accounts():
         return False
     try:
         import cryptography                      # noqa: F401
