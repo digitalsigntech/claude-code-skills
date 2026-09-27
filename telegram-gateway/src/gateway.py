@@ -963,8 +963,11 @@ def handle_project_file(msg, chat_id, path, caption):
     rel = os.path.relpath(dest, projects_mode.PROJECTS_DIR)
     tag = "auto-annotation" if auto else ("annotation" if caption else "note")
     preview = (annotation or "")[:350]
-    TG.send_message(chat_id, f"📁 Filed {kind} → `{rel}`\n_{tag}:_ {preview}",
-                    reply_to=msg["message_id"])
+    # With a caption the conversational turn below answers, so the filing
+    # receipt is noise (the owner, 2026-09-27); only uncaptioned files get one.
+    if not caption.strip():
+        TG.send_message(chat_id, f"📁 Filed {kind} → `{rel}`\n_{tag}:_ {preview}",
+                        reply_to=msg["message_id"])
     # A caption may also be a question/instruction about the file — give the
     # conversational turn a chance to act on it (it's told to stay quiet-short
     # if the caption was purely descriptive).
@@ -987,8 +990,11 @@ def handle_project_album(msgs, chat_id, paths, caption):
             dests.append(dest)
             lines.append(f"• {kind} `{os.path.relpath(dest, projects_mode.PROJECTS_DIR)}` — "
                          f"{(annotation or '')[:150]}")
-    TG.send_message(chat_id, "📁 Filed album:\n" + "\n".join(lines),
-                    reply_to=msgs[0]["message_id"])
+    # Captioned albums get the conversational turn below instead of a receipt
+    # (the owner, 2026-09-27: "why are you filing the album? not necessary");
+    # an uncaptioned album gets one short line, not a per-file listing.
+    if not caption.strip():
+        TG.send_message(chat_id, f"📁 Filed {len(dests)} files.", reply_to=msgs[0]["message_id"])
     if caption.strip():
         listing = "\n".join(dests)
         prompt = (f"The user posted an album of {len(dests)} files (already filed):\n{listing}\n"
