@@ -29,7 +29,7 @@ import tg_api as TG
 
 PROJECTS_DIR = os.path.join(C.WORKSPACE_ROOT, "projects")
 STATE_FILE = os.path.join(C.STATE_DIR, "projects.json")
-_LOCK = threading.Lock()
+_LOCK = threading.RLock()  # _update() calls get() under the lock
 
 # Interim until the DGX Spark: "local-policy" models run on OpenRouter, matching the
 # email-KB pipeline. Text = the standard Nemotron; vision = NVIDIA's Nemotron VL.
