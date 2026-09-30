@@ -20,9 +20,16 @@ def md_to_html(text):
         return f"\x00{len(stash) - 1}\x00"
 
     # Protect code first (its contents must NOT be markdown- or HTML-processed).
-    text = re.sub(r"```[ \t]*[\w+#.-]*\n?(.*?)```",
-                  lambda m: keep(f"<pre>{html.escape(m.group(1))}</pre>"),
-                  text, flags=re.S)
+    # A fenced block's language is passed through as Telegram's
+    # <pre><code class="language-x"> form: the apps put a header with a Copy
+    # button on a block that names its language, and only a long-press on one
+    # that does not (the owner, 2026-09-30: "the copy button isn't working").
+    def fence(m):
+        lang, body = m.group(1), html.escape(m.group(2))
+        if lang:
+            return keep(f'<pre><code class="language-{lang}">{body}</code></pre>')
+        return keep(f"<pre>{body}</pre>")
+    text = re.sub(r"```[ \t]*([\w+#.-]*)\n?(.*?)```", fence, text, flags=re.S)
     text = re.sub(r"`([^`\n]+)`",
                   lambda m: keep(f"<code>{html.escape(m.group(1))}</code>"), text)
 
