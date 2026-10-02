@@ -1179,6 +1179,12 @@ def _archive_history(limit, since):
              # #857: the chat the row belongs to, so a client can check it.
              "chat_id": int(_cid) if _cid is not None else None,
              "role": role,
+             # #868: who wrote it — "agent", "user", or "automation" for a
+             # row a scheduled job or another program wrote, which a client
+             # must not draw as the user's own words.
+             "author": ("agent" if role == "agent" else
+                        "automation" if _automation_sender(sender, _kind)
+                        else "user"),
              "sender": name if role == "agent" else (sender or "you"),
              # NO CAP (#275): this 2000 cut his answer mid-word at exactly
              # 2000 characters — "…over a channel the voi" — while the
@@ -1305,6 +1311,16 @@ def _strip_injected_prefix(text):
     if sep and first.startswith("[") and first.endswith("]") and rest.strip():
         return rest.strip()
     return text
+
+
+def _automation_sender(sender, kind=None):
+    """True for an inbound row a program wrote (#868): the scheduler, a
+    health check, a feedback report, another agent named in config."""
+    s = str(sender or "").strip().lower()
+    named = {str(x).lower() for x in (config().get("automation_senders") or [])}
+    return (kind == "feedback" or s in named or s.startswith("scheduler")
+            or s in ("the scheduler", "the health check", "health check",
+                     "selftest"))
 
 
 def history(limit=50, since=0.0):
