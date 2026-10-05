@@ -37,7 +37,12 @@ for _d in (STATE_DIR, INBOX_DIR, LOG_DIR):
 # Resolve to an absolute path: consumers (e.g. the voice server) may run without
 # ~/.local/bin on PATH, where a bare "claude" fails with ENOENT.
 import shutil as _shutil
-CLAUDE_BIN = (os.environ.get("CLAUDE_BIN") or _shutil.which("claude")
+# lib/claude-headless (when present) runs the turn on its own long-lived token so
+# background turns never race the interactive login's OAuth refresh — see it.
+_HEADLESS = os.path.join(WORKSPACE_ROOT, "lib", "claude-headless")
+CLAUDE_BIN = (os.environ.get("CLAUDE_BIN")
+              or (_HEADLESS if os.access(_HEADLESS, os.X_OK) else None)
+              or _shutil.which("claude")
               or os.path.expanduser("~/.local/bin/claude"))
 CLAUDE_WORKDIR = WORKSPACE_ROOT
 CLAUDE_TIMEOUT = int(os.environ.get("TG_TG_TIMEOUT", "900"))

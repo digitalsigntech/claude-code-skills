@@ -38,7 +38,7 @@ CAMERA = f"{C.WORKSPACE_ROOT}/voice/realtime/camera"
 # have written labels into a database nobody reads.
 NOTES_DB = os.environ.get("NOTES_DB", f"{C.WORKSPACE_ROOT}/personal/notes.db")
 FRESH_S = 1800
-CLAUDE = f"{HOME}/.local/bin/claude"
+CLAUDE = tgconf.CLAUDE_BIN
 
 _PROMPT = (
     "Look at the image at {path}. Reply with exactly two lines and nothing "
