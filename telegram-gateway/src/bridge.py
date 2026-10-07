@@ -264,10 +264,30 @@ def _err_text(stdout, stderr, rc):
     return ((stderr or "").strip() or (stdout or "").strip())[:500] or f"exit {rc}"
 
 
+# #875: the prompt rides as ONE argv element, and Linux refuses any single
+# argument over 128 KiB (MAX_ARG_STRLEN) with E2BIG — so a very long typed
+# message failed the whole turn. Above a safe size it goes on stdin instead;
+# `claude -p` with no prompt argument reads it from there (tested 140 KB).
+_ARGV_PROMPT_MAX = 100_000
+
+
+def _stdin_split(cmd):
+    """(cmd, stdin_text): the -p prompt moved to stdin when it is too big."""
+    try:
+        i = cmd.index("-p")
+    except ValueError:
+        return cmd, None
+    if i + 1 >= len(cmd) or len(cmd[i + 1].encode("utf-8")) <= _ARGV_PROMPT_MAX:
+        return cmd, None
+    return cmd[:i + 1] + cmd[i + 2:], cmd[i + 1]
+
+
 def _run(cmd):
+    cmd, _stdin = _stdin_split(cmd)
     try:
         r = subprocess.run(cmd, cwd=C.CLAUDE_WORKDIR, capture_output=True,
-                           text=True, timeout=C.CLAUDE_TIMEOUT)
+                           text=True, timeout=C.CLAUDE_TIMEOUT,
+                           **({"input": _stdin} if _stdin is not None else {}))
     except subprocess.TimeoutExpired:
         return None, "⏳ That took too long and timed out. Try again or narrow it down."
     if r.returncode != 0:
@@ -345,11 +365,24 @@ def ask(chat_id, prompt, sender=None):
 def _stream_run(cmd, on_event):
     """Run a stream-json Claude turn. on_event('text', full_text_so_far) on each text
     delta; on_event('tool', tool_name) when a tool starts. Returns (final_text, err)."""
+    cmd, _stdin = _stdin_split(cmd)
     try:
         proc = subprocess.Popen(cmd, cwd=C.CLAUDE_WORKDIR, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, text=True, bufsize=1)
+                                stderr=subprocess.PIPE, text=True, bufsize=1,
+                                stdin=(subprocess.PIPE if _stdin is not None
+                                       else None))
     except Exception as e:
         return None, str(e)
+    if _stdin is not None:
+        # Write and close in a thread: a 100 KB+ prompt can exceed the pipe
+        # buffer, and the stream reader below must start at once.
+        def _feed():
+            try:
+                proc.stdin.write(_stdin)
+                proc.stdin.close()
+            except Exception:
+                pass
+        threading.Thread(target=_feed, daemon=True).start()
     flag = {"timeout": False}
 
     def _kill():
