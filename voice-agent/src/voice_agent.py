@@ -435,13 +435,30 @@ def tg_text(text, who=None):
     if not api or not chat or not text:
         return False
     body = f"🎙 {who}: {text}" if who else text
+    # #875: a long typed message used to be cut at 3900 characters here, with
+    # nothing said. Telegram's limit is 4096 per message, so a longer line now
+    # goes as several, split on line (then word) boundaries, in order.
+    chunks, rest = [], body
+    while len(rest) > 3900:
+        cut = rest.rfind("\n", 0, 3900)
+        if cut < 2000:
+            cut = rest.rfind(" ", 0, 3900)
+        if cut < 2000:
+            cut = 3900
+        chunks.append(rest[:cut].rstrip())
+        rest = rest[cut:].lstrip()
+    chunks.append(rest)
+    first = None
     try:
-        res = api.send_message(chat, body[:3900])
-        if not (res and res.get("ok")):
-            return False
-        # request 519: the message id, so the copy can be deleted later
-        mid = ((res.get("result") or {}).get("message_id")) if isinstance(res.get("result"), dict) else None
-        return int(mid) if isinstance(mid, int) and mid > 0 else True
+        for c in chunks:
+            res = api.send_message(chat, c)
+            if not (res and res.get("ok")):
+                return False
+            if first is None:
+                # request 519: the message id, so the copy can be deleted later
+                mid = ((res.get("result") or {}).get("message_id")) if isinstance(res.get("result"), dict) else None
+                first = int(mid) if isinstance(mid, int) and mid > 0 else True
+        return first
     except Exception:
         return False
 
@@ -1904,9 +1921,18 @@ def ask(account, question, account_name="", archive_question=True,
         sid = f"{sid[:8]}-{sid[8:12]}-{sid[12:16]}-{sid[16:20]}-{sid[20:32]}"
         cmd += ["--session-id", sid]
 
+    # #875: Linux refuses one argv element over 128 KiB (E2BIG), so a very long
+    # typed message failed the turn. A big prompt goes on stdin; `claude -p`
+    # with no prompt argument reads it from there.
+    _stdin = None
+    _i = cmd.index("-p") if "-p" in cmd else -1
+    if _i >= 0 and _i + 1 < len(cmd) and len(cmd[_i + 1].encode("utf-8")) > 100_000:
+        _stdin = cmd[_i + 1]
+        cmd = cmd[:_i + 1] + cmd[_i + 2:]
+    _inp = {"input": _stdin} if _stdin is not None else {}
     try:
         r = subprocess.run(cmd, cwd=workdir, capture_output=True, text=True,
-                           timeout=cfg["turn_timeout"], env=env)
+                           timeout=cfg["turn_timeout"], env=env, **_inp)
     except subprocess.TimeoutExpired:
         _finish_turn(turn_id)
         return {"answer": "", "agent_error": "timeout",
@@ -1920,7 +1946,7 @@ def ask(account, question, account_name="", archive_question=True,
     if r.returncode != 0 and "cannot be used with root" in (err + out):
         r = subprocess.run([c for c in cmd if c != "--dangerously-skip-permissions"],
                            cwd=workdir, capture_output=True, text=True,
-                           timeout=cfg["turn_timeout"], env=env)
+                           timeout=cfg["turn_timeout"], env=env, **_inp)
         out, err = (r.stdout or "").strip(), (r.stderr or "").strip()
     if r.returncode != 0:
         _finish_turn(turn_id)
