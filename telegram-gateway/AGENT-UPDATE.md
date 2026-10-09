@@ -41,8 +41,9 @@ systemctl --user stop telegram-gateway   # or: pkill -f gateway.py
 # 3. Back up what you are about to overwrite, so a bad update is one command to undo
 cp -r <PROJECT>/telegram <PROJECT>/telegram.bak-$(date +%Y%m%d)
 
-# 4. Copy ONLY the source files
+# 4. Copy ONLY the source files, plus the headless wrapper (see "Staying signed in")
 cp claude-code-skills/telegram-gateway/src/*.py <PROJECT>/telegram/
+mkdir -p <PROJECT>/lib && install -m 755 claude-code-skills/telegram-gateway/src/claude-headless <PROJECT>/lib/
 
 # 5. Start it again and watch the first minute of log output
 systemctl --user start telegram-gateway
@@ -96,3 +97,27 @@ import something else, that is a bug in the release, not your install.
 
 The backup from step 3 is the rollback: stop the service, move the backup back into
 place, start it. State and token come with it, so you land exactly where you were.
+
+## Staying signed in
+
+Symptom: every so often Claude is logged out ("OAuth session expired", "please run
+/login") and someone has to sign in again. Cause: OAuth refresh tokens are single-use
+and every `claude` process shares `~/.claude/.credentials.json`; when the gateway, the
+voice adapter, a cron and a terminal session refresh at the same moment, the loser gets
+`invalid_grant` and the whole login dies.
+
+Fix: background turns run through `<PROJECT>/lib/claude-headless`, which exports
+`CLAUDE_CODE_OAUTH_TOKEN` from the secrets env file and execs `claude`. tgconf picks
+the wrapper up automatically when it is executable; point the voice adapter at it with
+`"claude_bin"` in its config.json. Then, once, on any machine signed in to the same
+account:
+
+```bash
+claude setup-token        # browser sign-in; prints a token valid for one year
+echo 'CLAUDE_CODE_OAUTH_TOKEN=<token>' >> ~/.config/<you>/secrets.env   # chmod 600
+```
+
+That token never refreshes, so it cannot race; only an interactive terminal session
+still refreshes the shared login. Nothing needs restarting — the wrapper reads the file
+on every turn. With no token in the file the wrapper is a plain pass-through. Renew a
+year later the same way.

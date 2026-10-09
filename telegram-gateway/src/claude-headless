@@ -1,0 +1,26 @@
+#!/bin/bash
+# Headless `claude` for everything that starts a Claude turn on its own: the
+# Telegram gateway, the voice adapter, crons, watchers.
+#
+# Why: OAuth refresh tokens are single-use, and every `claude` process shares
+# ~/.claude/.credentials.json. When two of them refresh at once, the loser gets
+# invalid_grant and the whole login dies ("OAuth session expired") — the cause
+# of the surprise logouts that make someone run /login again. Background
+# processes therefore run on their own long-lived token from `claude
+# setup-token` (CLAUDE_CODE_OAUTH_TOKEN in the secrets env file), which never
+# refreshes, so only an interactive terminal session ever touches the shared
+# login.
+#
+# The token is looked up in $CLAUDE_SECRETS_ENV if set, else in any
+# ~/.config/*/secrets.env. With no token anywhere this is a plain pass-through.
+if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+  for f in ${CLAUDE_SECRETS_ENV:-"$HOME"/.config/*/secrets.env}; do
+    [ -r "$f" ] || continue
+    tok=$(sed -n 's/^\(export \)\?CLAUDE_CODE_OAUTH_TOKEN=//p' "$f" | tail -1 | tr -d "\"' ")
+    [ -n "$tok" ] && { export CLAUDE_CODE_OAUTH_TOKEN="$tok"; break; }
+  done
+fi
+for c in "$CLAUDE_REAL_BIN" "$HOME/.local/bin/claude" /usr/local/bin/claude /usr/bin/claude; do
+  [ -n "$c" ] && [ -x "$c" ] && exec "$c" "$@"
+done
+echo "claude-headless: no claude binary found" >&2; exit 127
