@@ -242,6 +242,27 @@ HISTORY_TAIL_BYTES = 512 * 1024         # per session file, newest first
 HISTORY_MAX_FILES = 6
 
 
+def _vocab_path():
+    return str(pathlib.Path(STATE).parent / "vocabulary.json")
+
+
+def vocab_enabled():
+    """#878: offered when the install names sources or terms, or a list exists."""
+    c = config()
+    return bool(c.get("vocabulary_sources") or c.get("vocabulary_terms")
+                or os.path.exists(_vocab_path()))
+
+
+def vocab_rebuild():
+    import vocab
+    c = config()
+    wd = os.path.expanduser(c.get("workdir") or ".")
+    d = archive_dir()
+    return vocab.build(wd, c.get("vocabulary_sources") or [],
+                       seed_terms=c.get("vocabulary_terms") or [],
+                       archive_db=str(d / "chat.db") if d else None)
+
+
 def archive_dir():
     """A message archive on this machine, if it has one.
 
@@ -2714,6 +2735,8 @@ def capabilities():
     # `progress` is unconditional: it costs nothing, and the app treats its absence
     # as an agent that is not there.
     caps = ["ask", "health", "progress", "history", "media", "delete-message"]
+    if vocab_enabled():
+        caps.append("vocabulary")             # #878
     try:                       # only claimed when a key really exists
         agent_keys()
         caps.append("pubkey")
@@ -4102,6 +4125,17 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 self.log_message("history delete failed: %s", e)
                 return self._send(200, {"deleted": False, "reason": str(e)[:120]})
+        if kind == "vocabulary":
+            # #878: the business vocabulary the plane puts in every mint.
+            if not vocab_enabled():
+                return self._send(200, {"updated": None, "count": 0, "items": []})
+            try:
+                import vocab
+                return self._send(200, vocab.handle(_vocab_path(), d, vocab_rebuild))
+            except Exception as e:
+                self.log_message("vocabulary failed: %s", e)
+                return self._send(500, {"error": "vocabulary_failed",
+                                        "detail": str(e)[:200]})
         if kind == "history":
             try:
                 limit = min(int(d.get("limit") or 50), 100)

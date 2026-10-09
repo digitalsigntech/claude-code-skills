@@ -559,6 +559,28 @@ spoken one is kept (Kokoro's Japanese ran ten seconds on one short line). Japane
 greet without a Latin name — the synthesiser spells it letter by letter. Measured on the owner's
 agent, one greeting per language: 1.1–3.4 s spoken, under a second to make.
 
+## Business vocabulary (`vocabulary`)
+
+The voice spells and hears the business's own words (customers, suppliers,
+machines, products, jargon) when the agent supplies them. Name the sources in
+`config.json`, with paths relative to `workdir`:
+
+    "vocabulary_sources": [
+      {"path": "customers/customers.md", "kind": "customer", "headings": true, "contacts": true},
+      {"path": "vendors/vendors.md", "kind": "supplier", "column": "Vendor", "contacts": true},
+      {"path": "knowledge-base/equipment/equipment-park.md", "kind": "machine", "column": "Machine"}
+    ],
+    "vocabulary_terms": [{"term": "FA-17", "kind": "machine", "say_as": "F A seventeen"}]
+
+A source contributes its `## headings`, one table column (by header name), and/or the
+people in "Contact: Name" lines and Contact columns. Kinds: brand, machine, supplier,
+customer, product, term, person. The agent then lists the `vocabulary` capability and
+answers the relay `{"type": "vocabulary"}` (also `rebuild`, `add`, `remove`) from
+`vocabulary.json` beside its state. The list rebuilds itself once a day. Terms the user
+adds survive every rebuild. Weights come from how often the conversation archive uses
+each term. The plane puts the top terms in every session's transcription prompt and
+instructions.
+
 ## Accounts that never seal (`e2ee_exempt_accounts`)
 
 An account whose password is shared (a public demo handed to every prospect)
