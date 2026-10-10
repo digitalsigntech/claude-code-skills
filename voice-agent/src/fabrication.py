@@ -41,8 +41,11 @@ import re
 import sys
 import time
 
-STORE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                     "figure_ledger.json")
+# State lives OUTSIDE the code: next to this file it would be written into
+# whatever checkout the skill runs from, one `git add -A` from being published.
+STORE = os.environ.get("FIGURE_LEDGER") or os.path.join(
+    os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
+    "voice-agent", "figure_ledger.json")
 
 # Within 2% of a figure the agent gave counts as that figure: "6.3 million"
 # for 6,294,100 is a summary, not a fabrication.
@@ -122,6 +125,7 @@ def _load():
 
 
 def _save(d):
+    os.makedirs(os.path.dirname(STORE), exist_ok=True)
     tmp = STORE + ".tmp"
     with open(tmp, "w") as f:
         json.dump(d, f, indent=1, sort_keys=True)
