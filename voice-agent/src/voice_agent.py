@@ -4131,7 +4131,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"updated": None, "count": 0, "items": []})
             try:
                 import vocab
-                return self._send(200, vocab.handle(_vocab_path(), d, vocab_rebuild))
+                _ad = archive_dir()
+                return self._send(200, vocab.handle(
+                    _vocab_path(), d, vocab_rebuild,
+                    archive_db=str(_ad / "chat.db") if _ad else None))
             except Exception as e:
                 self.log_message("vocabulary failed: %s", e)
                 return self._send(500, {"error": "vocabulary_failed",
