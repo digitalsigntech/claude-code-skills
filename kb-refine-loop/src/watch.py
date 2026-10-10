@@ -14,6 +14,7 @@ pre-existing outbound id as "seeded" so history is never bulk-processed.
 Usage: watch.py [--dry] [--limit N] [--force THREAD_ID:REPLY_ID]
 """
 import argparse, json, os, re, sqlite3, subprocess, sys, datetime
+import claude_token   # background turns use their own token, never the shared login
 
 DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.expanduser(os.environ.get("PROJECT_ROOT", "~/workspace"))
@@ -109,6 +110,7 @@ def refine(thread_id, reply_id, dry=False, writer=None):
         print(f"{now()} DRY would refine thread={thread_id} reply={reply_id}")
         return True
     print(f"{now()} refine start thread={thread_id} reply={reply_id}")
+    claude_token.use()
     r = subprocess.run([CLAUDE, "-p", prompt, "--model", MODEL,
                         "--dangerously-skip-permissions"],
                        capture_output=True, text=True, timeout=TIMEOUT + 60)

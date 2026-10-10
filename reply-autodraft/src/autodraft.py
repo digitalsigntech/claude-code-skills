@@ -24,6 +24,7 @@ Threads are tracked by Gmail threadId, so a changed subject line never loses the
 match. Nothing is ever SENT by this script — the owner always sends themselves.
 """
 import os, sys, base64, sqlite3, json, subprocess, time, re
+import claude_token   # background turns use their own token, never the shared login
 import html as html_lib
 from datetime import datetime, timezone
 from email.mime.text import MIMEText
@@ -130,6 +131,7 @@ def cloud_llm(system, user, max_tokens=1500, timeout=200):
     Drafting/learning is quality-critical and low-volume (only real inquiries),
     so it runs on the interactive LLM subscription — not a metered API. Swap this
     for any provider by editing this one function; see README (backend swappable)."""
+    claude_token.use()
     try:
         r = subprocess.run(
             [CLAUDE_BIN, "-p", f"{system}\n\n---\n\n{user}", "--model", CLAUDE_MODEL,

@@ -23,11 +23,19 @@ Claude itself can't. One alert per outage, a re-ping every `realert_hours`
 while broken, one recovery message when auth comes back. Quiet OK runs write
 nothing, so the log only grows on state changes and probes.
 
+When a background token is configured (claude_token.py: CLAUDE_CODE_OAUTH_TOKEN
+from `claude setup-token` in ~/.config/<name>/secrets.env), headless agents run on
+it and cannot take part in the race at all. Then the token is what they depend
+on, so this probes a turn with it once every `token_probe_hours` instead of
+watching the shared login, which only interactive sessions still use. With no
+token it warns once that the machine is exposed to the race.
+
 Config: reads the same src/config.json as health_check.py — the `telegram`
 section for the ping target plus an optional `auth_watchdog` section (see
 config.example.json). Every field has a fallback.
 """
 
+import claude_token
 import json
 import os
 import subprocess
@@ -60,6 +68,7 @@ def load_config():
         "probe_timeout_sec": aw.get("probe_timeout_sec", 120),
         "grace_min": aw.get("grace_min", 60),
         "realert_hours": aw.get("realert_hours", 6),
+        "token_probe_hours": aw.get("token_probe_hours", 1),
         "host_label": aw.get("host_label", os.uname().nodename),
     }
 
@@ -158,8 +167,23 @@ def main():
     st = load_state()
     exp = token_expires_at()
     host = CFG["host_label"]
+    token = claude_token.use()   # probes below run on it when it exists
 
-    if exp is None:
+    if token:
+        if now() - st.get("probed_at", 0) < CFG["token_probe_hours"] * 3600:
+            return 0  # probed recently; state unchanged
+        st["probed_at"] = now()
+        p = probe()
+        if p == "ok":
+            status, why = "ok", ""
+        elif p == "auth":
+            status = "dead"
+            why = ("the background token (CLAUDE_CODE_OAUTH_TOKEN) got an auth error — "
+                   "expired or revoked; run `claude setup-token` and replace it in the "
+                   "secrets file")
+        else:
+            status, why = st["status"], ""
+    elif exp is None:
         status = "dead"
         why = "credentials file missing or unreadable"
     elif exp > now():
@@ -187,15 +211,23 @@ def main():
                 f"🔴 *Claude auth is DEAD on {host}* — " + why + ".\n"
                 "Headless Claude agents on this box are down until someone runs "
                 "`/login` in a Claude Code session there.\n"
-                "_Likely the known OAuth refresh race between concurrent claude "
-                "processes — not an account problem._")
+                + ("_Renew the background token (`claude setup-token`)._" if token else
+                   "_Likely the known OAuth refresh race between concurrent claude "
+                   "processes — not an account problem. A background token "
+                   "(`claude setup-token`, see claude_token.py) ends it for good._"))
             log(f"DEAD ({why}); alert sent={sent}")
-            st = {"status": "dead", "alerted_at": now() if sent else st["alerted_at"]}
+            st.update(status="dead", alerted_at=now() if sent else st["alerted_at"])
     else:
         if st["status"] == "dead":
             send_telegram(f"🟢 Claude auth on {host} is back — automation resumed.")
             log("recovered; recovery ping sent")
-        st = {"status": "ok", "alerted_at": 0}
+        st.update(status="ok", alerted_at=0)
+    if not token and not st.get("warned_no_token"):
+        send_telegram(f"⚠️ No background Claude token on {host}: headless agents share "
+                      "the interactive login, and two of them refreshing it at once "
+                      "signs the machine out. Fix once: `claude setup-token`, then put "
+                      "CLAUDE_CODE_OAUTH_TOKEN=<token> in ~/.config/<name>/secrets.env.")
+        st["warned_no_token"] = True
 
     save_state(st)
 

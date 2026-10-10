@@ -68,6 +68,16 @@ except ImportError:                     # profile lib absent = generic defaults
         has = staticmethod(lambda c: False)
         capability = staticmethod(lambda n, f=None, d=None: d)
 
+# Every turn this process spawns inherits the long-lived background token, so a
+# chat turn never refreshes the shared login and can never sign the machine out
+# (two refreshes at once kill it for everyone) — see claude_token.py. The wrapper
+# above re-reads the file per turn, so a renewed token needs no restart.
+try:
+    import claude_token as _claude_token
+    _claude_token.use()
+except ImportError:
+    pass
+
 BOT_NAME = os.environ.get("TG_BOT_NAME") or P.get("agent.name", "Claude")
 # Which Claude answers a chat turn. The profile (agent.model) is the one place a
 # deployment sets this — the same field the voice adapter reads, so both roads run

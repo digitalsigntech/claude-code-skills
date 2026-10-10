@@ -153,6 +153,29 @@ All knobs are environment variables (full list in `autodraft.env.example`):
 
 ---
 
+## Staying signed in
+
+This skill starts `claude` on its own, alongside whatever else on the machine does
+(a chat gateway, a voice adapter, crons, someone's terminal). OAuth refresh tokens
+are single-use and every `claude` shares `~/.claude/.credentials.json`, so two
+processes refreshing at the same moment sign the whole machine out ("OAuth session
+expired", everyone runs `/login` again).
+
+`src/claude_token.py` prevents it: before each spawn it loads a long-lived token
+into the child's environment, and that token never refreshes, so it cannot race.
+Set it up once per Claude account:
+
+```bash
+claude setup-token          # browser sign-in, prints a token valid for one year
+echo 'CLAUDE_CODE_OAUTH_TOKEN=<token>' >> ~/.config/<name>/secrets.env && chmod 600 ~/.config/<name>/secrets.env
+python3 src/claude_token.py # prints "background token: configured"
+```
+
+It is read from `$CLAUDE_SECRETS_ENV` or any `~/.config/*/secrets.env`, on every
+turn, so renewing it a year later needs no restart. The same token serves every
+machine on that account. With no token the skill still works, it is just exposed
+to the race.
+
 ## Caveats
 
 - **Swappable LLM backend.** `cloud_llm()` in `autodraft.py` shells out to a local CLI;

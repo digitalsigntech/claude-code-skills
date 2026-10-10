@@ -26,6 +26,7 @@ ignored — no reply, no agent turn — but reported to a Telegram chat.
 Run via start_watcher.sh (flock single-instance) + @reboot + watchdog cron.
 """
 import os, re, sys, ssl, time, json, base64, socket, imaplib, subprocess
+import claude_token   # background turns use their own token, never the shared login
 import urllib.request, urllib.parse
 from email.utils import parseaddr
 from email.message import EmailMessage
@@ -262,6 +263,7 @@ def run_agent(frm, subj, body, attachments, friend=False):
         f"Subject: {subj}\n"
         + (f"Attachments saved locally: {', '.join(attachments)}\n" if attachments else "")
         + f"\n{body}\n")
+    claude_token.use()
     p = subprocess.run(
         C.AGENT_CMD, shell=True, input=prompt.encode(),
         capture_output=True, timeout=C.AGENT_TIMEOUT,

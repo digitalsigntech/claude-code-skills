@@ -37,6 +37,7 @@ conversation over voice keeps its thread.
 import argparse, base64, calendar, hashlib, json, mimetypes, os, pathlib, re, secrets, \
     shutil, subprocess, sys, threading, time
 import urllib.request
+import claude_token
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -96,7 +97,12 @@ def config():
 
 
 def claude_bin():
-    """Absolute path to the CLI. A service manager does not inherit a login PATH."""
+    """Absolute path to the CLI. A service manager does not inherit a login PATH.
+
+    Called before every spawn, so it also puts the background token in the
+    environment the turn inherits (claude_token.py): a voice turn never refreshes
+    the shared login, and so can never sign the machine out."""
+    claude_token.use()
     cfg = load(CONFIG, DEFAULTS)
     if cfg.get("claude_bin"):
         return cfg["claude_bin"]
@@ -122,6 +128,9 @@ def health():
     if not exe:
         return {"ok": False, "signed_out": True,
                 "detail": "the claude CLI was not found on this machine"}
+    if os.environ.get(claude_token.VAR):
+        # Turns run on the long-lived background token, not the shared login.
+        return {"ok": True}
 
     cred = pathlib.Path.home() / ".claude" / ".credentials.json"
     if not cred.exists():

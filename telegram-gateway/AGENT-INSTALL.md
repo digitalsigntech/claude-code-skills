@@ -143,6 +143,19 @@ everyone**:
 Set an explicit absolute `PATH` in the unit file, or invoke `claude` by absolute path.
 Verify with `which claude` as the user the service will run as.
 
+## 4b. Give background turns their own token — or the agent will sign itself out
+
+Every chat turn is a `claude` process. Concurrent ones racing the shared login's
+single-use refresh token sign the machine out. Install the wrapper and set the token
+once (details: AGENT-UPDATE.md, "Staying signed in"):
+
+```bash
+mkdir -p <PROJECT>/lib && install -m 755 src/claude-headless <PROJECT>/lib/
+claude setup-token        # ask the operator to complete the browser sign-in
+echo 'CLAUDE_CODE_OAUTH_TOKEN=<token>' >> ~/.config/<name>/secrets.env && chmod 600 ~/.config/<name>/secrets.env
+python3 <PROJECT>/telegram/claude_token.py   # must print "configured"
+```
+
 ## 5. Verify end to end before reporting success
 
 Do not report the install as done because the process is running. A running process

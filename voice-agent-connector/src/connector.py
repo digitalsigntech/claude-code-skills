@@ -32,6 +32,8 @@ import shutil
 import subprocess
 import sys
 import threading
+
+import claude_token   # background turns use their own token, never the shared login
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -67,7 +69,7 @@ def agent_env():
     which is exactly how a single-purpose box runs a service: every turn fails
     instantly with a message about sudo that says nothing about voice.
     IS_SANDBOX=1 is the CLI's own acknowledgement that the risk was accepted."""
-    env = dict(os.environ)
+    env = claude_token.env()   # the user's terminal keeps the shared login to itself
     if hasattr(os, "geteuid") and os.geteuid() == 0:
         env.setdefault("IS_SANDBOX", "1")
     return env

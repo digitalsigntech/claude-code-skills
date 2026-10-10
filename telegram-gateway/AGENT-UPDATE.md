@@ -106,18 +106,21 @@ and every `claude` process shares `~/.claude/.credentials.json`; when the gatewa
 voice adapter, a cron and a terminal session refresh at the same moment, the loser gets
 `invalid_grant` and the whole login dies.
 
-Fix: background turns run through `<PROJECT>/lib/claude-headless`, which exports
-`CLAUDE_CODE_OAUTH_TOKEN` from the secrets env file and execs `claude`. tgconf picks
-the wrapper up automatically when it is executable; point the voice adapter at it with
-`"claude_bin"` in its config.json. Then, once, on any machine signed in to the same
-account:
+Fix, two layers, both shipped in `src/`:
+- `claude_token.py` — imported by `tgconf`, puts `CLAUDE_CODE_OAUTH_TOKEN` in the
+  gateway's environment, so every turn it spawns inherits it.
+- `claude-headless` — installed to `<PROJECT>/lib/`, picked up by tgconf as the binary
+  when executable; re-reads the token on every turn (the file wins), so renewal needs
+  no restart. Point the voice adapter at it with `"claude_bin"` in its config.json.
+
+Then, once per Claude account:
 
 ```bash
 claude setup-token        # browser sign-in; prints a token valid for one year
-echo 'CLAUDE_CODE_OAUTH_TOKEN=<token>' >> ~/.config/<you>/secrets.env   # chmod 600
+echo 'CLAUDE_CODE_OAUTH_TOKEN=<token>' >> ~/.config/<name>/secrets.env   # chmod 600
+python3 <PROJECT>/telegram/claude_token.py    # "background token: configured"
 ```
 
 That token never refreshes, so it cannot race; only an interactive terminal session
-still refreshes the shared login. Nothing needs restarting — the wrapper reads the file
-on every turn. With no token in the file the wrapper is a plain pass-through. Renew a
-year later the same way.
+still refreshes the shared login. One token serves every machine on the account. With
+no token the gateway works but stays exposed. Renew a year later the same way.

@@ -12,14 +12,14 @@
 # login.
 #
 # The token is looked up in $CLAUDE_SECRETS_ENV if set, else in any
-# ~/.config/*/secrets.env. With no token anywhere this is a plain pass-through.
-if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
-  for f in ${CLAUDE_SECRETS_ENV:-"$HOME"/.config/*/secrets.env}; do
-    [ -r "$f" ] || continue
-    tok=$(sed -n 's/^\(export \)\?CLAUDE_CODE_OAUTH_TOKEN=//p' "$f" | tail -1 | tr -d "\"' ")
-    [ -n "$tok" ] && { export CLAUDE_CODE_OAUTH_TOKEN="$tok"; break; }
-  done
-fi
+# ~/.config/*/secrets.env, on every call — the file wins over a token already in
+# the environment, so a renewed token takes effect on the next turn without a
+# restart. With no token anywhere this is a plain pass-through.
+for f in ${CLAUDE_SECRETS_ENV:-"$HOME"/.config/*/secrets.env}; do
+  [ -r "$f" ] || continue
+  tok=$(sed -n 's/^\(export \)\?CLAUDE_CODE_OAUTH_TOKEN=//p' "$f" | tail -1 | tr -d "\"' ")
+  [ -n "$tok" ] && { export CLAUDE_CODE_OAUTH_TOKEN="$tok"; break; }
+done
 for c in "$CLAUDE_REAL_BIN" "$HOME/.local/bin/claude" /usr/local/bin/claude /usr/bin/claude; do
   [ -n "$c" ] && [ -x "$c" ] && exec "$c" "$@"
 done
