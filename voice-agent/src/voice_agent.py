@@ -4132,6 +4132,9 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 import vocab
                 _ad = archive_dir()
+                # #884: "linked" = whichever chat this agent writes to now.
+                if str(d.get("chat_id") or "") == "linked":
+                    d = {**d, "chat_id": archive_chat_id()}
                 return self._send(200, vocab.handle(
                     _vocab_path(), d, vocab_rebuild,
                     archive_db=str(_ad / "chat.db") if _ad else None))
