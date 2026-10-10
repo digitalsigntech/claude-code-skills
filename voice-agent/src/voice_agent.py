@@ -4317,6 +4317,23 @@ class Handler(BaseHTTPRequestHandler):
                     "error": "e2ee_required",
                     "detail": "this account is sealed — send a `sealed` "
                               "envelope, not a plaintext line"})
+            # #885: OPT-IN TRANSCRIPT CAPTURE for measuring recognition (a
+            # vocabulary test). Off unless config names a file and an end
+            # time; then each spoken line (user and voice, not diagnostics)
+            # is appended with its time and account. Nothing else reads it.
+            _cap = config().get("log_capture") or {}
+            if (text and isinstance(_cap, dict) and _cap.get("file")
+                    and time.time() < float(_cap.get("until") or 0)
+                    and not d.get("diagnostic")
+                    and (not _cap.get("account") or _cap["account"] == account)):
+                try:
+                    with open(os.path.expanduser(_cap["file"]), "a",
+                              encoding="utf-8") as _cf:
+                        _cf.write(json.dumps({"ts": time.time(), "account": account,
+                                              "who": who, "text": text},
+                                             ensure_ascii=False) + "\n")
+                except Exception as e:
+                    self.log_message("log capture failed: %s", e)
             if not text:
                 return self._send(200, {"ok": True, "mirrored": False})
             # A DIAGNOSTIC IS NOT A SPOKEN LINE (2026-08-20, #251).
