@@ -38,3 +38,6 @@ voice-agent/src/agent-x25519.*
 voice-agent/src/config.json
 voice-agent/src/state.json
 voice-agent/src/agent-x25519.*
+
+# Runtime state written by the voice agent — never code, never published
+figure_ledger.json
