@@ -282,11 +282,11 @@ def _stdin_split(cmd):
     return cmd[:i + 1] + cmd[i + 2:], cmd[i + 1]
 
 
-def _run(cmd):
+def _run(cmd, env=None):
     cmd, _stdin = _stdin_split(cmd)
     try:
         r = subprocess.run(cmd, cwd=C.CLAUDE_WORKDIR, capture_output=True,
-                           text=True, timeout=C.CLAUDE_TIMEOUT,
+                           text=True, timeout=C.CLAUDE_TIMEOUT, env=env,
                            **({"input": _stdin} if _stdin is not None else {}))
     except subprocess.TimeoutExpired:
         return None, "⏳ That took too long and timed out. Try again or narrow it down."
@@ -358,6 +358,42 @@ def ask(chat_id, prompt, sender=None):
         if err is not None:
             return f"{ERROR_SENTINEL}{err}"
         _mark_inited(chat_id, sid)
+        return text or "(Claude returned an empty reply.)"
+
+
+# ---- masked chats (the owner 2026-10-12, "Email Drafting with Claude") ----------
+# Cloud Claude, but it only ever sees placeholders: the gateway masks the
+# message, the turn's ONE tool is mtool.py (reads through the masker, unmasks
+# draft bodies locally), and the reply is unmasked before it reaches Telegram.
+# Separate session key so the turn never resumes the chat's older UNMASKED
+# history. dontAsk + an allowlist = every other tool is refused, not prompted.
+MTOOL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mtool.py")
+# The hard wall is a PreToolUse hook: settings here allow Bash and default to
+# bypassPermissions, so permission flags alone did NOT stop `ls crm/` (tested).
+_MASK_GUARD = json.dumps({"hooks": {"PreToolUse": [{"matcher": "*", "hooks": [
+    {"type": "command", "command": "python3 " + os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "mask_guard.py")}]}]}})
+
+
+def ask_masked(chat_id, masked_prompt, sender=None, extra_system=""):
+    prompt = _augment(chat_id, masked_prompt, sender)
+    key = f"masked:{chat_id}"
+    cmd = [C.CLAUDE_BIN, "-p", prompt, "--model", C.current_model(),
+           "--tools", "Bash", "--permission-mode", "dontAsk",
+           "--allowedTools", f"Bash(python3 {MTOOL} *)", "--strict-mcp-config",
+           "--settings", _MASK_GUARD,
+           "--append-system-prompt", "\n\n".join(x for x in (C.APPEND_SYSTEM, extra_system) if x),
+           "--output-format", "json"]
+    env = dict(os.environ, MASK_CHAT=str(chat_id))   # claude -> Bash -> mtool
+    with _chat_lock(key):
+        sid, inited = _resolve(key)
+        text, err = _run(cmd + _sess_args(sid, inited), env=env)
+        if err is not None:
+            sid = str(uuid.uuid4())
+            text, err = _run(cmd + ["--session-id", sid], env=env)
+        if err is not None:
+            return f"{ERROR_SENTINEL}{err}"
+        _mark_inited(key, sid)
         return text or "(Claude returned an empty reply.)"
 
 

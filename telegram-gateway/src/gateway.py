@@ -91,6 +91,7 @@ except Exception as _e:        # a missing optional dep must not cost the whole 
     qa_cache = _InertModule()
     print(f"gateway: qa_cache off ({_e})", flush=True)
 import projects_mode
+import masked_chat
 
 # Searchable chat archive (every message + reply -> SQLite/FTS5). Best-effort: if the
 # module can't load, archiving silently no-ops and the gateway runs unaffected.
@@ -905,6 +906,28 @@ def kb_reflex(text):
     return None
 
 
+# ---- masked chats -----------------------------------------------------------
+MASKED_CHATS = masked_chat.masked_chats()
+
+
+def handle_masked_text(msg, chat_id, text):
+    M = masked_chat.ChatMasker(chat_id)
+    try:
+        masked = M.mask(text)
+    except Exception as e:                       # fail closed: nothing raw goes out
+        log(f"masked chat={chat_id} mask error: {e}")
+        TG.send_message(chat_id, "⚠️ Masking failed, so nothing was sent to the cloud. "
+                                 "Please try again.", reply_to=msg["message_id"])
+        return
+    with Typing(chat_id):
+        reply = bridge.ask_masked(chat_id, masked, sender=_sender_full(msg),
+                                  extra_system=masked_chat.SYSTEM)
+    reply = masked_chat.ChatMasker(chat_id).unmask(reply)   # reload: mtool added tokens
+    TG.send_message(chat_id, reply, reply_to=msg["message_id"])
+    _arc_out(chat_id, reply)
+    log(f"masked turn chat={chat_id} tokens={len(M.rev)}")
+
+
 # ---- project chats ----------------------------------------------------------
 # (the owner 2026-07-19, "PHD R&D with Claude"): every post is filed into the bound
 # project under workspace/projects/<slug>/ BEFORE the conversational turn; the turn's
@@ -1145,6 +1168,13 @@ def handle_text(msg, chat_id, text):
         if summary:
             log(f"feedback chat={chat_id} {summary}")
             return
+
+    # Masked chats (the owner 2026-10-12): cloud Claude on placeholders only — the
+    # message is masked here, the turn's only tool is mtool.py, the reply is
+    # unmasked before it is sent. Never Nemotron, never the raw-tool turn.
+    if chat_id in MASKED_CHATS and not command.startswith("/"):
+        handle_masked_text(msg, chat_id, text)
+        return
 
     # Project chats: file-then-answer, project files first. Handled BEFORE the KB
     # reflexes/caches on purpose — the KB is the wrong first source here.
