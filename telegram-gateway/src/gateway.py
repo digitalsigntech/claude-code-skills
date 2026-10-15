@@ -1592,6 +1592,30 @@ def main():
     if not C.allowlist():
         log("WARNING: allowlist is EMPTY — every message will be denied until you add a user ID "
             "to telegram/allowlist.json")
+    # Staying signed in (2026-10-15, the owner: "people will be confused when they are kicked out
+    # of claude login a few days after installing"): every turn is a claude process, and
+    # concurrent ones racing the shared login's single-use refresh sign the machine out. A
+    # one-year `claude setup-token` token avoids it; without one, say so loudly at every start
+    # and tell the owner in Telegram once, with the two steps.
+    try:
+        import claude_token as _ct
+        if not _ct.token():
+            log("WARNING: no one-year Claude token (CLAUDE_CODE_OAUTH_TOKEN) - concurrent turns "
+                "can sign this machine out. Fix: `claude setup-token`, then put "
+                "CLAUDE_CODE_OAUTH_TOKEN=<token> in ~/.config/<name>/secrets.env (AGENT-INSTALL.md 4b).")
+            _flag = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".token_nag_sent")
+            if C.OWNER_ID and not os.path.exists(_flag):
+                TG.send_message(C.OWNER_ID,
+                    "Heads-up: this assistant has no one-year Claude token yet, so Claude may sign "
+                    "this computer out in a few days (a known Claude Code issue when several "
+                    "conversations run at once).\n\nFix once, on this computer:\n"
+                    "1. Run `claude setup-token` and finish the sign-in in the browser.\n"
+                    "2. Put the token it prints in the secrets file as "
+                    "`CLAUDE_CODE_OAUTH_TOKEN=<token>` (or ask me to do it).\n"
+                    "It lasts a year; nothing needs restarting.")
+                open(_flag, "w").write(str(int(time.time())))
+    except Exception as _e:
+        log(f"token check skipped: {_e}")
     threading.Thread(target=drain_injections, daemon=True).start()
     file_reflex.warm()          # keep the workspace list hot (2026-08-15)
     log(f"email→chat injection queue active: {INJECT_DIR}")

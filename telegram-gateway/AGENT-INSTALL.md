@@ -64,6 +64,11 @@ That prints the user IDs of recent senders. Write theirs into `allowlist.json`
 the allowlist is in place before you leave the gateway running — an open bot means
 strangers get a shell on this box through you.
 
+**The one-year Claude token (required, not optional).** Ask the operator to run
+`claude setup-token` on this machine and finish the browser sign-in; it prints a token
+valid for one year. Without it the agent signs itself out within days (step 4b explains
+why). Store it as in step 4b. Never echo it back into the chat.
+
 **Whether they want group chats.** If yes, tell them to disable group privacy:
 @BotFather → `/setprivacy` → pick the bot → **Disable**. Otherwise the bot only sees
 messages that @-mention it. Skip if they only want direct messages.
@@ -143,7 +148,7 @@ everyone**:
 Set an explicit absolute `PATH` in the unit file, or invoke `claude` by absolute path.
 Verify with `which claude` as the user the service will run as.
 
-## 4b. Give background turns their own token — or the agent will sign itself out
+## 4b. Give background turns their own token — REQUIRED, or the agent will sign itself out in days
 
 Every chat turn is a `claude` process. Concurrent ones racing the shared login's
 single-use refresh token sign the machine out. Install the wrapper and set the token
@@ -182,6 +187,7 @@ came back. Then check the logs for exceptions on that turn.
 - [ ] Group privacy disabled (only if they want group chats)
 - [ ] Service starts on boot and restarts on failure
 - [ ] Absolute `PATH` set so `claude` resolves under the service manager
+- [ ] `python3 <PROJECT>/telegram/claude_token.py` prints "configured" (the one-year token)
 - [ ] A real message round-tripped from Telegram
 - [ ] Logs clean on that turn
 

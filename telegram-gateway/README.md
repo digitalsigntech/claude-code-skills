@@ -51,6 +51,26 @@ NAT with no public IP or inbound ports.
 > [Optional integrations](#optional-integrations) for how to strip or keep them.
 
 
+## Stay signed in: the one-year token (do this at install)
+
+Every chat turn is a separate `claude` process. When several run at once they race to
+refresh the shared Claude login, and the loser signs the whole machine out: a known Claude
+Code issue, and the reason a fresh install "suddenly asks to log in again" a few days later.
+The fix takes a minute and lasts a year:
+
+```bash
+claude setup-token                      # browser sign-in; prints a token valid for one year
+echo 'CLAUDE_CODE_OAUTH_TOKEN=<token>' >> ~/.config/<name>/secrets.env && chmod 600 ~/.config/<name>/secrets.env
+python3 telegram/claude_token.py        # must print "configured"
+```
+
+Every background turn then uses that token and never touches the shared login, so it
+can't be signed out by its neighbours. Nothing needs restarting; renewal next year is the
+same two lines. Until it is set, the gateway logs a warning at every start and sends the
+owner one Telegram message with these steps. (Optional: add
+`set -a; . ~/.config/<name>/secrets.env; set +a` to `~/.bashrc` so your own terminal
+`claude` uses it too.)
+
 ## The agent profile — configure this before anything else
 
 One file describes your deployment; the code reads roles, never names.
