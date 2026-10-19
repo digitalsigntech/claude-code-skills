@@ -26,7 +26,7 @@ archive and the id of the owner's sent reply to test against.
 
 3. **Attempt N (start N=1): draft the full reply from the KB only, as the owner.**
    Facts: use `~/workspace/knowledge-base/` (product-qa.md, manuals,
-   phd-recovery-fluids.md, price-list.md, from-emails/, `ug -in` searches).
+   phd-recovery-fluids.md, price-list.md, from-emails/, `command grep -rin` searches).
    Style: write it as an email the owner would actually send, following
    `knowledge-base/writing-styles/<owner>.md` + `learned-<owner>.md`
    (greeting, sentence length, structure, sign-off — the works). Do not guess
