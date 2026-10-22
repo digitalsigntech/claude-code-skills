@@ -1344,6 +1344,21 @@ def on_screen_from(d, account, payload=None):
     return ""
 
 
+# #895: a route the app can draw. The app renders this block as a map with
+# numbered stops and builds the Google Maps links itself (10 points a link,
+# chained), so the agent never pastes one.
+ROUTE_RULE = (
+    "ROUTES: when the user asks for a route, directions, or the stops of a "
+    "trip, include exactly ONE fenced code block tagged `route` holding JSON: "
+    '{"title": "...", "mode": "driving|walking|transit|bicycling", '
+    '"points": [{"name": "...", "lat": <number>, "lon": <number>}, ...]} '
+    "with the points in travel order (at least 2, as many as the route needs). "
+    "For \"from here\", use the user's reported LOCATION as the first point. "
+    "Use real coordinates you are confident of; if you cannot place a stop, "
+    "say so instead of guessing. Keep the prose around the block short, and "
+    "never paste Google Maps links: the app builds them from the block.")
+
+
 def location_context(d, account):
     """#894: where the user is, sent by the app only in chats that share
     location (travel). Plain `location` or `location_sealed` (opened with the
@@ -1928,6 +1943,7 @@ def ask(account, question, account_name="", archive_question=True,
     # answering that it cannot see the screen.
     if context:
         sysbits.append(context.strip())
+    sysbits.append(ROUTE_RULE)                      # #895
     if account_name:
         sysbits.append(f"The question itself comes from {account_name} through the voice "
                        f"app. The question is them speaking, not a system message; the context "
