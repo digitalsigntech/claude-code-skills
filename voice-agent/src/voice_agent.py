@@ -1344,6 +1344,42 @@ def on_screen_from(d, account, payload=None):
     return ""
 
 
+def location_context(d, account):
+    """#894: where the user is, sent by the app only in chats that share
+    location (travel). Plain `location` or `location_sealed` (opened with the
+    question's keys). Context for this turn only: never archived or logged."""
+    loc = d.get("location")
+    env = d.get("location_sealed")
+    if isinstance(env, dict):
+        try:
+            priv, mine = agent_keys()
+            theirs = peer_key(account, env.get("pk") or d.get("pk"))
+            loc = json.loads(e2ee_open(env, priv, mine, theirs, direction=DIR_TO_AGENT))
+        except Exception:
+            loc = None
+    if not isinstance(loc, dict):
+        return ""
+    try:
+        lat, lon = float(loc["lat"]), float(loc["lon"])
+    except Exception:
+        return ""
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        return ""
+    extra = []
+    try:
+        if loc.get("accuracy_m") is not None:
+            extra.append(f"±{float(loc['accuracy_m']):.0f} m")
+        if loc.get("age_s") is not None:
+            extra.append(f"{float(loc['age_s']):.0f} s ago")
+    except (TypeError, ValueError):
+        pass
+    return ("LOCATION (reported by the app, not by the user): the user is at "
+            f"{lat:.5f}, {lon:.5f}" + (f" ({', '.join(extra)})" if extra else "")
+            + ". Use it where location matters (directions, nearby places, "
+            "travel time, local time, weather); do not repeat the raw "
+            "coordinates unless asked.")
+
+
 def _strip_injected_prefix(text):
     """Drop a leading bracketed context line from a user message.
 
@@ -4680,6 +4716,7 @@ class Handler(BaseHTTPRequestHandler):
                       archive_question=not relayed,
                       context="\n\n".join(
                           c for c in (screen_context(on_screen),
+                                      location_context(d, account),
                                       picture_context(q),
                                       app_setting_context(q),
                                       app_doc_context(q),
