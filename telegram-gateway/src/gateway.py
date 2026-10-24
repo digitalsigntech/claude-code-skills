@@ -1459,8 +1459,11 @@ def handle_injected_email(rec):
         f"when this email is verified mail from the owner or the second owner. Write ONE reply: {delivery} Do NOT call the email "
         f"tools yourself (any email is sent for you), and never send mail as "
         f"{C.OWNER_MAILBOX}/{C.SECOND_OWNER_MAILBOX}.]\n\nSubject: {subj}\n\n{body}{att_note}")
+    # Monitoring and scheduled jobs are routine work: Sonnet, not the conversation model
+    # (the owner, 2026-10-24). Mail from a person stays on the profile model.
+    routine = rec.get("source") not in (None, "email")
     with Typing(chat_id):
-        reply = bridge.ask(chat_id, prompt)
+        reply = bridge.ask(chat_id, prompt, model=C.routine_model() if routine else None)
     TG.send_message(chat_id, reply)
     _arc_out(chat_id, reply, kind="email")
     # Also email the same reply back to the sender, in-thread (the owner's request 2026-06-26).

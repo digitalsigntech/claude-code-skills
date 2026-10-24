@@ -126,6 +126,23 @@ def current_model():
         except (OSError, ValueError):
             pass                      # keep the last good value; a bad profile is not a dead bot
     return _MODEL_CACHE["value"]
+def routine_model():
+    """Model for ROUTINE automated turns (health check, scheduler tasks, filing, labelling,
+    background summaries): profile agent.routine_model, default Sonnet. Conversations with
+    people stay on current_model(). the owner, 2026-10-24: top-up bills — routine jobs to Sonnet."""
+    env = os.environ.get("TG_ROUTINE_MODEL")
+    if env:
+        return env
+    try:
+        with open(_profile_path()) as fh:
+            val = ((json.load(fh).get("agent") or {}).get("routine_model") or "").strip()
+        if val:
+            return val
+    except (OSError, ValueError):
+        pass
+    return "claude-sonnet-5-5"
+
+
 HOST_LABEL = os.environ.get("TG_HOST_LABEL") or P.get("host.label", "this machine")
 WORKSPACE_LABEL = os.environ.get("TG_WORKSPACE_LABEL") or P.get(
     "workspace.label", "workspace")

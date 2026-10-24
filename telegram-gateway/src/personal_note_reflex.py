@@ -60,7 +60,7 @@ def _label_later(note_id, path, chat_id=None):
         # profile was the one nobody looked at (2026-09-13 audit).
         out = subprocess.run(
             [CLAUDE, "-p", _PROMPT.format(path=path),
-             "--model", tgconf.current_model(),
+             "--model", tgconf.routine_model(),
              "--dangerously-skip-permissions"],
             capture_output=True, text=True, timeout=300)
         txt = out.stdout or ""

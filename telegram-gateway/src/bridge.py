@@ -193,7 +193,7 @@ def _augment(chat_id, prompt, sender=None):
     return prompt
 
 
-def _base_cmd(prompt, extra_system=""):
+def _base_cmd(prompt, extra_system="", model=None):
     """`extra_system`: per-turn context the SYSTEM knows (2026-08-20, #252).
 
     Not in the prompt, deliberately. Context appended to the user's message
@@ -202,7 +202,7 @@ def _base_cmd(prompt, extra_system=""):
     typing a sentence. It also lands in the archive as something they never
     said. The system channel is where facts we supply belong; the empty
     default keeps every existing caller byte-identical."""
-    cmd = [C.CLAUDE_BIN, "-p", prompt, "--model", C.current_model(), "--dangerously-skip-permissions"]
+    cmd = [C.CLAUDE_BIN, "-p", prompt, "--model", model or C.current_model(), "--dangerously-skip-permissions"]
     sysmsg = "\n\n".join(x for x in (C.APPEND_SYSTEM, extra_system) if x)
     if sysmsg:
         cmd += ["--append-system-prompt", sysmsg]
@@ -343,18 +343,20 @@ def classify_error(text):
     return "signed_out" if any(m in err for m in AUTH_MARKERS) else "agent_error"
 
 
-def ask(chat_id, prompt, sender=None):
+def ask(chat_id, prompt, sender=None, model=None):
+    """`model`: override for this one turn (routine automated turns run on
+    tgconf.routine_model(); people's messages keep the profile model)."""
     prompt = _augment(chat_id, prompt, sender)
     with _chat_lock(chat_id):
         sid, inited = _resolve(chat_id)
-        text, err = _run(_base_cmd(prompt) + ["--output-format", "json"] + _sess_args(sid, inited))
+        text, err = _run(_base_cmd(prompt, model=model) + ["--output-format", "json"] + _sess_args(sid, inited))
         if err is not None and not inited and "already in use" in err:
             # Session exists on disk but init was never recorded (first turn died after
             # the CLI created it). Resume it instead of re-creating.
-            text, err = _run(_base_cmd(prompt) + ["--output-format", "json", "--resume", sid])
+            text, err = _run(_base_cmd(prompt, model=model) + ["--output-format", "json", "--resume", sid])
         if err is not None:
             sid = str(uuid.uuid4())
-            text, err = _run(_base_cmd(prompt) + ["--output-format", "json", "--session-id", sid])
+            text, err = _run(_base_cmd(prompt, model=model) + ["--output-format", "json", "--session-id", sid])
         if err is not None:
             return f"{ERROR_SENTINEL}{err}"
         _mark_inited(chat_id, sid)
