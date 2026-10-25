@@ -263,14 +263,30 @@ def _account_line(sender):
         return None
 
 
+PURPOSES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chat_purposes.json")
+
+
+def _purpose(chat_id):
+    """Pinned group purpose (the owner 2026-10-24, Space Backup group): one line per chat in
+    chat_purposes.json, put in every turn so a short question ("are the backups
+    deleted?") is read in the group's own subject. Kept out of the sessions file,
+    which session resets rewrite."""
+    try:
+        p = json.load(open(PURPOSES_FILE)).get(str(chat_id))
+        return f" Group purpose: {p}" if p else ""
+    except Exception:
+        return ""
+
+
 def _chat_context(chat_id, sender=None):
     ent = _load().get(str(chat_id)) or {}
     title, ctype = ent.get("title"), ent.get("ctype")
     frm = f" This message is from: {sender}." if sender else ""
     acct = _account_line(sender)
     frm += f"\n{acct}" if acct else ""
+    pur = _purpose(chat_id)
     if title:
-        return f'[You are in the Telegram {ctype or "group"} "{title}" (chat_id {chat_id}).{frm}]'
+        return f'[You are in the Telegram {ctype or "group"} "{title}" (chat_id {chat_id}).{pur}{frm}]'
     if sender:
         return f'[Telegram chat {chat_id}.{frm}]'
     return None
