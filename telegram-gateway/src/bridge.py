@@ -104,6 +104,109 @@ def _mark_inited(chat_id, sid):
         _save()
 
 
+# ---- automatic session reset (2026-10-24) -----------------------------------
+# Every turn re-sends the chat's whole history, so a session that has run for
+# days costs ~10x a fresh one per message (one group went 35k -> 379k context;
+# another reached $181 before hitting the monthly spend limit).
+# Before each turn, a chat's session is replaced when it has been quiet for
+# AUTO_RESET_IDLE_H hours or its last context passed AUTO_RESET_CTX tokens.
+# Continuity comes from the chat archive: the new session's first prompt
+# carries the chat's last few messages. Masked chats rotate with NO handoff —
+# the archive holds unmasked text.
+AUTO_RESET_IDLE_H = float(os.environ.get("TG_AUTO_RESET_IDLE_H", 4))
+AUTO_RESET_CTX = int(os.environ.get("TG_AUTO_RESET_CTX", 200_000))
+_PROJECTS = os.path.expanduser("~/.claude/projects")
+_CHAT_DB = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "chatlog", "chat.db")
+_RESET_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "auto_reset.log")
+
+
+def _transcript(sid):
+    for d in os.listdir(_PROJECTS):
+        f = os.path.join(_PROJECTS, d, sid + ".jsonl")
+        if os.path.exists(f):
+            return f
+    return None
+
+
+def _last_context(path):
+    """Context size (tokens) of the session's most recent model call."""
+    with open(path, "rb") as fh:
+        fh.seek(max(0, os.path.getsize(path) - 400_000))
+        tail = fh.read().decode(errors="replace").splitlines()
+    for line in reversed(tail):
+        if '"usage"' not in line:
+            continue
+        try:
+            u = json.loads(line)["message"]["usage"]
+        except Exception:
+            continue
+        return (u.get("input_tokens", 0) + u.get("cache_read_input_tokens", 0)
+                + u.get("cache_creation_input_tokens", 0))
+    return 0
+
+
+def _handoff(chat_id, n=12, per=500, cap=6000):
+    """The chat's last n archived messages, oldest first, for the new session."""
+    import sqlite3
+    try:
+        con = sqlite3.connect(f"file:{_CHAT_DB}?mode=ro", uri=True, timeout=5)
+        rows = con.execute("select ts, sender, text from messages where chat_id=? "
+                           "order by epoch desc limit ?", (int(chat_id), n)).fetchall()
+        con.close()
+    except Exception:
+        return ""
+    lines, total = [], 0
+    for ts, who, text in reversed(rows):
+        t = " ".join((text or "").split())
+        t = t[:per] + ("…" if len(t) > per else "")
+        lines.append(f"{ts[11:16]} {who}: {t}")
+        total += len(lines[-1])
+    while total > cap and lines:
+        total -= len(lines.pop(0))
+    return "\n".join(lines)
+
+
+def _maybe_rotate(chat_id, handoff=True):
+    """Call INSIDE the chat lock, before _resolve. Returns a prompt prefix
+    ('' when nothing rotated or no handoff)."""
+    with _sess_guard:
+        ent = _load().get(str(chat_id))
+    if not ent or not ent.get("init"):
+        return ""
+    path = _transcript(ent["sid"])
+    if not path:
+        return ""
+    idle_h = (time.time() - os.path.getmtime(path)) / 3600
+    ctx = _last_context(path)
+    if idle_h >= AUTO_RESET_IDLE_H:
+        reason = f"quiet for {idle_h:.0f} h"
+    elif ctx >= AUTO_RESET_CTX:
+        reason = f"context reached {ctx // 1000}k tokens"
+    else:
+        return ""
+    with _sess_guard:
+        s = _load()
+        e = s.get(str(chat_id))
+        if not e or e.get("sid") != ent["sid"]:
+            return ""
+        e["sid"] = str(uuid.uuid4()); e["init"] = False   # held files stay held
+        _save()
+    try:
+        with open(_RESET_LOG, "a") as fh:
+            fh.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} chat={chat_id} "
+                     f"title={ent.get('title')!r} old={ent['sid']} reason={reason}\n")
+    except OSError:
+        pass
+    if not handoff or str(chat_id).startswith("masked:"):
+        return ""
+    recent = _handoff(chat_id)
+    return (f"[This chat's Claude session was reset automatically ({reason}) to keep "
+            f"turns cheap. Your earlier context is gone; the chat's last messages from "
+            f"the archive are below for continuity. If you need more, query "
+            f"chatlog/chat.db for chat_id {chat_id}.\n{recent}]\n\n" if recent else "")
+
+
 def set_chat_meta(chat_id, title, ctype):
     """Record the Telegram chat's display title + type so Claude knows which room
     it's in. Called on every inbound message (titles can change)."""
@@ -348,6 +451,7 @@ def ask(chat_id, prompt, sender=None, model=None):
     tgconf.routine_model(); people's messages keep the profile model)."""
     prompt = _augment(chat_id, prompt, sender)
     with _chat_lock(chat_id):
+        prompt = _maybe_rotate(chat_id) + prompt
         sid, inited = _resolve(chat_id)
         text, err = _run(_base_cmd(prompt, model=model) + ["--output-format", "json"] + _sess_args(sid, inited))
         if err is not None and not inited and "already in use" in err:
@@ -388,6 +492,7 @@ def ask_masked(chat_id, masked_prompt, sender=None, extra_system=""):
            "--output-format", "json"]
     env = dict(os.environ, MASK_CHAT=str(chat_id))   # claude -> Bash -> mtool
     with _chat_lock(key):
+        _maybe_rotate(key, handoff=False)
         sid, inited = _resolve(key)
         text, err = _run(cmd + _sess_args(sid, inited), env=env)
         if err is not None:
@@ -483,6 +588,7 @@ def ask_stream(chat_id, prompt, on_event, sender=None, extra_system=""):
     prompt = _augment(chat_id, prompt, sender)
     flags = ["--output-format", "stream-json", "--include-partial-messages", "--verbose"]
     with _chat_lock(chat_id):
+        prompt = _maybe_rotate(chat_id) + prompt
         sid, inited = _resolve(chat_id)
         text, err = _stream_run(_base_cmd(prompt, extra_system) + flags + _sess_args(sid, inited), on_event)
         if err is not None and not inited and "already in use" in err:

@@ -257,6 +257,12 @@ records what the CLI said even when the chat got something truncated.
   API 10.1 `sendRichMessage` for native rendering (with a clean text fallback).
 - **Commands:** `/help`, `/whoami` (show chat/user IDs), `/clear` (a.k.a. `/new`,
   `/reset` — forget this chat's session), plus optional `/cloud` and `/topic`.
+- **Automatic session reset:** before each turn, a chat's session is replaced when
+  it has been quiet for 4 h or its last model call carried more than 200k tokens of
+  context (`TG_AUTO_RESET_IDLE_H`, `TG_AUTO_RESET_CTX`). Every call re-sends the
+  whole history, so a days-long session costs ~10x a fresh one per message. The new
+  session's first prompt carries the chat's last 12 archived messages so the thread
+  survives; masked chats rotate with no handoff. Log: `logs/auto_reset.log`.
 - **Reflexes are OFF by default (`TG_REFLEX_INTERCEPT=0`).** Every reflex listed
   below is a keyword/pattern gate that answers a message *instead of* the model.
   On the origin install all of them were switched off on 2026-08-30 — the owner:
