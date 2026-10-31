@@ -193,6 +193,7 @@ HELP = (
     "model and cloud Claude (mode shows on the group title)\n"
     "/project [slug] — show/set which project this chat files into\n"
     "/clear (or /new) — clear this chat's memory and start fresh\n"
+    "/usage — Claude usage: weekly limits and when they reset\n"
     "/whoami — show this chat's IDs\n"
     "/help — this message")
 
@@ -1094,6 +1095,13 @@ def handle_text(msg, chat_id, text):
     if command == "/whoami":
         TG.send_message(chat_id, f"chat_id: `{chat_id}`\nyour user_id: `{msg['from']['id']}`\n"
                                  f"chat type: {msg['chat'].get('type')}"); return
+    if command == "/usage":
+        # Claude subscription usage (the terminal's /usage): weekly limits with their reset time.
+        out = subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "usage_reflex.py")],
+                             capture_output=True, text=True, timeout=30).stdout.strip() or "Couldn't read Claude usage."
+        TG.send_message(chat_id, out, reply_to=msg["message_id"])
+        _arc_out(chat_id, out)
+        return
     if command in ("/cloud", "/c"):
         # Escape hatch for STRICT privacy mode: force a real cloud (Claude) turn,
         # bypassing the on-box router. Use only when you know the query is public.
@@ -1578,6 +1586,7 @@ def main():
         {"command": "project", "description": "Show or set this chat's project binding"},
         {"command": "topic", "description": "Show this conversation's current project topic"},
         {"command": "clear", "description": "Clear this chat's memory, start fresh"},
+        {"command": "usage", "description": "Claude usage: weekly limits and when they reset"},
         {"command": "whoami", "description": "Show chat & user IDs"},
         {"command": "help", "description": "What I can do"},
     ])
