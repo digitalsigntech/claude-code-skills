@@ -481,26 +481,24 @@ def handle_album(msgs, chat_id):
         _send_private_files(chat_id, files)
         log(f"always-nemotron album chat={chat_id} n={len(paths)} files={len(files)}")
         return
-    if caption.strip():
+    # Captioned or not, an album gets a model turn (2026-11-02, as single files).
+    if True:
         for p in paths:
             bridge.hold_file(chat_id, p)
         listing = "\n".join(f"  - {p}" for p in paths)
         prompt = (f"{len(paths)} files were sent together as one Telegram album and saved at:\n"
                   f"{listing}\n"
-                  f"The user's caption on the album (it applies to ALL of the files): "
-                  f"\"{caption.strip()}\"\n"
-                  f"Open/read the files and respond to their message.")
+                  + (f"The user's caption on the album (it applies to ALL of the files): "
+                     f"\"{caption.strip()}\"\n"
+                     f"Open/read the files and respond to their message."
+                     if caption.strip() else
+                     "It came with no caption. Look at the files and reason about why "
+                     "they were sent here, in this chat's context; respond to that. Do "
+                     "not file them anywhere unless they clearly ask to be kept."))
         with Typing(chat_id):
             reply = bridge.ask(chat_id, prompt, sender=_sender_full(msgs[0]))
             TG.send_message(chat_id, reply, reply_to=msgs[0]["message_id"])
         _arc_out(chat_id, reply)
-        return
-    key = uuid.uuid4().hex[:10]
-    with PENDING_GUARD:
-        PENDING[key] = {"path": paths, "caption": caption, "chat_id": chat_id}
-    TG.send_message(chat_id,
-                    f"📥 Saved {len(paths)} files from your album.\nWhat should I do with them?",
-                    reply_to=msgs[0]["message_id"], reply_markup=_file_keyboard(key))
 
 
 def _image_data_url(path):
@@ -632,8 +630,10 @@ def handle_file(msg, chat_id):
     # so follow-up messages in this chat can keep referring to it.
     # A photo always gets a turn, caption or not (the owner 2026-11-01): it is
     # reasoned about, never just filed or parked behind the action buttons.
-    is_photo = path.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
-    if caption.strip() or is_photo:
+    # Since 2026-11-02 EVERY file does, not just photos (the owner: a caption-less
+    # Firebase key pair sent as asked got parked behind the buttons — "the
+    # hard-coded logic is messing up again"). The chat's context says why it came.
+    if True:
         # Always-Nemotron chats stay on-box even for file captions (2026-07-20: a
         # captioned photo in the Private group was escaping to the cloud Claude turn).
         # Nemotron can't view the image, but it gets the caption + file location and
@@ -723,13 +723,6 @@ def handle_file(msg, chat_id):
             TG.send_message(chat_id, reply, reply_to=msg["message_id"])
         _arc_out(chat_id, reply)
         return
-    key = uuid.uuid4().hex[:10]
-    with PENDING_GUARD:
-        PENDING[key] = {"path": path, "caption": caption, "chat_id": chat_id}
-    prompt_msg = f"📥 Saved `{os.path.basename(path)}`.\nWhat should I do with it?"
-    TG.send_message(chat_id, prompt_msg,
-                    reply_to=msg["message_id"], reply_markup=_file_keyboard(key))
-    _arc_out(chat_id, prompt_msg)
 
 
 def handle_voice(msg, chat_id):
