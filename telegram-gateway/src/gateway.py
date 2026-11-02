@@ -589,7 +589,7 @@ def handle_file(msg, chat_id):
     # sheet in the frame, extracts each (white paper -> PDF, other stock -> JPEG)
     # and files it annotated. Fires only when a document is actually detected, so
     # an ordinary photo costs ~1s and falls through to everything below.
-    if scan_reflex.should_try(path, caption):
+    if chat_id not in C.NO_SCAN_CHATS and scan_reflex.should_try(path, caption):
         try:
             with Typing(chat_id):
                 summary = scan_reflex.try_handle(

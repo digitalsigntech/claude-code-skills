@@ -344,6 +344,11 @@ ALWAYS_NEMOTRON_CHATS = _tg_chat_set("always_local_chats")
 # as a Piper-synthesized voice note plus the full text. Other chats keep the existing
 # file handling (e.g. a caption-less voice note in the owner's DM stays a personal note).
 VOICE_CHATS = _tg_chat_set("voice_chats")
+# Chats where a photo is never auto-filed as a scanned document (scan_reflex):
+# app-development groups whose photos are screenshots of the app, not paper.
+# the owner 2026-11-01, Space Backup group: a TV screenshot with a bug-report caption
+# was filed into knowledge-base/from-scans instead of reaching the turn.
+NO_SCAN_CHATS = _tg_chat_set("no_scan_chats")
 # Project chats (the owner 2026-07-19, "PHD R&D with Claude" group): a group bound to a
 # project directory under workspace/projects/<slug>/ — every post (text/voice/photo/doc)
 # is auto-filed there; /wisdom (cloud Claude) vs /privacy (Nemotron) per chat, mode
