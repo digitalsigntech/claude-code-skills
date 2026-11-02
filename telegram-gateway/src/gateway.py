@@ -589,7 +589,10 @@ def handle_file(msg, chat_id):
     # sheet in the frame, extracts each (white paper -> PDF, other stock -> JPEG)
     # and files it annotated. Fires only when a document is actually detected, so
     # an ordinary photo costs ~1s and falls through to everything below.
-    if chat_id not in C.NO_SCAN_CHATS and scan_reflex.should_try(path, caption):
+    # the owner 2026-11-01: "Stop automatic filing of photos. Always reason about a
+    # photo." The reflex no longer fires on its own (scan_auto, default off);
+    # the turn can still run scan_reflex.py itself when a photo IS a document.
+    if C.SCAN_AUTO and scan_reflex.should_try(path, caption):
         try:
             with Typing(chat_id):
                 summary = scan_reflex.try_handle(
@@ -607,7 +610,8 @@ def handle_file(msg, chat_id):
     # document goes straight into the KB — no action keyboard — and the reply
     # confirms the ingest AND what the document is (title/gist).
     if not caption.strip() and chat_id in C.ALWAYS_NEMOTRON_CHATS \
-            and path.lower().endswith(C.DOC_EXTS + C.IMG_EXTS):
+            and path.lower().endswith(C.DOC_EXTS) \
+            and not path.lower().endswith(C.IMG_EXTS):   # photos get a turn (2026-11-01)
         name = os.path.basename(path)
         with Typing(chat_id):
             result = _ingest(path, caption)
@@ -626,7 +630,10 @@ def handle_file(msg, chat_id):
     # A caption is the user's actual question/instruction about the file — answer it
     # directly instead of swallowing it behind the action buttons. Hold the file too
     # so follow-up messages in this chat can keep referring to it.
-    if caption.strip():
+    # A photo always gets a turn, caption or not (the owner 2026-11-01): it is
+    # reasoned about, never just filed or parked behind the action buttons.
+    is_photo = path.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
+    if caption.strip() or is_photo:
         # Always-Nemotron chats stay on-box even for file captions (2026-07-20: a
         # captioned photo in the Private group was escaping to the cloud Claude turn).
         # Nemotron can't view the image, but it gets the caption + file location and
@@ -670,7 +677,9 @@ def handle_file(msg, chat_id):
                          "and edit_pdf if they ask for changes")
             else:
                 note += " — you cannot view it, but their message refers to it"
-            turn_text = f"{note}] {caption.strip()}"
+            turn_text = f"{note}] " + (caption.strip() or
+                "(no caption: work out from the picture and this chat why it was "
+                "sent, and respond to that; save it only if it clearly should be kept)")
             # A CAPTIONED document must be filed too (2026-08-18). Until today a
             # bare document was ingested and a captioned one was not — the
             # caption was read as an instruction and the file stayed in
@@ -703,8 +712,12 @@ def handle_file(msg, chat_id):
             return
         bridge.hold_file(chat_id, path)
         prompt = (f"A file was sent to you via Telegram and saved at: {path}\n"
-                  f"The user's message accompanying it: \"{caption.strip()}\"\n"
-                  f"Open/read the file and respond to their message.")
+                  + (f"The user's message accompanying it: \"{caption.strip()}\"\n"
+                     f"Open/read the file and respond to their message."
+                     if caption.strip() else
+                     "It came with no caption. Look at it and reason about why it "
+                     "was sent here, in this chat's context; respond to that. Do not "
+                     "file it anywhere unless it clearly asks to be kept."))
         with Typing(chat_id):
             reply = bridge.ask(chat_id, prompt, sender=_sender_full(msg))
             TG.send_message(chat_id, reply, reply_to=msg["message_id"])
