@@ -49,6 +49,7 @@ class _Config:
 
 C = _Config()
 import tg_api as TG
+TG.ARCHIVE_SENDS = False  # the gateway archives its replies itself (_arc_out)
 import bridge
 import privacy_router
 import photo_reflex

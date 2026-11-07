@@ -1,6 +1,7 @@
 """Thin Telegram Bot API client (long-polling, no webhook — works behind NAT)."""
 import re
 import os
+import sys
 import json
 import time
 import html
@@ -268,10 +269,29 @@ def _chunks(text, n=C.TG_MAX):
         text = text[cut:].lstrip("\n")
 
 
+# Every message the bot posts must be in chat.db, or Claude can't see what the bot said
+# (the owner 2026-11-07: a cron watchdog alert was only findable by screenshot). The
+# gateway archives its own replies (_arc_out) and sets this False to avoid duplicates;
+# every other process (cron monitors, reminders, scripts) archives here.
+ARCHIVE_SENDS = True
+
+
+def _archive_out(chat_id, text):
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "chatlog"))
+        import chatdb
+        who = os.path.basename(sys.argv[0] or "script").removesuffix(".py") or "script"
+        chatdb.record(text, "out", sender=f"claude ({who})", chat_id=chat_id)
+    except Exception:
+        pass
+
+
 def send_message(chat_id, text, reply_to=None, reply_markup=None):
     """Send a reply. Table/task-list replies go via sendRichMessage (native rendering);
     everything else uses the fast HTML path. On rich failure, tables are degraded to
     readable rows before falling back so pipe junk never reaches the user."""
+    if ARCHIVE_SENDS:
+        _archive_out(chat_id, text)
     if needs_rich(text) and len(text) <= C.RICH_MAX:
         res = send_rich_message(chat_id, text, reply_to, reply_markup)
         if res:
