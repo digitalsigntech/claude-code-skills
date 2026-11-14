@@ -1395,6 +1395,51 @@ def location_context(d, account):
             "coordinates unless asked.")
 
 
+_INLINE_CONTEXT = re.compile(r"\n*\[Context:(?P<body>.*)\]\s*$", re.S)
+
+
+def split_inline_context(q):
+    """(question, context): an app build that appends the earlier
+    conversation as a trailing "[Context: ...]" block, from before the
+    separate `context` field, is split here, so the question stays the
+    user's own words for the cache, the reflexes and the progress table."""
+    m = _INLINE_CONTEXT.search(q or "")
+    if not m or m.start() == 0:
+        return q, ""
+    return q[:m.start()].rstrip(), m.group("body").strip()
+
+
+def conversation_context(text):
+    """What was said on the phone just before this question, with the voice
+    assistant only, and never sent to the agent. Context for the question,
+    never the user's words to this agent."""
+    t = str(text or "").strip()
+    if not t:
+        return ""
+    return ("EARLIER ON THE PHONE (reported by the app, not asked of you): the user was talking with "
+            "the voice assistant on the phone just before this question, and none of it was sent to "
+            "you. Use it to understand what the question refers to; answer only the question:\n"
+            + t[:4000])
+
+
+def context_from(d, account, payload=None):
+    """The `context` text of a request: inside a sealed payload, plain in the
+    body, or sealed on its own (`context_sealed`). Empty when there is none."""
+    if isinstance(payload, dict) and payload.get("context"):
+        return str(payload.get("context"))[:4000]
+    if d.get("context"):
+        return str(d.get("context"))[:4000]
+    env = d.get("context_sealed")
+    if isinstance(env, dict):
+        try:
+            priv, mine = agent_keys()
+            theirs = peer_key(account, env.get("pk") or d.get("pk"))
+            return str(e2ee_open(env, priv, mine, theirs, direction=DIR_TO_AGENT) or "")[:4000]
+        except Exception as e:
+            print(f"[voice-agent] context seal not opened: {str(e)[:80]}", file=sys.stderr)
+    return ""
+
+
 def _strip_injected_prefix(text):
     """Drop a leading bracketed context line from a user message.
 
@@ -4679,6 +4724,10 @@ class Handler(BaseHTTPRequestHandler):
                               "envelope, not a plaintext question"})
             if not q:
                 return self._send(400, {"error": "no question"})
+            q, _inline_ctx = split_inline_context(q)
+            _conv_ctx = context_from(d, account) or _inline_ctx
+            if _conv_ctx:
+                self.log_message("conversation context: %d chars", len(_conv_ctx))
             # 2026-08-13: "what reminders do I have" came back as a bulleted
             # list here and as a grid on the box, because the box answers it
             # WITHOUT a model — a deterministic reflex emits the markdown table
@@ -4732,6 +4781,7 @@ class Handler(BaseHTTPRequestHandler):
                       archive_question=not relayed,
                       context="\n\n".join(
                           c for c in (screen_context(on_screen),
+                                      conversation_context(_conv_ctx),
                                       location_context(d, account),
                                       picture_context(q),
                                       app_setting_context(q),
