@@ -602,7 +602,7 @@ def phantom_gate(text, seconds, prefiltered=None, peak=None):
 
 
 def hallucination_gate(text, seconds, prefiltered=None, peak=None, heard=None, phone_lang=None,
-                       quiet=False, known_langs=(), heard_p=None):
+                       quiet=False, known_langs=(), heard_p=None, phone_heard=None):
     """Whisper's output on audio that held no words — the FULL rule (request
     from the app after the car-cabin session of 2026-09-05):
 
@@ -621,7 +621,8 @@ def hallucination_gate(text, seconds, prefiltered=None, peak=None, heard=None, p
     3. word density: a "sentence" of few words spread over many seconds
        (under 0.5 words a second across 8 s or more) is noise narrated, not
        speech — "I'm going to go ahead and get started" over 30 s is eight
-       words at 0.27 a second;
+       words at 0.27 a second — unless the phone's recogniser heard the very
+       same words (`phone_heard`), which noise does not produce twice;
     4. a repeated word: one word three or more times and nothing else, when
        it is a filler ("I. I. I. I. I. I."), or five or more times whatever
        the word — the recogniser stuttering on noise. "no no no" passes;
@@ -671,7 +672,12 @@ def hallucination_gate(text, seconds, prefiltered=None, peak=None, heard=None, p
                      and (peak is None or peak == float("-inf") or peak >= -24.0))
         if not plausible:
             return "phone heard no words"
-    if secs >= 8.0 and words / secs < 0.5:
+    # #645 (2026-11-21): "Are you there" over 12.7 s was dropped here although
+    # the phone's own recogniser had heard the same three words. Two
+    # recognisers agreeing on the words is speech, however long the clip —
+    # noise narrated does not come out the same twice.
+    _agree = bool(phone_heard) and _tokens(phone_heard) == _tokens(t)
+    if secs >= 8.0 and words / secs < 0.5 and not _agree:
         return f"{words} words over {secs:.0f}s"
     toks = _tokens(t)
     if len(set(toks)) == 1 and (len(toks) >= 5 or (len(toks) >= 3 and toks[0] in FILLERS)):
@@ -995,6 +1001,42 @@ def detect_language(wav):
     return code
 
 
+# #878: the business vocabulary as whisper's initial prompt, which biases it
+# toward those spellings. whisper keeps at most ~224 prompt tokens, so the top
+# terms only (~500 characters). Read from the agent's own vocabulary.json and
+# cached for ten minutes; no list means no prompt, exactly as before.
+_VOCAB_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "vocabulary.json")
+_vp_cache = {"t": 0.0, "v": ""}
+
+
+def _vocab_prompt(limit_chars=500):
+    if time.time() - _vp_cache["t"] < 600:
+        return _vp_cache["v"]
+    out = ""
+    try:
+        with open(_VOCAB_JSON, encoding="utf-8") as f:
+            d = json.load(f)
+        removed = {str(r).lower() for r in d.get("removed") or []}
+        items = [{**m, "weight": 1.0} for m in d.get("manual") or []] + list(
+            d.get("built") or [])
+        items.sort(key=lambda i: -float(i.get("weight") or 0))
+        terms, seen = [], set()
+        for i in items:
+            t = str(i.get("term") or "").strip()
+            if not t or t.lower() in removed or t.lower() in seen:
+                continue
+            if len(", ".join(terms + [t])) > limit_chars:
+                break
+            terms.append(t)
+            seen.add(t.lower())
+        out = ", ".join(terms)
+    except Exception:
+        out = ""
+    _vp_cache.update(t=time.time(), v=out)
+    return out
+
+
 def transcribe(audio_bytes, suffix=".m4a", lang=None, hint=""):
     """(text, seconds, peak_dbfs, language_heard). Raises on an absurd clip.
 
@@ -1050,10 +1092,12 @@ def transcribe(audio_bytes, suffix=".m4a", lang=None, hint=""):
             else:
                 code = detect_language(wav) or "auto"
         model = model_for(code)
+        _vp = _vocab_prompt()
         with _SPEECH_CPU:
             out = subprocess.run(
                 [WHISPER_BIN, "-m", model, "-f", wav, "-nt", "-np",
-                 "-l", code, "-oj", "-of", os.path.join(d, "res")],
+                 "-l", code, "-oj", "-of", os.path.join(d, "res")]
+                + (["--prompt", _vp] if _vp else []),
                 capture_output=True, text=True, timeout=600)
         heard = code
         if code == "auto":
