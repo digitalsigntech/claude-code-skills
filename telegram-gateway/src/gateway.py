@@ -751,7 +751,7 @@ def handle_voice(msg, chat_id):
     # Echo what was heard so a bad transcription is immediately visible.
     TG.send_message(chat_id, f"🎙️ _{text}_", reply_to=msg["message_id"])
     # Q&A cache: a repeat spoken question is answered instantly (still as a voice note).
-    reply = qa_cache.lookup(text) if qa_cache.cacheable(text) else None
+    reply = qa_cache.lookup(text) if _qa_ok(chat_id, text) else None
     if reply:
         log(f"qa-cache hit (voice) chat={chat_id} {text[:60]!r}")
     else:
@@ -761,7 +761,7 @@ def handle_voice(msg, chat_id):
                   f"they spoke (detected: {lang}).]\n\n{text}")
         with Typing(chat_id):
             reply = bridge.ask(chat_id, prompt, sender=_sender_full(msg))
-        if qa_cache.cacheable(text):
+        if _qa_ok(chat_id, text):
             qa_cache.store(text, reply, source="voice-note")
     _arc_out(chat_id, reply, kind="voice")
     ogg = None
@@ -941,6 +941,21 @@ def handle_masked_text(msg, chat_id, text):
 # project under workspace/projects/<slug>/ BEFORE the conversational turn; the turn's
 # first source of context is the project directory, not the KB. Privacy toggle:
 # /wisdom = cloud Claude, /privacy = on-box-policy Nemotron (fails closed).
+def _qa_ok(chat_id, text):
+    """Q&A cache applies only in one-to-one chats, never in groups. Every group here is
+    a working group about something live (Space Backup, trading, websites ...): "what
+    decision is needed from me?" or "any news from chia3?" means a different answer an
+    hour later, and on 2026-11-21 and again 11-22 the cache replayed a day-old
+    decisions list in the Space Backup group. Stable product/company Q&A asked in a DM
+    (and the voice app, which has its own call) is what the cache is for."""
+    try:
+        if int(chat_id) < 0:
+            return False
+    except Exception:
+        return False
+    return qa_cache.cacheable(text)
+
+
 def handle_project_text(msg, chat_id, text, kind="note", already_filed=None):
     """File the message into the project notebook, then answer per privacy mode."""
     pm = projects_mode.get(chat_id)
@@ -1243,7 +1258,7 @@ def handle_text(msg, chat_id, text):
     # intent queries never reach it. Only standalone question-shaped messages qualify
     # (see qa_cache.cacheable); everything else falls through untouched.
     user_q = text          # pristine question for the cache (reflexes may augment text)
-    if not command.startswith("/") and qa_cache.cacheable(text):
+    if not command.startswith("/") and _qa_ok(chat_id, text):
         cached = qa_cache.lookup(text)
         if cached:
             TG.send_message(chat_id, "⚡ " + cached, reply_to=msg["message_id"])
@@ -1274,7 +1289,7 @@ def handle_text(msg, chat_id, text):
             reply = bridge.ask(chat_id, text, sender=_sender_full(msg))
         TG.send_message(chat_id, reply, reply_to=msg["message_id"])
         _arc_out(chat_id, reply)
-        if qa_cache.cacheable(user_q):
+        if _qa_ok(chat_id, user_q):
             qa_cache.store(user_q, reply, source="text")
         return
 
@@ -1299,7 +1314,7 @@ def handle_text(msg, chat_id, text):
         TG.deliver_final(chat_id, mid, reply)
     else:
         TG.send_message(chat_id, reply, reply_to=msg["message_id"])
-    if qa_cache.cacheable(user_q):
+    if _qa_ok(chat_id, user_q):
         qa_cache.store(user_q, reply, source="text")
 
 

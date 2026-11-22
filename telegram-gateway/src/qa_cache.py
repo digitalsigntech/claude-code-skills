@@ -16,7 +16,9 @@ Safety guards, because a wrong instant answer is worse than a slow right one:
 Used by: voice/realtime/server.py (ask_claude bridge — questions arrive restated
 self-contained, cache always applies), gateway.py handle_text and handle_voice
 (conversational, so both store and serve only question-shaped standalone
-messages — see cacheable()).
+messages — see cacheable()). The gateway uses it in one-to-one chats ONLY
+(gateway._qa_ok, 2026-11-22): group chats are working groups about live state, where
+the same question has a new answer an hour later.
 
 CLI: python3 qa_cache.py stats | list | clear [--all | --like SUBSTR]
 """
