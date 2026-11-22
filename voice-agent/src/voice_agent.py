@@ -2085,15 +2085,10 @@ def ask(account, question, account_name="", archive_question=True,
                            cwd=workdir, capture_output=True, text=True,
                            timeout=cfg["turn_timeout"], env=env, **_inp)
         out, err = (r.stdout or "").strip(), (r.stderr or "").strip()
-    if r.returncode != 0:
-        _finish_turn(turn_id)
-        blob = f"{err}\n{out}"
-        if SIGNED_OUT.search(blob):
-            return {"answer": "", "agent_error": "signed_out", "detail": err[:400]}
-        return {"answer": "", "agent_error": "failed", "detail": (err or out)[:400]}
-
-    # A resumed session that the CLI has forgotten: retry once, fresh.
-    if not out and sid and "No conversation found" in err:
+    # A resumed session that the CLI has forgotten: retry once, fresh. Checked
+    # BEFORE the exit code: the CLI exits non-zero for it, and with the check
+    # after, a forgotten session failed every turn for that account for good.
+    if sid and "No conversation found" in f"{err}\n{out}":
         with _lock:
             st = load(STATE, {})
             st.get("sessions", {}).pop(account, None)
@@ -2103,6 +2098,13 @@ def ask(account, question, account_name="", archive_question=True,
         # second attempt answers with less than the first one knew.
         return ask(account, question, account_name, archive_question=False,
                    archive_turn=archive_turn, context=context, tier=tier)
+
+    if r.returncode != 0:
+        _finish_turn(turn_id)
+        blob = f"{err}\n{out}"
+        if SIGNED_OUT.search(blob):
+            return {"answer": "", "agent_error": "signed_out", "detail": err[:400]}
+        return {"answer": "", "agent_error": "failed", "detail": (err or out)[:400]}
 
     remember_session(account, sid)
     _finish_turn(turn_id)
