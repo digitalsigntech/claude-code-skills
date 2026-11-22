@@ -1914,7 +1914,7 @@ def with_site_url(question, answer):
 
 
 def ask(account, question, account_name="", archive_question=True,
-        archive_turn=True, context="", tier=None):
+        archive_turn=True, context="", tier=None, provider=None):
     """`archive_turn=False` for a LOOKUP: answer and drop.
 
     2026-08-14: when no table is on screen the app asks the agent
@@ -1995,7 +1995,8 @@ def ask(account, question, account_name="", archive_question=True,
     try:
         import local_voice as _lvp
         sysbits.append(_lvp.privacy_context(
-            tier or "text", bool(telegram_chat()) and not is_guest()))
+            tier or "text", bool(telegram_chat()) and not is_guest(),
+            provider))
     except Exception as e:
         print(f"[voice-agent] privacy context skipped: {e}", flush=True)
     sysbits.append(ROUTE_RULE)                      # #895
@@ -2097,7 +2098,8 @@ def ask(account, question, account_name="", archive_question=True,
         # The retry is the same turn: it must carry the same context, or the
         # second attempt answers with less than the first one knew.
         return ask(account, question, account_name, archive_question=False,
-                   archive_turn=archive_turn, context=context, tier=tier)
+                   archive_turn=archive_turn, context=context, tier=tier,
+                   provider=provider)
 
     if r.returncode != 0:
         _finish_turn(turn_id)
@@ -4792,6 +4794,11 @@ class Handler(BaseHTTPRequestHandler):
             res = ask(account, q, name, archive_turn=(keep is not False),
                       archive_question=not relayed,
                       tier="cloud" if relayed else "typed",
+                      # Request 921: the relay's word for which company runs
+                      # the live session's voice model, relayed turns only.
+                      provider=(d.get("voice_provider") if relayed
+                                and d.get("voice_provider") in ("OpenAI", "Google")
+                                else None),
                       context="\n\n".join(
                           c for c in (screen_context(on_screen),
                                       conversation_context(_conv_ctx),

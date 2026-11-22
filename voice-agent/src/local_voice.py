@@ -1858,11 +1858,14 @@ APP_FACTS_RULE = (
     "voice model is in use, or how much balance is left: if the phone's tools listed for this turn "
     "include one that reads it (app settings, balance), call that tool and report only what it "
     "returns; otherwise say in one sentence that the app shows that in its own settings and that "
-    "you cannot see it from here. This is about the voice app "
+    "you cannot see it from here. Which COMPANY runs the cloud voice tiers is not a secret and "
+    "is not covered by this rule: OpenAI runs High and Standard quality, Google runs Value "
+    "quality. When the turn's facts below say which company runs THIS call, a privacy answer "
+    "names that one company and that is not a guess; when they do not, it names both. This is about the voice app "
     "only; questions about the business you work for are answered as usual.]")
 
 
-def privacy_context(tier, mirror=None):
+def privacy_context(tier, mirror=None, provider=None):
     """Facts about this turn for any privacy question. `tier`: "local" (the
     sound was sealed and opened here), "cloud" (a cloud voice tier relayed the
     question), "typed", anything else = text whose origin is not known. `mirror`: the name of the Telegram chat
@@ -1874,11 +1877,19 @@ def privacy_context(tier, mirror=None):
                 "cloud voice model on this tier: never say the speech goes to one. The sound was heard in "
                 "two places only, the phone and this machine.")
     elif tier == "cloud":
+        if provider in ("OpenAI", "Google"):
+            who = (f"The cloud voice model on THIS call is run by {provider}: the relay reported it for "
+                   f"this turn. A privacy answer on this turn names {provider} as the company that "
+                   "hears the call. ")
+        else:
+            who = ("The provider is OpenAI on High and Standard quality and Google on Value quality; the "
+                   "relay did not say which this call is on, so a privacy answer names both and says the "
+                   "app's settings show the quality in use. ")
         road = ("This question was relayed by a CLOUD voice tier (High, Standard or Value quality). On "
                 "those tiers that tier's speech provider hears the call while it is live; that is the one "
-                "part sealing cannot cover there. The question as it reached this machine, and your "
-                "answer back, are sealed between the phone and this machine. Local quality is different: "
-                "it has no speech provider at all.")
+                "part sealing cannot cover there. " + who + "The question as it reached this machine, "
+                "and your answer back, are sealed between the phone and this machine. Local quality is "
+                "different: it has no speech provider at all.")
     elif tier == "typed":
         road = ("This question arrived as sealed TEXT, typed on the phone and opened only on this "
                 "machine. No speech provider is involved in a typed message. A voice call is a separate "
@@ -1903,7 +1914,9 @@ def privacy_context(tier, mirror=None):
               "is not in use here.")
     return ("[HOW THIS TURN TRAVELLED: facts for any question about privacy, encryption, or who can hear "
             "or read this conversation. Say only what is true of THIS turn and THIS chat; never "
-            "generalise from another tier.\n" + road + "\n" + tg + "\n"
+            "generalise from another tier. This block is written fresh for every turn, and the user can "
+            "change quality or type between turns, so an earlier turn that travelled another way is "
+            "not a conflict: answer for this turn from this block, without hedging.\n" + road + "\n" + tg + "\n"
             "After this machine has the words, it answers with its own assistant model like any other "
             "message to this agent; if asked about that specifically, say so plainly.]\n"
             + APP_FACTS_RULE)
