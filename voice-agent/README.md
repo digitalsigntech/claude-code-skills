@@ -354,3 +354,9 @@ for a shared demo install, where there is no owner to ask.
 | `src/stream_lq.py` | Real-time streaming: the resident GPU recogniser, the frame codec, the session; `--selftest`, `--facts`. |
 | `src/config.example.json` | Copy to `config.json`. |
 | `src/*.service.example` | systemd units for the adapter and the tunnel. |
+
+### `voice_provider` on a relayed ask
+
+A relay may add `"voice_provider": "OpenAI" | "Google"` beside `"relayed": true`: the company that runs
+the live call's cloud voice model. The agent then names that company in a privacy answer; without the
+field it names both. It never carries the tier, the model or the price.
