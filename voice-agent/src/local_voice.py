@@ -1681,13 +1681,27 @@ def split_tool_call(text):
                    "arguments": args if isinstance(args, dict) else {}}
 
 
+TOOL_RESULT_CAP = 16000
+
+
 def tool_result_prompt(call, output):
-    """The continuation message after the phone ran a tool."""
+    """The continuation message after the phone ran a tool.
+
+    The text the model is told to read aloud (`say`) and the rule for reading
+    it go FIRST, and the cap is generous: a 4000-char cut once landed in the
+    middle of `say` behind a long `you_already_know`, and the model told the
+    person "the rest of the caption was cut off before it reached me"."""
+    if isinstance(output, dict):
+        first = [k for k in ("say", "rule") if k in output]
+        output = {**{k: output[k] for k in first},
+                  **{k: v for k, v in output.items() if k not in first}}
     try:
         out = json.dumps(output, ensure_ascii=False)
     except Exception:
         out = str(output)
-    return (f"{TOOL_RESULT_MARK} {call.get('name')} -> {out[:4000]}\n"
+    if len(out) > TOOL_RESULT_CAP:
+        out = out[:TOOL_RESULT_CAP] + " …[the rest of this result was cut for length]"
+    return (f"{TOOL_RESULT_MARK} {call.get('name')} -> {out}\n"
             "Continue the conversation for the person in one or two spoken sentences. "
             "Do not repeat the lead-in you already said. Call another tool only if "
             "the task still needs it.")
@@ -1832,6 +1846,22 @@ def greeting_text(lang, name=None):
 # cannot know which road a question came in by unless the turn says so, and it
 # generalised from the cloud case. So every turn carries the facts of ITS road
 # and of ITS chat, in the system context, whatever was asked.
+# What the agent cannot see and must not assert. On a High quality call the
+# agent answered "How much does this model cost?" with the Local tier's price
+# ("costs nothing per minute, no talk time comes off your balance"): it does
+# not know the quality tier in use, its price or the balance; the app does.
+APP_FACTS_RULE = (
+    "[THE APP'S PRICES, TIERS AND BALANCE: you cannot see which voice quality or voice model this "
+    "call is using, what it costs per minute, what plan the person is on, or their balance or talk "
+    "time. Never state, estimate or guess any of these, and never describe one tier's price as if "
+    "it were the one in use. If asked what this model, this call or a tier costs, which tier or "
+    "voice model is in use, or how much balance is left: if the phone's tools listed for this turn "
+    "include one that reads it (app settings, balance), call that tool and report only what it "
+    "returns; otherwise say in one sentence that the app shows that in its own settings and that "
+    "you cannot see it from here. This is about the voice app "
+    "only; questions about the business you work for are answered as usual.]")
+
+
 def privacy_context(tier, mirror=None):
     """Facts about this turn for any privacy question. `tier`: "local" (the
     sound was sealed and opened here), "cloud" (a cloud voice tier relayed the
@@ -1875,7 +1905,8 @@ def privacy_context(tier, mirror=None):
             "or read this conversation. Say only what is true of THIS turn and THIS chat; never "
             "generalise from another tier.\n" + road + "\n" + tg + "\n"
             "After this machine has the words, it answers with its own assistant model like any other "
-            "message to this agent; if asked about that specifically, say so plainly.]")
+            "message to this agent; if asked about that specifically, say so plainly.]\n"
+            + APP_FACTS_RULE)
 
 
 def greeting_reply(lang, speaker=None, name=None):
