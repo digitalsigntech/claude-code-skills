@@ -104,6 +104,24 @@ def from_markdown(path, kind, headings=False, column=None, contacts=False):
     return [x for x in out if _usable(x["term"])]
 
 
+def _count_whole(blob, t):
+    """Whole-word occurrences of `t` in `blob`. A substring count made "Valid"
+    the top term on the strength of every "invalid", and "Meta" of every
+    "metadata". Done with str.find rather than one lookbehind regex per term:
+    280 regexes over a 22 MB archive held the interpreter for minutes and
+    starved every other request of the server that called it."""
+    if not t:
+        return 0
+    n, i, L, end = 0, blob.find(t), len(t), len(blob)
+    while i != -1:
+        a = blob[i - 1] if i else " "
+        b = blob[i + L] if i + L < end else " "
+        if not (a.isalnum() or a in "_-" or b.isalnum() or b in "_-"):
+            n += 1
+        i = blob.find(t, i + 1)
+    return n
+
+
 def _weights(terms, archive_db, days=90):
     """0..1 per term: how often the conversation archive mentions it lately."""
     if not archive_db or not os.path.exists(archive_db):
@@ -116,10 +134,7 @@ def _weights(terms, archive_db, days=90):
     except Exception:
         return {}
     blob = "\n".join(str(r[0] or "") for r in rows).lower()
-    # Whole words only: a substring count made "Valid" the top term on the
-    # strength of every "invalid", and "Meta" of every "metadata".
-    counts = {t: len(re.findall(r"(?<![\w-])" + re.escape(t.lower())
-                                + r"(?![\w-])", blob)) for t in terms}
+    counts = {t: _count_whole(blob, t.lower()) for t in terms}
     top = max(counts.values() or [0]) or 1
     return {t: round(min(1.0, 0.2 + 0.8 * c / top), 3) if c else 0.1
             for t, c in counts.items()}
@@ -161,6 +176,11 @@ def load(path):
 
 
 _SAVE_LOCK = __import__("threading").Lock()
+# One rebuild at a time. While one runs, a request that already has a list is
+# served that list instead of starting a second scan of the archive: three
+# overlapping daily rebuilds once stalled a server for four minutes, each
+# retry of the timed-out request having started another.
+_BUILD_LOCK = __import__("threading").Lock()
 
 
 def save(path, d):
@@ -304,8 +324,12 @@ def handle(path, req, rebuild_fn, archive_db=None):
     stale = lambda e: time.time() - float(e.get("built_at") or 0) > 86400
     if req.get("chat_id") in (None, "") and (
             req.get("rebuild") or not d.get("built") or stale(d)):
-        d["built"] = rebuild_fn()
-        d["built_at"] = d["updated"] = time.time()
+        if _BUILD_LOCK.acquire(blocking=not d.get("built")):
+            try:
+                d["built"] = rebuild_fn()
+                d["built_at"] = d["updated"] = time.time()
+            finally:
+                _BUILD_LOCK.release()
     cid = req.get("chat_id")
     if cid not in (None, ""):
         try:
@@ -314,11 +338,15 @@ def handle(path, req, rebuild_fn, archive_db=None):
             return {"error": "bad chat_id"}
         chats = d.setdefault("chats", {})
         e = chats.setdefault(cid, {})
-        if req.get("rebuild") or not e.get("built_at") or stale(e):
-            acct = view(d)["items"] if d.get("built") else []
-            e["built"] = chat_terms(archive_db, cid,
-                                    exclude=[i["term"] for i in acct[:300]])
-            e["built_at"] = e["updated"] = time.time()
+        due = req.get("rebuild") or not e.get("built_at") or stale(e)
+        if due and _BUILD_LOCK.acquire(blocking=not e.get("built_at")):
+            try:
+                acct = view(d)["items"] if d.get("built") else []
+                e["built"] = chat_terms(archive_db, cid,
+                                        exclude=[i["term"] for i in acct[:300]])
+                e["built_at"] = e["updated"] = time.time()
+            finally:
+                _BUILD_LOCK.release()
         _apply_overlay(e, req)
         if json.dumps(d, sort_keys=True) != _before:
             save(path, d)
