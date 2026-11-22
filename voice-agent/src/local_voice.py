@@ -1825,6 +1825,59 @@ def greeting_text(lang, name=None):
     return random.choice(named).format(name=first) if first else random.choice(plain)
 
 
+# HOW THIS TURN TRAVELLED (request 915, 2026-11-21). Asked "is it end-to-end
+# encrypted" on Local quality, an agent answered that the speech goes to a
+# voice model provider and that the chat is mirrored to Telegram. The first is
+# false on this tier and the second was stated as how the app works. A model
+# cannot know which road a question came in by unless the turn says so, and it
+# generalised from the cloud case. So every turn carries the facts of ITS road
+# and of ITS chat, in the system context, whatever was asked.
+def privacy_context(tier, mirror=None):
+    """Facts about this turn for any privacy question. `tier`: "local" (the
+    sound was sealed and opened here), "cloud" (a cloud voice tier relayed the
+    question), "typed", anything else = text whose origin is not known. `mirror`: the name of the Telegram chat
+    this conversation is copied into, True if unnamed, falsy if there is none."""
+    if tier == "local":
+        road = ("This turn arrived on LOCAL QUALITY. The phone sealed the SOUND itself and the relay "
+                "carried envelopes it cannot open; only this machine opened it, turned it into words and "
+                "speaks the answer with its own speech engine. There is NO cloud speech provider and no "
+                "cloud voice model on this tier: never say the speech goes to one. The sound was heard in "
+                "two places only, the phone and this machine.")
+    elif tier == "cloud":
+        road = ("This question was relayed by a CLOUD voice tier (High, Standard or Value quality). On "
+                "those tiers that tier's speech provider hears the call while it is live; that is the one "
+                "part sealing cannot cover there. The question as it reached this machine, and your "
+                "answer back, are sealed between the phone and this machine. Local quality is different: "
+                "it has no speech provider at all.")
+    elif tier == "typed":
+        road = ("This question arrived as sealed TEXT, typed on the phone and opened only on this "
+                "machine. No speech provider is involved in a typed message. A voice call is a separate "
+                "matter: on Local quality the sound is sealed too and only this machine hears it; on the "
+                "cloud tiers (High, Standard, Value) that tier's speech provider hears the call.")
+    else:
+        road = ("This question arrived as sealed TEXT, opened only on this machine: either typed on the "
+                "phone, or passed on by a cloud voice tier during a call. You cannot tell which from "
+                "here, so do not claim either. No speech provider is involved in a typed message. In a "
+                "voice call: on Local quality the sound is sealed too and only this machine hears it; on "
+                "the cloud tiers (High, Standard, Value) that tier's speech provider hears the call.")
+    if mirror:
+        name = f' "{mirror}"' if isinstance(mirror, str) else ""
+        tg = (f"This conversation IS also copied into the Telegram chat{name}, because this agent's owner "
+              "set it up that way. That copy is this install's choice and is OPTIONAL: the app talks to "
+              "the agent through the sealed relay and needs no Telegram. If it is relevant, say exactly "
+              "that: an optional copy exists here, and Telegram can read that copy. Never present "
+              "Telegram as part of how the app works.")
+    else:
+        tg = ("This conversation is NOT copied to Telegram. Do not mention Telegram when describing how "
+              "this app or this conversation works; if asked, a Telegram copy is an optional extra that "
+              "is not in use here.")
+    return ("[HOW THIS TURN TRAVELLED: facts for any question about privacy, encryption, or who can hear "
+            "or read this conversation. Say only what is true of THIS turn and THIS chat; never "
+            "generalise from another tier.\n" + road + "\n" + tg + "\n"
+            "After this machine has the words, it answers with its own assistant model like any other "
+            "message to this agent; if asked about that specifically, say so plainly.]")
+
+
 def greeting_reply(lang, speaker=None, name=None):
     """A voice reply shaped like an answer, with no question behind it:
     {text, voice:{format,b64}, lang, speaker, audio_seconds_in: 0,

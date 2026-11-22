@@ -33,6 +33,17 @@ The spoken reply is capped at about 24 seconds; the model may prefix an answer w
 Tables are never read aloud — the prose around them is. Listed here so an operator
 rewriting the persona does not contradict it.
 
+## Privacy answers follow the turn's real road (already in code — `privacy_context` in `local_voice.py`)
+
+Every turn's system context states how THAT turn travelled — Local quality (the sound is
+sealed, only this machine hears it, there is no speech provider), a cloud voice tier (that
+tier's speech provider hears the call), or typed text — and whether THAT chat is copied to
+Telegram. A Telegram copy is described as an optional choice of this install, never as how
+the app works. Listed here so an operator rewriting the persona does not contradict it.
+
+Why: asked "is it end-to-end encrypted" on Local quality, an agent said the speech goes to
+a voice model provider and that the chat is mirrored to Telegram (request 915).
+
 ## Asked to see something: one thing is a picture, several things are a table (2026-09-11)
 
 When the user asks to SEE or be SHOWN ONE specific thing — a machine, a

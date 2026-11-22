@@ -1914,7 +1914,7 @@ def with_site_url(question, answer):
 
 
 def ask(account, question, account_name="", archive_question=True,
-        archive_turn=True, context=""):
+        archive_turn=True, context="", tier=None):
     """`archive_turn=False` for a LOOKUP: answer and drop.
 
     2026-08-14: when no table is on screen the app asks the agent
@@ -1988,6 +1988,16 @@ def ask(account, question, account_name="", archive_question=True,
     # answering that it cannot see the screen.
     if context:
         sysbits.append(context.strip())
+    # Request 915: the facts of THIS turn's road (Local quality, a cloud tier,
+    # or typed) and whether THIS chat is copied to Telegram, on every turn.
+    # Asked "is it end-to-end encrypted" on Local quality, an agent described
+    # a cloud speech provider and a Telegram mirror as how the app works.
+    try:
+        import local_voice as _lvp
+        sysbits.append(_lvp.privacy_context(
+            tier or "text", bool(telegram_chat()) and not is_guest()))
+    except Exception as e:
+        print(f"[voice-agent] privacy context skipped: {e}", flush=True)
     sysbits.append(ROUTE_RULE)                      # #895
     if account_name:
         sysbits.append(f"The question itself comes from {account_name} through the voice "
@@ -2092,7 +2102,7 @@ def ask(account, question, account_name="", archive_question=True,
         # The retry is the same turn: it must carry the same context, or the
         # second attempt answers with less than the first one knew.
         return ask(account, question, account_name, archive_question=False,
-                   archive_turn=archive_turn, context=context)
+                   archive_turn=archive_turn, context=context, tier=tier)
 
     remember_session(account, sid)
     _finish_turn(turn_id)
@@ -3592,7 +3602,7 @@ class Handler(BaseHTTPRequestHandler):
             # now carry the session's caller.
             set_caller(account)
             self.log_message("stream ask from %s: %.60s", name or account, text)
-            res = ask(account, text, name, archive_question=False,
+            res = ask(account, text, name, archive_question=False, tier="local",
                       context=time_context(tz) + VOICE_CONTEXT + _tools_block(tools))
             ans = str(res.get("answer") or "")
             if tools and not res.get("agent_error") and ans:
@@ -3809,7 +3819,7 @@ class Handler(BaseHTTPRequestHandler):
                 # dedupe was built for the app-versus-agent race, not for the
                 # agent racing itself.
                 res = ask(account, text, name, archive_question=False,
-                          archive_turn=keep,
+                          archive_turn=keep, tier="local",
                           context=time_context(d.get("tz")) + VOICE_CONTEXT + _tools_block(tools)
                           + _screen_block(on_screen_from(d, account, payload)))
                 ans = str(res.get("answer") or "")
@@ -4046,7 +4056,7 @@ class Handler(BaseHTTPRequestHandler):
         prompt = local_voice.tool_result_prompt({"name": tname}, tr.get("output"))
         self.log_message("voice turn: tool_result %s for %s -> continuing; output %.200s", tname, turn_id or "?",
                          json.dumps(tr.get("output"), ensure_ascii=False) if tr.get("output") is not None else "(none)")
-        res = ask(account, prompt, name, archive_question=False, archive_turn=keep,
+        res = ask(account, prompt, name, archive_question=False, archive_turn=keep, tier="local",
                   context=time_context(d.get("tz")) + VOICE_CONTEXT + _tools_block(tools)
                   + _screen_block(on_screen_from(d, account, tr)))
         ans = str(res.get("answer") or "")
@@ -4779,6 +4789,7 @@ class Handler(BaseHTTPRequestHandler):
             _tools = _tools_for(account, d)
             res = ask(account, q, name, archive_turn=(keep is not False),
                       archive_question=not relayed,
+                      tier="cloud" if relayed else "typed",
                       context="\n\n".join(
                           c for c in (screen_context(on_screen),
                                       conversation_context(_conv_ctx),
