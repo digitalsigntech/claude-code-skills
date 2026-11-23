@@ -524,12 +524,19 @@ def ask_masked(chat_id, masked_prompt, sender=None, extra_system=""):
 
 
 # ---- streaming (used for chat) ----------------------------------------------
-def _stream_run(cmd, on_event):
+def _stream_run(cmd, on_event, env_extra=None):
     """Run a stream-json Claude turn. on_event('text', full_text_so_far) on each text
-    delta; on_event('tool', tool_name) when a tool starts. Returns (final_text, err)."""
+    delta; on_event('tool', tool_name) when a tool starts. Returns (final_text, err).
+
+    env_extra: variables added to the turn's environment only (the voice adapter
+    passes TG_TURN_ID so a reminder the turn creates is stamped with it, #925)."""
     cmd, _stdin = _stdin_split(cmd)
+    _env = None
+    if env_extra:
+        _env = dict(os.environ)
+        _env.update({k: str(v) for k, v in env_extra.items() if v is not None})
     try:
-        proc = subprocess.Popen(cmd, cwd=C.CLAUDE_WORKDIR, stdout=subprocess.PIPE,
+        proc = subprocess.Popen(cmd, cwd=C.CLAUDE_WORKDIR, env=_env, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=True, bufsize=1,
                                 stdin=(subprocess.PIPE if _stdin is not None
                                        else None))
@@ -603,20 +610,20 @@ def _stream_run(cmd, on_event):
     return (full or final), err
 
 
-def ask_stream(chat_id, prompt, on_event, sender=None, extra_system=""):
+def ask_stream(chat_id, prompt, on_event, sender=None, extra_system="", env_extra=None):
     prompt = _augment(chat_id, prompt, sender)
     flags = ["--output-format", "stream-json", "--include-partial-messages", "--verbose"]
     with _chat_lock(chat_id):
         prompt = _maybe_rotate(chat_id) + prompt
         sid, inited = _resolve(chat_id)
-        text, err = _stream_run(_base_cmd(prompt, extra_system) + flags + _sess_args(sid, inited), on_event)
+        text, err = _stream_run(_base_cmd(prompt, extra_system) + flags + _sess_args(sid, inited), on_event, env_extra)
         if err is not None and not inited and "already in use" in err:
             # Session exists on disk but init was never recorded (first turn died after
             # the CLI created it). Resume it instead of re-creating.
-            text, err = _stream_run(_base_cmd(prompt, extra_system) + flags + ["--resume", sid], on_event)
+            text, err = _stream_run(_base_cmd(prompt, extra_system) + flags + ["--resume", sid], on_event, env_extra)
         if err is not None and "timed out" not in err:
             sid = str(uuid.uuid4())
-            text, err = _stream_run(_base_cmd(prompt, extra_system) + flags + ["--session-id", sid], on_event)
+            text, err = _stream_run(_base_cmd(prompt, extra_system) + flags + ["--session-id", sid], on_event, env_extra)
         if err is not None:
             return f"⚠️ Claude error: {err}"
         _mark_inited(chat_id, sid)
