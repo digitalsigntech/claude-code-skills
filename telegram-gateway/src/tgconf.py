@@ -126,6 +126,18 @@ def current_model():
         except (OSError, ValueError):
             pass                      # keep the last good value; a bad profile is not a dead bot
     return _MODEL_CACHE["value"]
+def current_effort():
+    """Reasoning effort for a person's turn: profile agent.effort (low/medium/high/xhigh/max), read
+    per turn like the model; empty = the CLI default. the owner 2026-11-22: Opus 5.5 at medium effort.
+    Routine turns (routine_model) keep the CLI default."""
+    try:
+        with open(_profile_path()) as fh:
+            val = ((json.load(fh).get("agent") or {}).get("effort") or "").strip().lower()
+        return val if val in ("low", "medium", "high", "xhigh", "max") else ""
+    except (OSError, ValueError):
+        return ""
+
+
 def routine_model():
     """Model for ROUTINE automated turns (health check, scheduler tasks, filing, labelling,
     background summaries): profile agent.routine_model, default Sonnet. Conversations with

@@ -322,6 +322,8 @@ def _base_cmd(prompt, extra_system="", model=None):
     said. The system channel is where facts we supply belong; the empty
     default keeps every existing caller byte-identical."""
     cmd = [C.CLAUDE_BIN, "-p", prompt, "--model", model or C.current_model(), "--dangerously-skip-permissions"]
+    if not model and C.current_effort():      # a person's turn on the profile model; routine turns keep the default
+        cmd += ["--effort", C.current_effort()]
     sysmsg = "\n\n".join(x for x in (C.APPEND_SYSTEM, extra_system) if x)
     if sysmsg:
         cmd += ["--append-system-prompt", sysmsg]
@@ -501,6 +503,7 @@ def ask_masked(chat_id, masked_prompt, sender=None, extra_system=""):
     prompt = _augment(chat_id, masked_prompt, sender)
     key = f"masked:{chat_id}"
     cmd = [C.CLAUDE_BIN, "-p", prompt, "--model", C.current_model(),
+           *(["--effort", C.current_effort()] if C.current_effort() else []),
            "--tools", "Bash", "--permission-mode", "dontAsk",
            "--allowedTools", f"Bash(python3 {MTOOL} *)", "--strict-mcp-config",
            "--settings", _MASK_GUARD,
